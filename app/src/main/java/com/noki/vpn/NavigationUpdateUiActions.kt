@@ -1,6 +1,7 @@
 package com.noki.vpn
 
 import com.noki.vpn.data.AppInfo
+import com.noki.vpn.data.InstallOnboardingStep
 import com.noki.vpn.ui.PrimaryNavigationPolicy
 import com.noki.vpn.vpn.VpnRuntimeMode
 import kotlinx.coroutines.CancellationException
@@ -38,8 +39,89 @@ internal fun AppUiRuntime.setPendingVpnStartMode(mode: VpnRuntimeMode) {
     pendingVpnStartModeState.mode = mode
 }
 
+internal fun requireStartupFlow(state: AppUiState, previous: AppUiState = state): AppUiState {
+    if (!state.isReady || state.currentDestination == AppDestination.SPLASH) return state
+    if (state.installOnboardingStep == InstallOnboardingStep.COMPLETE ||
+        state.installOnboardingStep == InstallOnboardingStep.APPEARANCE
+    ) {
+        val authenticated = AuthStepReducer.requireCredentialsSetup(state, previous)
+        return if (state.installOnboardingStep == InstallOnboardingStep.APPEARANCE &&
+            authenticated.isAuthenticated && !authenticated.userProfile.credentialsSetupRequired
+        ) authenticated.copy(screenStack = listOf(AppDestination.HOME), dialog = null) else authenticated
+    }
+    val selectingApps = state.installOnboardingStep == InstallOnboardingStep.ROUTING &&
+        state.screenStack == listOf(AppDestination.ONBOARDING, AppDestination.APP_FILTER)
+    return if (selectingApps) state else state.copy(
+        screenStack = listOf(AppDestination.ONBOARDING),
+        dialog = null,
+    )
+}
+
+internal fun showsInstallAppearanceDialog(state: AppUiState): Boolean =
+    state.isReady && state.installOnboardingStep == InstallOnboardingStep.APPEARANCE &&
+        state.isAuthenticated && !state.userProfile.credentialsSetupRequired &&
+        state.currentDestination == AppDestination.HOME
+
+internal fun AppUiRuntime.advanceInstallOnboarding() {
+    val canAdvance = if (uiState.installOnboardingStep == InstallOnboardingStep.APPEARANCE) {
+        showsInstallAppearanceDialog(uiState)
+    } else uiState.currentDestination == AppDestination.ONBOARDING
+    if (!uiState.isReady || !canAdvance) return
+    val next = when (uiState.installOnboardingStep) {
+        InstallOnboardingStep.CONSENT -> InstallOnboardingStep.ROUTING
+        InstallOnboardingStep.ROUTING -> InstallOnboardingStep.APPEARANCE
+        InstallOnboardingStep.APPEARANCE -> InstallOnboardingStep.COMPLETE
+        InstallOnboardingStep.COMPLETE -> return
+    }
+    saveInstallOnboardingStep(next)
+}
+
+private fun AppUiRuntime.saveInstallOnboardingStep(step: InstallOnboardingStep) {
+    try {
+        repository.saveInstallOnboardingStep(step)
+        uiState = uiState.copy(
+            installOnboardingStep = step,
+            screenStack = listOf(if (step == InstallOnboardingStep.COMPLETE || step == InstallOnboardingStep.APPEARANCE) {
+                if (uiState.isAuthenticated) AppDestination.HOME else AppDestination.LOGIN
+            } else AppDestination.ONBOARDING),
+            inlineMessage = null,
+        )
+    } catch (_: Exception) {
+        uiState = uiState.copy(inlineMessage = tr(
+            uiState.personalizationSettings.language,
+            "Не удалось сохранить настройку. Попробуйте ещё раз.",
+            "Couldn't save your choice. Please try again.",
+        ))
+    }
+}
+
 internal fun AppUiRuntime.goBack() {
+    if (uiState.installOnboardingStep == InstallOnboardingStep.CONSENT ||
+        uiState.installOnboardingStep == InstallOnboardingStep.ROUTING
+    ) {
+        if (uiState.currentDestination == AppDestination.APP_FILTER) {
+            uiState = uiState.copy(screenStack = listOf(AppDestination.ONBOARDING), dialog = null)
+        }
+        return
+    }
+    if (showsInstallAppearanceDialog(uiState)) {
+        advanceInstallOnboarding()
+        return
+    }
     if (!uiState.isAuthenticated && sessionOperationJob != null) return
+    if (uiState.userProfile.credentialsSetupRequired) {
+        if (sessionOperationJob != null) return
+        val staleUsernameCheck = registrationUsernameCheckJob
+        registrationUsernameCheckJob = null
+        staleUsernameCheck?.cancel()
+        registrationWorkflow.invalidate()
+        if (uiState.authStep == AuthStep.REGISTRATION_PASSWORD) {
+            uiState = AuthStepReducer.previousRegistrationStep(uiState)
+        } else {
+            logout()
+        }
+        return
+    }
     if (uiState.currentDestination == AppDestination.PASSWORD_RECOVERY) {
         if (uiState.passwordRecoveryForm.isSubmitting) return
         val recoveryPurpose = uiState.passwordRecoveryPurpose

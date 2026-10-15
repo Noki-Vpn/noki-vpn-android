@@ -11,10 +11,11 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
-import android.util.DisplayMetrics
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -39,18 +40,12 @@ import com.noki.vpn.data.VpnConnectionState
 import com.noki.vpn.ui.AppScreen
 import com.noki.vpn.ui.NokiTheme
 import com.noki.vpn.vpn.AppVpnService
+import com.noki.vpn.vpn.GeositeUpdateWorker
 import com.noki.vpn.vpn.NetworkCapabilityPolicy
 import com.noki.vpn.vpn.VpnRuntimeMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
-
-private fun Int.toStableDensityDp(currentDensityDpi: Int): Int {
-    if (this <= 0 || currentDensityDpi <= 0) return this
-    return (this * currentDensityDpi.toFloat() / DisplayMetrics.DENSITY_DEVICE_STABLE)
-        .roundToInt()
-}
 
 internal fun shouldFilterTouchesWhenObscured(apiLevel: Int): Boolean =
     apiLevel <= Build.VERSION_CODES.R
@@ -60,6 +55,7 @@ class MainActivity : ComponentActivity() {
     private val credentialManager by lazy { CredentialManager.create(this) }
     private val telegramLoginGateway: TelegramLoginGateway
         get() = viewModel.telegramLoginGateway
+    private var startupNotificationPermissionPending = false
 
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -84,7 +80,8 @@ class MainActivity : ComponentActivity() {
     private val startupNotificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {
-        // No-op: this launcher only primes app notifications on first app start.
+        startupNotificationPermissionPending = false
+        maybeRequestStartupBackgroundPermission()
     }
 
     private val avatarPickerLauncher = registerForActivityResult(
@@ -119,16 +116,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun attachBaseContext(newBase: Context) {
-        val baseConfiguration = newBase.resources.configuration
-        val currentDensityDpi = baseConfiguration.densityDpi
-            .takeIf { it > 0 }
-            ?: newBase.resources.displayMetrics.densityDpi
-        val configuration = Configuration(baseConfiguration).apply {
-            screenWidthDp = baseConfiguration.screenWidthDp.toStableDensityDp(currentDensityDpi)
-            screenHeightDp = baseConfiguration.screenHeightDp.toStableDensityDp(currentDensityDpi)
-            smallestScreenWidthDp =
-                baseConfiguration.smallestScreenWidthDp.toStableDensityDp(currentDensityDpi)
-            densityDpi = DisplayMetrics.DENSITY_DEVICE_STABLE
+        val configuration = Configuration(newBase.resources.configuration).apply {
             fontScale = 1f
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 fontWeightAdjustment = 0
@@ -140,6 +128,9 @@ class MainActivity : ComponentActivity() {
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        GeositeUpdateWorker.schedule(applicationContext)
+        startupNotificationPermissionPending = savedInstanceState
+            ?.getBoolean(KEY_STARTUP_NOTIFICATION_PERMISSION_PENDING, false) ?: false
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 viewModel.awaitReady()
@@ -198,6 +189,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(KEY_STARTUP_NOTIFICATION_PERMISSION_PENDING, startupNotificationPermissionPending)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -436,18 +432,40 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun maybeRequestStartupPermissions() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        if (!StartupPermissionPolicy.shouldRequestNotificationPermissionOnFirstLaunch(
+        if (startupNotificationPermissionPending) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            StartupPermissionPolicy.shouldRequestNotificationPermissionOnFirstLaunch(
                 sdkInt = Build.VERSION.SDK_INT,
                 notificationGranted = !shouldRequestNotificationPermission(),
                 alreadyRequested = startupPermissionsPreferences()
                     .getBoolean(KEY_STARTUP_NOTIFICATION_PERMISSION_REQUESTED, false),
             )
         ) {
+            markStartupNotificationPermissionRequested()
+            startupNotificationPermissionPending = true
+            startupNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
-        markStartupNotificationPermissionRequested()
-        startupNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        maybeRequestStartupBackgroundPermission()
+    }
+
+    private fun maybeRequestStartupBackgroundPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val powerManager = getSystemService(PowerManager::class.java) ?: return
+        val preferences = startupPermissionsPreferences()
+        if (!StartupPermissionPolicy.shouldRequestBackgroundPermissionOnFirstLaunch(
+                sdkInt = Build.VERSION.SDK_INT,
+                ignoringBatteryOptimizations = powerManager.isIgnoringBatteryOptimizations(packageName),
+                alreadyRequested = preferences.getBoolean(KEY_STARTUP_BACKGROUND_PERMISSION_REQUESTED, false),
+            )
+        ) return
+        preferences.edit { putBoolean(KEY_STARTUP_BACKGROUND_PERMISSION_REQUESTED, true) }
+        runCatching {
+            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:$packageName")))
+        }.onFailure {
+            android.util.Log.w("Noki", "Background permission request unavailable", it)
+        }
     }
 
     private fun markStartupNotificationPermissionRequested() {
@@ -465,5 +483,9 @@ class MainActivity : ComponentActivity() {
         const val APP_NOTIFICATION_ACTION_OPEN_SECURITY_UPDATE = "open_security_update"
         private const val KEY_STARTUP_NOTIFICATION_PERMISSION_REQUESTED =
             "startup_notification_permission_requested"
+        private const val KEY_STARTUP_NOTIFICATION_PERMISSION_PENDING =
+            "startup_notification_permission_pending"
+        private const val KEY_STARTUP_BACKGROUND_PERMISSION_REQUESTED =
+            "startup_background_permission_requested"
     }
 }

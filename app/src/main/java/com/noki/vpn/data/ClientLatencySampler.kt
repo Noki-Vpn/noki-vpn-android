@@ -18,6 +18,8 @@ internal fun clientLatencyTargetKey(location: ServerLocation): String? =
 internal fun clientLatencyTargetKey(server: VpnServer): String? =
     clientLatencyTargetKey(server.id, "${server.host}:${server.probePort ?: 0}")
 
+internal fun clientLatencyTargetKey(node: RuForeignNode): String = "ru:${node.id}"
+
 internal fun ServerLocation.withClientLatencies(samples: Map<String, Int>): ServerLocation {
     val measured = servers.map { server -> server.copy(latencyMs = clientLatencyTargetKey(server)?.let(samples::get)) }
     return copy(
@@ -42,18 +44,27 @@ class ClientLatencySampler(
 ) {
     fun networkSignature(): String = context?.let { AndroidUnderlyingNetworkSource(it).currentSnapshot()?.signature } ?: "none"
 
-    suspend fun measure(locations: List<ServerLocation>): Map<String, Int> = coroutineScope {
+    suspend fun measure(
+        locations: List<ServerLocation>,
+    ): Map<String, Int> {
+        val targets = locations.asSequence().filter { it.isOnline }.flatMap { location ->
+            if (location.servers.isEmpty()) sequenceOf(Triple(clientLatencyTargetKey(location), location.host, 443))
+            else location.servers.asSequence().filter { it.isOnline }.map { Triple(clientLatencyTargetKey(it), it.host, it.probePort) }
+        }.distinctBy { it.first }.toList()
+        return measureTargets(targets, allowIcmpFallback = true)
+    }
+
+    suspend fun measureRelayTargets(targets: Map<String, List<Pair<String, Int>>>): Map<String, Int> =
+        measureTargets(targets.flatMap { (key, values) -> values.map { (host, port) -> Triple(key, host, port) } }, false)
+
+    private suspend fun measureTargets(
+        targets: List<Triple<String?, String, Int?>>, allowIcmpFallback: Boolean,
+    ): Map<String, Int> = coroutineScope {
         val network = context?.let { AndroidUnderlyingNetworkSource(it).currentSnapshot()?.network }
         if (context != null && network == null) return@coroutineScope emptyMap()
         val probeSlots = Semaphore(DeviceLatency.MAX_CONCURRENT_DNS_LOOKUPS)
-        locations
-            .asSequence()
-            .filter { location -> location.isOnline }
-            .flatMap { location ->
-                if (location.servers.isEmpty()) sequenceOf(Triple(clientLatencyTargetKey(location), location.host, 443))
-                else location.servers.asSequence().filter { it.isOnline }.map { Triple(clientLatencyTargetKey(it), it.host, it.probePort) }
-            }
-            .distinctBy { it.first }
+        targets.asSequence()
+            .distinct()
             .mapNotNull { (key, rawHost, port) ->
                 val targetKey = key ?: return@mapNotNull null
                 val host = rawHost.trim()
@@ -69,7 +80,9 @@ class ClientLatencySampler(
                                             lookup = network::getAllByName)
                                     }.filterNotNull().sorted()
                                     samples.getOrNull(samples.size / 2)
-                                        ?: if (context == null) icmpPing(host, LATENCY_ICMP_COUNT, LATENCY_ICMP_TIMEOUT_SECONDS) else null
+                                        ?: if (context == null && allowIcmpFallback) {
+                                            icmpPing(host, LATENCY_ICMP_COUNT, LATENCY_ICMP_TIMEOUT_SECONDS)
+                                        } else null
                                 }
                             }
                         }
@@ -80,7 +93,8 @@ class ClientLatencySampler(
             .toList()
             .awaitAll()
             .filterNotNull()
-            .toMap()
+            .groupBy({ it.first }, { it.second })
+            .mapValues { (_, samples) -> samples.min() }
     }
 
     private companion object {

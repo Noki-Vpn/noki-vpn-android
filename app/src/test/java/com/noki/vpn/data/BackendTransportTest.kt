@@ -1,5 +1,6 @@
 package com.noki.vpn.data
 
+import com.noki.vpn.BuildConfig
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -18,12 +19,64 @@ import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import okio.BufferedSource
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BackendTransportTest {
+    @Test
+    fun `credentials setup atomically sends the pair with account device proof and parses plain user`() = runBlocking {
+        var request: Request? = null
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            request = chain.request()
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body("""{"id":"user-1","username":"chosen_name","email":"tg_12345678901234@a.noki",
+                    "is_active":true,"is_admin":false,"has_password":true,"credentials_setup_required":false}"""
+                    .toResponseBody("application/json".toMediaType())).build()
+        }.build()
+
+        val user = BackendApiClient(client, "https://api.example").setupAccountCredentials(
+            "access", "Chosen.Name", "secret123", "device", "proof",
+        )
+        val sent = checkNotNull(request)
+        val body = Buffer().also { sent.body!!.writeTo(it) }.readUtf8().let(::JSONObject)
+
+        assertEquals("POST", sent.method)
+        assertEquals("/v1/app/security/credentials", sent.url.encodedPath)
+        assertEquals("Bearer access", sent.header("Authorization"))
+        assertEquals("device", sent.header("X-Device-Id"))
+        assertEquals("proof", sent.header("X-Device-Key"))
+        assertEquals(setOf("username", "password"), body.keys().asSequence().toSet())
+        assertEquals("Chosen.Name", body.getString("username"))
+        assertEquals("secret123", body.getString("password"))
+        assertEquals("chosen_name", user.username)
+        assertTrue(user.hasPassword)
+        assertFalse(user.credentialsSetupRequired)
+    }
+
+    @Test
+    fun `VPN access sends the release version with authenticated device proof`() = runBlocking {
+        var request: Request? = null
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            request = chain.request()
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body("{\"can_connect\":true}".toResponseBody("application/json".toMediaType())).build()
+        }.build()
+
+        val access = BackendApiClient(client, "https://api.example").vpnAccess("access", "device", "proof")
+        val sent = checkNotNull(request)
+
+        assertTrue(access.canConnect)
+        assertEquals("/v1/vpn/access", sent.url.encodedPath)
+        assertEquals("Bearer access", sent.header("Authorization"))
+        assertEquals("device", sent.header("X-Device-Id"))
+        assertEquals("proof", sent.header("X-Device-Key"))
+        assertEquals(BuildConfig.VERSION_CODE.toString(), sent.header("X-Noki-Version-Code"))
+    }
+
     @Test
     fun `backend control plane and streaming retain default protocols`() {
         val controlPlane = defaultBackendControlPlaneClient()

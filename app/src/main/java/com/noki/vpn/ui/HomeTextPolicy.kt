@@ -14,9 +14,6 @@ internal val HomeWarning = Color(0xFFFF6B6B)
 internal val HomeStroke = Color(0xFF29404E)
 internal val HomeNoFontPaddingTextStyle = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = true))
 internal const val HOME_SERVER_DROPDOWN_EXIT_DURATION_MS = 220
-internal const val HOME_SERVER_DROPDOWN_EXIT_FADE_DELAY_MS = 140
-internal const val HOME_SERVER_DROPDOWN_EXIT_FADE_DURATION_MS = 80
-internal const val HOME_SERVER_DROPDOWN_BACKDROP_KEEP_ALIVE_MS = 260L
 internal const val HOME_SERVER_DROPDOWN_FIRST_ITEM_TOP_DP = 68f
 internal const val HOME_SERVER_DROPDOWN_HANDLE_VISIBLE_ALPHA = 0.96f
 internal const val HOME_SERVER_DROPDOWN_HANDLE_FADE_START_FRACTION = 0.5f

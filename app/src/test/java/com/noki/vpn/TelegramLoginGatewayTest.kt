@@ -1,14 +1,173 @@
 package com.noki.vpn
 
+import android.app.Activity
+import android.app.Application
+import android.content.Context
+import android.content.pm.verify.domain.DomainVerificationManager
+import android.content.pm.verify.domain.DomainVerificationUserState
+import android.os.Process
+import android.os.UserHandle
+import androidx.lifecycle.SavedStateHandle
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.UUID
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
+import org.robolectric.shadow.api.Shadow
+import org.robolectric.shadows.ShadowContextImpl
+import org.robolectric.util.ReflectionHelpers
+import org.robolectric.util.ReflectionHelpers.ClassParameter
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], application = Application::class, shadows = [TelegramLoginGatewayTest.DomainVerificationShadow::class])
 class TelegramLoginGatewayTest {
+    @Test
+    fun `new runtime releases an abandoned link and stale callback cannot clear a newer live flow`() {
+        val handle = SavedStateHandle()
+        val previousAttempt = TelegramAuthPurposeState(handle).begin(TelegramAuthPurpose.LINK)
+        val scope = CoroutineScope(Job().apply { cancel() })
+        val runtime = AppUiRuntime(RuntimeEnvironment.getApplication(), handle, scope)
+        assertEquals(null, runtime.telegramAuthPurposeState.currentAttemptId)
+        assertFalse(runtime.telegramAuthPurposeState.isCurrent(previousAttempt))
+        runtime.uiState = AppUiState(isReady = true, isAuthenticated = true)
+
+        val liveAttempt = runtime.telegramAuthPurposeState.begin(TelegramAuthPurpose.LINK)
+        val request = runtime.telegramLoginGateway.begin()
+        runtime.telegramLoginGateway.markExternalFlowStarted(request.clientState)
+        runtime.uiState = runtime.uiState.copy(telegramLoginState = TelegramLoginState.LaunchingSdk(TelegramAuthPurpose.LINK))
+        runtime.handleTelegramLoginCallback(runtime.telegramLoginGateway.consumeCallback("old-code", "S".repeat(43), null))
+
+        assertTrue(runtime.telegramAuthPurposeState.isCurrent(liveAttempt))
+        assertEquals(TelegramLoginState.LaunchingSdk(TelegramAuthPurpose.LINK), runtime.uiState.telegramLoginState)
+        assertTrue(runtime.telegramLoginGateway.consumeCallback("current-code", request.clientState, null)
+            is TelegramLoginCallbackResult.AuthorizationCode)
+    }
+
+    @Test
+    fun `native launch falls back when callback domain is missing or unverified`() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val manager = domainVerification(activity)
+        val gateway = TelegramLoginGateway()
+        for (hosts in listOf(
+            emptyMap(),
+            mapOf("app601443831-login.tg.dev" to DomainVerificationUserState.DOMAIN_STATE_NONE),
+            mapOf("another-login.tg.dev" to DomainVerificationUserState.DOMAIN_STATE_VERIFIED),
+        )) {
+            manager.state = domainState(activity, allowed = true, hosts = hosts)
+            assertFalse(gateway.openNative(activity, "tg://oauth?token=native-request"))
+            assertEquals(null, shadowOf(activity).nextStartedActivity)
+        }
+        manager.state = null
+        assertFalse(gateway.openNative(activity, "tg://oauth?token=native-request"))
+        assertEquals(null, shadowOf(activity).nextStartedActivity)
+    }
+
+    @Test
+    fun `disabled supported links falls back even for a verified callback`() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        domainVerification(activity).state = domainState(
+            activity, allowed = false,
+            hosts = mapOf("app601443831-login.tg.dev" to DomainVerificationUserState.DOMAIN_STATE_VERIFIED),
+        )
+        assertFalse(TelegramLoginGateway().openNative(activity, "tg://oauth?token=native-request"))
+        assertEquals(null, shadowOf(activity).nextStartedActivity)
+    }
+
+    @Test
+    fun `native launch uses verified or explicitly selected callback domain`() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        for (state in listOf(DomainVerificationUserState.DOMAIN_STATE_VERIFIED, DomainVerificationUserState.DOMAIN_STATE_SELECTED)) {
+            domainVerification(activity).state = domainState(
+                activity, allowed = true, hosts = mapOf("app601443831-login.tg.dev" to state),
+            )
+            assertTrue(TelegramLoginGateway().openNative(activity, "tg://oauth?token=native-request"))
+            assertEquals("tg://oauth?token=native-request", shadowOf(activity).nextStartedActivity.dataString)
+        }
+    }
+
+    @Test
+    fun `unavailable domain verification service falls back`() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        domainVerification(activity).unavailable = true
+        assertFalse(TelegramLoginGateway().openNative(activity, "tg://oauth?token=native-request"))
+        assertEquals(null, shadowOf(activity).nextStartedActivity)
+    }
+
+    @Test
+    fun `native return fallback retains PKCE and accepts only the current browser state`() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val entropy = ByteArray(32) { 7 }
+        val gateway = TelegramLoginGateway(randomBytes = { entropy.copyOf() })
+        val request = gateway.begin()
+        assertTrue(gateway.markExternalFlowStarted(request.clientState))
+        assertFalse(gateway.openNative(activity, "tg://oauth?token=native-request"))
+        assertTrue(gateway.completeExternalFlow(request.clientState))
+        assertTrue(gateway.markExternalFlowStarted(request.clientState, browser = true))
+        assertEquals(TelegramLoginCallbackResult.Failure(TelegramCallbackFailure.Stale),
+            gateway.consumeCallback("late-native-code", null, null))
+        assertEquals(TelegramLoginCallbackResult.Failure(TelegramCallbackFailure.Stale),
+            gateway.consumeBrowserCallback("S".repeat(43), null))
+        assertEquals(
+            TelegramLoginCallbackResult.BrowserState(
+                request.clientState, Base64.getUrlEncoder().withoutPadding().encodeToString(entropy),
+            ),
+            gateway.consumeBrowserCallback(request.clientState, null),
+        )
+        assertEquals(TelegramLoginCallbackResult.Failure(TelegramCallbackFailure.Stale),
+            gateway.consumeBrowserCallback(request.clientState, null))
+    }
+
+    @Test
+    @Config(sdk = [28])
+    fun `older Android preserves native launch without domain verification API`() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        assertTrue(TelegramLoginGateway().openNative(activity, "tg://oauth?token=native-request"))
+        assertEquals("tg://oauth?token=native-request", shadowOf(activity).nextStartedActivity.dataString)
+    }
+
+    private fun domainVerification(activity: Activity): DomainVerificationShadow {
+        val manager = activity.getSystemService(DomainVerificationManager::class.java)
+            ?: Shadow.newInstanceOf(DomainVerificationManager::class.java).also {
+                Shadow.extract<ShadowContextImpl>(activity.baseContext).setSystemService(Context.DOMAIN_VERIFICATION_SERVICE, it)
+            }
+        return Shadow.extract(manager)
+    }
+
+    private fun domainState(activity: Activity, allowed: Boolean, hosts: Map<String, Int>): DomainVerificationUserState =
+        ReflectionHelpers.callConstructor(
+            DomainVerificationUserState::class.java,
+            ClassParameter.from(UUID::class.java, UUID.randomUUID()),
+            ClassParameter.from(String::class.java, activity.packageName),
+            ClassParameter.from(UserHandle::class.java, Process.myUserHandle()),
+            ClassParameter.from(Boolean::class.javaPrimitiveType, allowed),
+            ClassParameter.from(Map::class.java, hosts),
+        )
+
+    @Implements(value = DomainVerificationManager::class, minSdk = 31)
+    class DomainVerificationShadow {
+        var state: DomainVerificationUserState? = null
+        var unavailable = false
+
+        @Implementation
+        fun getDomainVerificationUserState(packageName: String): DomainVerificationUserState? {
+            check(!unavailable) { "domain_service_unavailable" }
+            return state?.takeIf { it.packageName == packageName }
+        }
+    }
+
     @Test
     fun `native code without state can be verified using the active PKCE session`() {
         val gateway = TelegramLoginGateway(randomBytes = { ByteArray(32) { 8 } })

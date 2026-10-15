@@ -25,7 +25,7 @@ object EndpointGroupPolicy {
 
     fun manualOptions(options: List<VpnEndpointOption>): List<VpnEndpointOption> {
         val grouped = linkedMapOf<String, MutableList<VpnEndpointOption>>()
-        options.filter { !it.canaryOnly && it.host.isNotBlank() }.forEach { option ->
+        options.filter { !it.canaryOnly && EndpointSecurityPolicy.isAllowedOption(it) }.forEach { option ->
             grouped.getOrPut(groupKey(option)) { mutableListOf() }.add(option)
         }
         return grouped.map { (key, group) ->

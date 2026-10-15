@@ -1,6 +1,7 @@
 package com.noki.vpn
 
 import com.noki.vpn.data.AppLanguage
+import com.noki.vpn.data.BackendException
 import com.noki.vpn.data.PersonalizationSettings
 import com.noki.vpn.data.UserProfile
 import com.noki.vpn.data.VpnConnectionState
@@ -9,6 +10,42 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ConnectionStateReducerTest {
+    @Test
+    fun requiredClientUpdateExplainsHowToConnectWithoutLosingDiagnosticCode() {
+        for ((language, labels) in listOf(
+            AppLanguage.RU to Pair(
+                "Обновите Noki для подключения",
+                "Обновите Noki для подключения. Обновление доступно в «Безопасности».",
+            ),
+            AppLanguage.EN to Pair(
+                "Update Noki to connect",
+                "Update Noki to connect. The update is available in Security.",
+            ),
+        )) {
+            val result = ConnectionStateReducer.reduce(
+                current = AppUiState(
+                    personalizationSettings = PersonalizationSettings(language = language),
+                    connectedAtMillis = 1234L,
+                    screenStack = listOf(AppDestination.HOME),
+                ),
+                state = VpnConnectionState.FAILED,
+                reason = ConnectionReason.parse("client_update_required"),
+                connectedAtMillis = null, nowMillis = 1L, dailyStats = emptyList(), endpointRating = "",
+            ) as ConnectionStateReducer.Transition.Normal
+
+            assertEquals(labels.first, result.state.connectionReason)
+            assertEquals(labels.second, result.state.inlineMessage)
+            assertEquals(
+                labels.second,
+                AppErrorMapper.readableNetworkError(language, BackendException("client_update_required", 426)),
+            )
+            assertEquals(null, result.state.connectedAtMillis)
+            assertEquals(ConnectionStateReducer.RuntimeAction.Clear, result.runtimeAction)
+            assertEquals("client_update_required", result.logAction?.errorType)
+            assertEquals(listOf(AppDestination.HOME), result.state.screenStack)
+        }
+    }
+
     @Test
     fun explicitStopClearsPreviousNetworkWait() {
         val stopped = ConnectionStateReducer.reduce(
@@ -36,6 +73,20 @@ class ConnectionStateReducerTest {
             assertTrue(result.state.inlineMessage.orEmpty().isNotBlank())
             assertTrue(!result.state.inlineMessage.orEmpty().contains("underlay_unavailable"))
         }
+    }
+
+    @Test
+    fun ruExitProbeFailureIsReadableWithoutLosingDiagnosticCode() {
+        val result = ConnectionStateReducer.reduce(
+            current = AppUiState(personalizationSettings = PersonalizationSettings(language = AppLanguage.RU)),
+            state = VpnConnectionState.FAILED,
+            reason = ConnectionReason.Unknown("ru_wireguard_exit_probe_failed"),
+            connectedAtMillis = null, nowMillis = 1L, dailyStats = emptyList(), endpointRating = "",
+        ) as ConnectionStateReducer.Transition.Normal
+
+        assertEquals("Нет связи с выходом", result.state.connectionReason)
+        assertEquals("RU-реле подключено, но выходная нода недоступна", result.state.inlineMessage)
+        assertEquals("ru_wireguard_exit_probe_failed", result.logAction?.details)
     }
 
     @Test

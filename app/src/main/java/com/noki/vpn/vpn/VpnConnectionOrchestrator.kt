@@ -40,7 +40,7 @@ internal data class VpnConnectionSnapshot(
 )
 
 internal class VpnConnectionOrchestrator(
-    private val xray: XrayRuntime,
+    private val core: VpnCoreRuntime,
     private val tunFactory: TunInterfaceFactory,
     private val sidecars: VpnConnectedSidecars,
 ) {
@@ -175,36 +175,23 @@ internal class VpnConnectionOrchestrator(
     ): TunHandle? = tunFactory.establish(settings, underlay)
 
     @Synchronized
-    fun startXray(config: String): Boolean {
+    fun startCore(config: String): Boolean {
         val activeTunnel = tunnel ?: return false
-        return xray.start(config, activeTunnel.fd)
+        return core.start(config, activeTunnel.fd)
     }
 
-    fun stopXray() {
-        xray.stop()
+    fun stopCore() {
+        core.stop()
     }
+
+    fun rebindWireGuard(): Boolean = core.rebindWireGuard()
 
     fun cancelReadinessProbe() {
-        xray.cancelRouteSwitch()
-        xray.cancelMeasureDelay()
+        core.cancelMeasureDelay()
     }
 
-    fun measureDelay(targetUrl: String, timeoutMillis: Long): XrayProbeResult =
-        xray.measureDelay(targetUrl, timeoutMillis)
-
-    suspend fun switchRoute(
-        config: String,
-        generationId: Long,
-        canCommit: () -> Boolean,
-    ): XrayProbeResult {
-        val job = checkNotNull(kotlinx.coroutines.currentCoroutineContext()[Job])
-        check(lifecycleMutex.holdsLock(job))
-        val result = xray.switchRoute(config) {
-            job.isActive && isCurrent(generationId) && canCommit()
-        }
-        kotlinx.coroutines.currentCoroutineContext().ensureActive()
-        return result
-    }
+    fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult =
+        core.measureDelay(targetUrl, timeoutMillis)
 
     fun pauseConnectedSidecars() {
         activeOwner?.let(sidecars::stop)
@@ -260,7 +247,7 @@ internal class VpnConnectionOrchestrator(
 
     fun releaseResourcesWhileOwned(finalState: VpnConnectionState?, retainTunnel: Boolean = false) {
         pauseConnectedSidecars()
-        xray.stop()
+        core.stop()
         if (!retainTunnel) {
             tunnel?.close()
             tunnel = null

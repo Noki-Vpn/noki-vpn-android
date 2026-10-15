@@ -3,6 +3,7 @@ package com.noki.vpn.data
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -20,12 +21,12 @@ class EndpointHealthEventsConcurrencyTest {
             val release = CompletableDeferred<Unit>()
             var uploads = 0
             val reporter = EndpointHealthEventReporter(
-                store, upload = { _, _ -> uploads++; entered.complete(Unit); release.await() },
+                store, upload = { _, _ -> uploads++; entered.complete(Unit); withTimeout(5_000L) { release.await() } },
                 loadSettings = { current },
             )
             store.saveEndpointHealthEventQueue(listOf(event("old")))
             val first = async { reporter.flush(original) }
-            entered.await()
+            withTimeout(5_000L) { entered.await() }
             val waiting = async { reporter.flush(original) }
             yield()
             current = if (changeAccount) settings("new-token") else original.copy(
@@ -33,8 +34,8 @@ class EndpointHealthEventsConcurrencyTest {
             )
             store.saveEndpointHealthEventQueue(listOf(event("replacement")))
             release.complete(Unit)
-            first.await()
-            waiting.await()
+            withTimeout(5_000L) { first.await() }
+            withTimeout(5_000L) { waiting.await() }
             reporter.recordEvent(original, event("stale"))
             assertEquals(1, uploads)
             assertEquals(if (changeAccount) listOf(event("replacement")) else emptyList(), store.loadEndpointHealthEventQueue())
@@ -72,6 +73,31 @@ class EndpointHealthEventsConcurrencyTest {
     }
 
     @Test
+    fun `RU and multihop do not append ordinary endpoint events or heartbeats`() = runBlocking {
+        val direct = settings("token")
+        for (advanced in listOf(
+            direct.advancedSettings.copy(ruRelayEnabled = true),
+            direct.advancedSettings.copy(multiHop = direct.advancedSettings.multiHop.copy(enabled = true)),
+        )) {
+            val store = InMemoryEndpointHealthEventStore()
+            val current = direct.copy(advancedSettings = advanced)
+            var uploads = 0
+            val reporter = EndpointHealthEventReporter(
+                store, upload = { _, _ -> uploads++ }, loadSettings = { current },
+            )
+
+            reporter.recordEvent(current, event("new"))
+            reporter.recordEvent(direct, event("stale-direct"))
+            reporter.recordHeartbeatIfDue(current, "heartbeat", EndpointRankingPolicy.NetworkKind.WIFI, null)
+            reporter.recordHeartbeatIfDue(direct, "stale-heartbeat", EndpointRankingPolicy.NetworkKind.WIFI, null)
+
+            assertEquals(0, uploads)
+            assertEquals(emptyList<EndpointHealthEvent>(), store.loadEndpointHealthEventQueue())
+            assertEquals(0L, store.loadEndpointHealthLastHeartbeatAtMillis())
+        }
+    }
+
+    @Test
     fun `concurrent flushes do not upload the same identical batch`() = runBlocking {
         val store = InMemoryEndpointHealthEventStore()
         val firstUploadStarted = CompletableDeferred<Unit>()
@@ -84,7 +110,7 @@ class EndpointHealthEventsConcurrencyTest {
             upload = { _, events ->
                 assertEquals(batch, events)
                 firstUploadStarted.complete(Unit)
-                resumeFirstUpload.await()
+                withTimeout(5_000L) { resumeFirstUpload.await() }
             },
         )
         val secondReporter = EndpointHealthEventReporter(
@@ -97,14 +123,14 @@ class EndpointHealthEventsConcurrencyTest {
 
         store.saveEndpointHealthEventQueue(batch + batch)
         val firstFlush = async { firstReporter.flush(settings) }
-        firstUploadStarted.await()
+        withTimeout(5_000L) { firstUploadStarted.await() }
         val secondFlush = async { secondReporter.flush(settings) }
         yield()
 
         assertFalse("second flush must wait for the first acknowledgement", secondUploadStarted.isCompleted)
         resumeFirstUpload.complete(Unit)
-        firstFlush.await()
-        secondFlush.await()
+        withTimeout(5_000L) { firstFlush.await() }
+        withTimeout(5_000L) { secondFlush.await() }
 
         assertTrue(secondUploadStarted.isCompleted)
         assertEquals(emptyList<EndpointHealthEvent>(), store.loadEndpointHealthEventQueue())
@@ -126,7 +152,7 @@ class EndpointHealthEventsConcurrencyTest {
             upload = { _, events ->
                 assertEquals(listOf(first), events)
                 uploadStarted.complete(Unit)
-                resumeUpload.await()
+                withTimeout(5_000L) { resumeUpload.await() }
             },
         )
         val appendReporter = EndpointHealthEventReporter(store = store, upload = { _, _ -> })
@@ -134,18 +160,26 @@ class EndpointHealthEventsConcurrencyTest {
 
         store.saveEndpointHealthEventQueue(listOf(first))
         val flush = async { flushReporter.flush(uploadSettings) }
-        uploadStarted.await()
+        withTimeout(5_000L) { uploadStarted.await() }
         val append = async { appendReporter.recordEvent(settings(token = null), second) }
-        appendApplied.await()
+        withTimeout(5_000L) { appendApplied.await() }
         resumeUpload.complete(Unit)
-        flush.await()
-        append.await()
+        withTimeout(5_000L) { flush.await() }
+        withTimeout(5_000L) { append.await() }
 
         assertEquals(listOf(second), store.loadEndpointHealthEventQueue())
     }
 
     private fun settings(token: String?): StoredSettings =
-        DefaultStoredSettingsFactory.create().copy(backendAccessToken = token)
+        DefaultStoredSettingsFactory.create().let { defaults ->
+            defaults.copy(
+                backendAccessToken = token,
+                advancedSettings = defaults.advancedSettings.copy(
+                    ruRelayEnabled = false,
+                    multiHop = defaults.advancedSettings.multiHop.copy(enabled = false),
+                ),
+            )
+        }
 
     private fun event(code: String) = EndpointHealthEvent(
         endpointCode = code,

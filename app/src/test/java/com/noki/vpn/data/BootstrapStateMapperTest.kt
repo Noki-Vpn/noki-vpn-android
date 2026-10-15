@@ -12,6 +12,28 @@ import org.junit.Test
 
 class BootstrapStateMapperTest {
     @Test
+    fun `bootstrap credentials marker replaces the saved marker in both directions`() {
+        for (required in listOf(true, false)) {
+            val mapped = BootstrapStateMapper.mapBootstrap(
+                bootstrap = BootstrapPayload(
+                    user = BackendUser("user-1", "telegram_user", "tg_12345678901234@a.noki", null, true, false,
+                        credentialsSetupRequired = required),
+                    subscription = BackendSubscription(status = "inactive", planCode = null, expiresAt = null,
+                        trafficUsedGb = null, trafficLimitGb = null),
+                    plans = emptyList(), locations = emptyList(), devices = emptyList(), paymentsReady = false,
+                ),
+                language = AppLanguage.EN,
+                currentUserProfile = UserProfile(credentialsSetupRequired = !required),
+                currentProfile = VlessProfile(), advancedSettings = AdvancedSettings(),
+                endpointOptions = emptyList(), currentDeviceId = "device-1", currentDeviceKey = "key-1",
+                previousDeviceAccessRole = "owner", clientLatencyByTarget = emptyMap(),
+            )
+
+            assertEquals(required, mapped.userProfile.credentialsSetupRequired)
+        }
+    }
+
+    @Test
     fun `account device custom name is title and model stays in subtitle`() {
         val device = BackendDevice(
             id = "device-1",

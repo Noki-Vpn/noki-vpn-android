@@ -1,10 +1,10 @@
 package com.noki.vpn
 
-import com.noki.vpn.data.withClientLatencies
-
 import android.os.SystemClock
 import com.noki.vpn.data.AuthRefreshRejectedException
 import com.noki.vpn.data.ServerLocation
+import com.noki.vpn.data.MultiHopSettings
+import com.noki.vpn.data.RuForeignNode
 import com.noki.vpn.data.clientLatencyTargetKey
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -12,6 +12,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 
 internal fun AppUiRuntime.applyAndPersist(newState: AppUiState) {
     applyAndPersist(newState, SettingsEffect.None)
@@ -266,26 +272,42 @@ internal fun AppUiRuntime.applyBackendSyncMetadata(result: BackendSyncResult) {
     backendDeviceAccessRole = result.patch.currentDeviceAccessRole
 }
 
-internal fun clientLatencyRequestTarget(locations: List<ServerLocation>): List<String> =
-    locations
+internal fun clientLatencyRequestTarget(
+    locations: List<ServerLocation>,
+    ruRelayEnabled: Boolean = false,
+    multiHop: MultiHopSettings = MultiHopSettings(),
+    foreignNodes: List<RuForeignNode> = emptyList(),
+): List<String> {
+    if (multiHop.enabled && !ruRelayEnabled) return emptyList()
+    val hops = runCatching { multiHop.explicitNodeIds() }.getOrElse { return emptyList() }
+    if (ruRelayEnabled) return foreignNodes.filter { hops == null || it.id == hops.second }
+        .map { "ru:1:${hops?.first ?: "null"}:${it.id}" }.distinct().sorted()
+    return locations
         .asSequence()
         .filter { it.isOnline }
         .flatMap { location ->
             if (location.servers.isEmpty()) sequenceOf(clientLatencyTargetKey(location))
-            else location.servers.asSequence().filter { it.isOnline }.map { clientLatencyTargetKey(it) }
+            else location.servers.asSequence().filter {
+                it.isOnline
+            }.map { server ->
+                clientLatencyTargetKey(server)
+            }
         }
         .filterNotNull()
         .sorted()
         .toList()
+}
 
 internal fun AppUiRuntime.refreshClientLatenciesAsync(
     locations: List<ServerLocation>,
     refreshCached: Boolean = false,
 ) {
-    if (uiState.advancedSettings.multiHop.enabled) return
     val attempt = authSessionCoordinator.attempt() ?: return
     val networkSignature = clientLatencySampler.networkSignature()
-    val target = clientLatencyRequestTarget(locations)
+    val ruRelayEnabled = uiState.advancedSettings.ruRelayEnabled
+    val multiHop = uiState.advancedSettings.multiHop
+    val foreignNodes = uiState.ruForeignNodes
+    val target = clientLatencyRequestTarget(locations, ruRelayEnabled, multiHop, foreignNodes)
     if (target.isEmpty()) return
     val activeJob = clientLatencyRefreshJob
     if (activeJob != null) {
@@ -293,7 +315,7 @@ internal fun AppUiRuntime.refreshClientLatenciesAsync(
         if (clientLatencyRefreshTarget == target && sameNetwork && !refreshCached) return
         if (!sameNetwork) {
             clientLatencyByTarget = emptyMap()
-            uiState = uiState.copy(locations = uiState.locations.map { it.withClientLatencies(emptyMap()) })
+            uiState = BackendSyncCoordinator.withCachedClientLatencies(uiState, emptyMap())
         }
         clientLatencyRefreshJob = null
         clientLatencyRefreshTarget = null
@@ -303,23 +325,19 @@ internal fun AppUiRuntime.refreshClientLatenciesAsync(
         val ownerJob = currentCoroutineContext()[Job]
             ?: error("Client latency coroutine has no Job")
         try {
-            val measured = measureClientLatencies(locations)
+            val measured = measureClientLatencies(locations, ruRelayEnabled, multiHop, foreignNodes)
             if (
-                uiState.advancedSettings.multiHop.enabled ||
                 clientLatencySampler.networkSignature() != networkSignature ||
                 clientLatencyRefreshJob !== ownerJob ||
                 !ownerJob.isActive ||
                 !authSessionCoordinator.isCurrent(attempt) ||
-                clientLatencyRequestTarget(uiState.locations) != target
+                clientLatencyRequestTarget(uiState.locations, uiState.advancedSettings.ruRelayEnabled,
+                    uiState.advancedSettings.multiHop, uiState.ruForeignNodes) != target
             ) {
                 return@launch
             }
             clientLatencyByTarget = measured
-            uiState = uiState.copy(
-                locations = uiState.locations.map { location ->
-                    location.withClientLatencies(measured)
-                },
-            )
+            uiState = BackendSyncCoordinator.withCachedClientLatencies(uiState, measured)
             // Keep presentation samples fresh and owned by this physical network.
             val expiresAt = SystemClock.elapsedRealtime() + 30_000L
             while (SystemClock.elapsedRealtime() < expiresAt &&
@@ -345,7 +363,7 @@ internal fun AppUiRuntime.refreshClientLatenciesAsync(
             if (clientLatencyRefreshJob === ownerJob) {
                 if (authSessionCoordinator.isCurrent(attempt)) {
                     clientLatencyByTarget = emptyMap()
-                    uiState = uiState.copy(locations = uiState.locations.map { it.withClientLatencies(emptyMap()) })
+                    uiState = BackendSyncCoordinator.withCachedClientLatencies(uiState, emptyMap())
                 }
                 clientLatencyRefreshJob = null
                 clientLatencyRefreshTarget = null
@@ -360,9 +378,53 @@ internal fun AppUiRuntime.refreshClientLatenciesAsync(
 }
 
 internal fun AppUiRuntime.hasMissingClientLatency(locations: List<ServerLocation>): Boolean {
+    if (uiState.advancedSettings.ruRelayEnabled) return uiState.ruForeignNodes.any {
+        clientLatencyTargetKey(it) !in clientLatencyByTarget
+    }
     return BackendSyncCoordinator.hasMissingClientLatency(locations, clientLatencyByTarget)
 }
 
-internal suspend fun AppUiRuntime.measureClientLatencies(locations: List<ServerLocation>): Map<String, Int> {
-    return clientLatencySampler.measure(locations)
+internal suspend fun AppUiRuntime.measureClientLatencies(
+    locations: List<ServerLocation>,
+    ruRelayEnabled: Boolean = uiState.advancedSettings.ruRelayEnabled,
+    multiHop: MultiHopSettings = uiState.advancedSettings.multiHop,
+    foreignNodes: List<RuForeignNode> = uiState.ruForeignNodes,
+): Map<String, Int> {
+    if (multiHop.enabled && !ruRelayEnabled) return emptyMap()
+    val hops = runCatching { multiHop.explicitNodeIds() }.getOrElse { return emptyMap() }
+    if (!ruRelayEnabled) return clientLatencySampler.measure(locations)
+    val attempt = authSessionCoordinator.attempt() ?: return emptyMap()
+    val network = com.noki.vpn.vpn.AndroidUnderlyingNetworkSource(application)
+        .currentSnapshot()?.network ?: return emptyMap()
+    val probeApi = backendApi.onNetwork(network)
+    val deviceId = backendDeviceId
+    val deviceKey = backendDeviceKey
+    val targets = coroutineScope {
+        val slots = Semaphore(4)
+        foreignNodes.filter { hops == null || it.id == hops.second }
+            .distinctBy { it.id }.map { server ->
+                async {
+                    val key = clientLatencyTargetKey(server)
+                    val relays = withTimeoutOrNull(8_000L) {
+                        slots.withPermit {
+                            try {
+                                authSessionCoordinator.run(attempt) { token ->
+                                    probeApi.ruRelayCatalog(token, deviceId, deviceKey, server.id, hops?.first, routeVersion = 1)
+                                }.relays
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                emptyList()
+                            }
+                        }
+                    }.orEmpty()
+                    key to relays.filter { it.available && it.pairReady }.mapNotNull { relay ->
+                        val host = relay.probeHost ?: return@mapNotNull null
+                        val port = relay.probePort ?: return@mapNotNull null
+                        host to port
+                    }
+                }
+            }.awaitAll().filterNotNull().toMap()
+    }
+    return clientLatencySampler.measureRelayTargets(targets)
 }

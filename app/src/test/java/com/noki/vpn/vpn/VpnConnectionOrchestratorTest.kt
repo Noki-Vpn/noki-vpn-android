@@ -24,7 +24,7 @@ class VpnConnectionOrchestratorTest {
     @Test
     fun `independent lifecycle operations wait and cancellation preserves the holder`() = runBlocking {
         val orchestrator = VpnConnectionOrchestrator(
-            RecordingXrayRuntime(mutableListOf()), UnusedTunInterfaceFactory,
+            RecordingVpnCoreRuntime(mutableListOf()), UnusedTunInterfaceFactory,
             RecordingConnectedSidecars(mutableListOf()),
         )
         val release = CompletableDeferred<Unit>()
@@ -46,7 +46,7 @@ class VpnConnectionOrchestratorTest {
     @Test
     fun `invalidated lifecycle cannot deliver an owned completion`() = runBlocking {
         val orchestrator = VpnConnectionOrchestrator(
-            xray = RecordingXrayRuntime(mutableListOf()),
+            core = RecordingVpnCoreRuntime(mutableListOf()),
             tunFactory = UnusedTunInterfaceFactory,
             sidecars = RecordingConnectedSidecars(mutableListOf()),
         )
@@ -72,12 +72,12 @@ class VpnConnectionOrchestratorTest {
     fun `concurrent replacement keeps the newest transition registered`() = runBlocking {
         val firstCancellationEntered = CountDownLatch(1)
         val releaseFirstCancellation = CountDownLatch(1)
-        val runtime = BlockingFirstCancellationXrayRuntime(
+        val runtime = BlockingFirstCancellationVpnCoreRuntime(
             entered = firstCancellationEntered,
             release = releaseFirstCancellation,
         )
         val orchestrator = VpnConnectionOrchestrator(
-            xray = runtime,
+            core = runtime,
             tunFactory = UnusedTunInterfaceFactory,
             sidecars = RecordingConnectedSidecars(mutableListOf()),
         )
@@ -153,7 +153,7 @@ class VpnConnectionOrchestratorTest {
     fun `replacement cancels native readiness before waiting for previous transition`() = runBlocking {
         val events = mutableListOf<String>()
         val orchestrator = VpnConnectionOrchestrator(
-            xray = RecordingXrayRuntime(events),
+            core = RecordingVpnCoreRuntime(events),
             tunFactory = UnusedTunInterfaceFactory,
             sidecars = RecordingConnectedSidecars(events),
         )
@@ -192,7 +192,7 @@ class VpnConnectionOrchestratorTest {
     fun `replacement transition cancels the previous lifecycle owner`() = runBlocking {
         val events = mutableListOf<String>()
         val orchestrator = VpnConnectionOrchestrator(
-            xray = RecordingXrayRuntime(events),
+            core = RecordingVpnCoreRuntime(events),
             tunFactory = UnusedTunInterfaceFactory,
             sidecars = RecordingConnectedSidecars(events),
         )
@@ -230,11 +230,11 @@ class VpnConnectionOrchestratorTest {
     @Test
     fun `connected activation and release have one lifecycle resource owner`() = runBlocking {
         val events = mutableListOf<String>()
-        val runtime = RecordingXrayRuntime(events)
+        val runtime = RecordingVpnCoreRuntime(events)
         val tun = RecordingTunHandle(events)
         val sidecars = RecordingConnectedSidecars(events)
         val orchestrator = VpnConnectionOrchestrator(
-            xray = runtime,
+            core = runtime,
             tunFactory = UnusedTunInterfaceFactory,
             sidecars = sidecars,
         )
@@ -268,7 +268,7 @@ class VpnConnectionOrchestratorTest {
                 "start_sidecars:11",
                 "cancel_probe",
                 "stop_sidecars:11",
-                "stop_xray",
+                "stop_core",
                 "close_tun",
             ),
             events,
@@ -282,7 +282,7 @@ class VpnConnectionOrchestratorTest {
         val transitionMayFinish = CompletableDeferred<Unit>()
         val transitionCancelling = CompletableDeferred<Unit>()
         val events = mutableListOf<String>()
-        val runtime = RecordingXrayRuntime(events)
+        val runtime = RecordingVpnCoreRuntime(events)
         val tun = RecordingTunHandle(events)
         val scheduler = RecordingDelayedTaskScheduler(events)
         val delayedOwner = Any()
@@ -330,7 +330,7 @@ class VpnConnectionOrchestratorTest {
         assertFalse(completed)
         assertEquals(
             listOf("cancel_probe", "cancel_transition", "join_transition", "cancel_delayed",
-                "stop_xray", "close_tun", "cancel_background"),
+                "stop_core", "close_tun", "cancel_background"),
             events,
         )
     }
@@ -339,7 +339,7 @@ class VpnConnectionOrchestratorTest {
     fun `destroy releases resources only after acquiring lifecycle ownership`() = runBlocking {
         val events = mutableListOf<String>()
         val orchestrator = VpnConnectionOrchestrator(
-            RecordingXrayRuntime(events), UnusedTunInterfaceFactory, RecordingConnectedSidecars(events),
+            RecordingVpnCoreRuntime(events), UnusedTunInterfaceFactory, RecordingConnectedSidecars(events),
         )
         orchestrator.lifecycleMutex.lock()
         val destroy = orchestrator.shutdown(
@@ -362,7 +362,7 @@ class VpnConnectionOrchestratorTest {
     fun `destroy cancels background work even when resource close fails`() {
         val events = mutableListOf<String>()
         val orchestrator = VpnConnectionOrchestrator(
-            RecordingXrayRuntime(events), UnusedTunInterfaceFactory, RecordingConnectedSidecars(events),
+            RecordingVpnCoreRuntime(events), UnusedTunInterfaceFactory, RecordingConnectedSidecars(events),
         )
         assertThrows(IllegalStateException::class.java) {
             runBlocking {
@@ -379,36 +379,6 @@ class VpnConnectionOrchestratorTest {
         assertEquals(listOf("cancel_probe", "release_resources", "cancel_background"), events)
     }
 
-    @Test
-    fun `route switch keeps core and tunnel and rejects a stale generation`() = runBlocking {
-        val events = mutableListOf<String>()
-        val runtime = RecordingXrayRuntime(events)
-        val orchestrator = VpnConnectionOrchestrator(runtime, UnusedTunInterfaceFactory, RecordingConnectedSidecars(events))
-        val tun = RecordingTunHandle(events)
-        val settings = DefaultStoredSettingsFactory.create()
-        val generation = orchestrator.beginTransition()
-        orchestrator.withLifecycleLock {
-            orchestrator.activateConnected(generation, 11L, tun, settings, null)
-            assertEquals(1L, orchestrator.switchRoute("candidate", generation) { true }.delayMs)
-            assertSame(tun, orchestrator.currentTunnel())
-            assertEquals(11L, orchestrator.snapshot().owner?.coreId)
-            assertEquals(listOf("start_sidecars:11"), events)
-            orchestrator.invalidate()
-            assertEquals(null, orchestrator.switchRoute("candidate", generation) { true }.delayMs)
-        }
-    }
-
-    @Test
-    fun `route switch rejects a changed network or revoked session`() = runBlocking {
-        val orchestrator = VpnConnectionOrchestrator(
-            RecordingXrayRuntime(mutableListOf()), UnusedTunInterfaceFactory,
-            RecordingConnectedSidecars(mutableListOf()),
-        )
-        val generation = orchestrator.beginTransition()
-        orchestrator.withLifecycleLock {
-            assertEquals(null, orchestrator.switchRoute("candidate", generation) { false }.delayMs)
-        }
-    }
 
 }
 
@@ -434,45 +404,39 @@ private class RecordingConnectedSidecars(
     }
 }
 
-private class RecordingXrayRuntime(
+private class RecordingVpnCoreRuntime(
     private val events: MutableList<String>,
-) : XrayRuntime {
+) : VpnCoreRuntime {
+    override fun rebindWireGuard(): Boolean = true
+
     override fun start(config: String, tunFd: Int): Boolean {
-        events += "start_xray"
+        events += "start_core"
         return true
     }
 
     override fun stop() {
-        events += "stop_xray"
+        events += "stop_core"
     }
-
-    override fun switchRoute(config: String, canCommit: () -> Boolean): XrayProbeResult =
-        XrayProbeResult(if (canCommit()) 1L else null)
-
-    override fun cancelRouteSwitch() = Unit
 
     override fun cancelMeasureDelay() {
         events += "cancel_probe"
     }
 
-    override fun measureDelay(targetUrl: String, timeoutMillis: Long): XrayProbeResult =
-        XrayProbeResult(delayMs = 1L)
+    override fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult =
+        VpnProbeResult(delayMs = 1L)
 }
 
-private class BlockingFirstCancellationXrayRuntime(
+private class BlockingFirstCancellationVpnCoreRuntime(
     private val entered: CountDownLatch,
     private val release: CountDownLatch,
-) : XrayRuntime {
+) : VpnCoreRuntime {
+    override fun rebindWireGuard(): Boolean = true
+
     private val cancellationCalls = AtomicInteger(0)
 
     override fun start(config: String, tunFd: Int): Boolean = true
 
     override fun stop() = Unit
-
-    override fun switchRoute(config: String, canCommit: () -> Boolean): XrayProbeResult =
-        XrayProbeResult(if (canCommit()) 1L else null)
-
-    override fun cancelRouteSwitch() = Unit
 
     override fun cancelMeasureDelay() {
         if (cancellationCalls.incrementAndGet() == 1) {
@@ -481,8 +445,8 @@ private class BlockingFirstCancellationXrayRuntime(
         }
     }
 
-    override fun measureDelay(targetUrl: String, timeoutMillis: Long): XrayProbeResult =
-        XrayProbeResult(delayMs = 1L)
+    override fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult =
+        VpnProbeResult(delayMs = 1L)
 }
 
 private class RecordingTunHandle(

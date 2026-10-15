@@ -1,12 +1,37 @@
 package com.noki.vpn
 
 import com.noki.vpn.data.UserProfile
+import com.noki.vpn.data.RuForeignNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class LogoutStateReducerTest {
+    @Test
+    fun logoutFromPendingCredentialsClearsPasswordsAndDoesNotReenterRegistration() {
+        val pending = AppUiState(
+            isAuthenticated = true,
+            userProfile = UserProfile(credentialsSetupRequired = true),
+            screenStack = listOf(AppDestination.REGISTRATION),
+            authStep = AuthStep.REGISTRATION_PROFILE,
+            registrationForm = RegistrationFormState(password = "secret123", passwordRepeat = "secret123"),
+        )
+
+        val loggedOut = AuthStepReducer.requireCredentialsSetup(LogoutStateReducer.reduce(pending), pending)
+
+        assertFalse(loggedOut.isAuthenticated)
+        assertFalse(loggedOut.userProfile.credentialsSetupRequired)
+        assertEquals(listOf(AppDestination.LOGIN), loggedOut.screenStack)
+        assertEquals(RegistrationFormState(), loggedOut.registrationForm)
+    }
+
+    @Test
+    fun logoutClearsAuthenticatedOverlayDiscovery() {
+        val result = LogoutStateReducer.reduce(AppUiState(isAuthenticated = true,
+            ruForeignNodes = listOf(RuForeignNode("overlay", "NL overlay", "NL"))))
+        assertEquals(emptyList<RuForeignNode>(), result.ruForeignNodes)
+    }
     @Test
     fun logoutClearsTelegramFailureAndPendingLink() {
         val telegramStates = listOf(

@@ -1,5 +1,6 @@
 package com.noki.vpn.data
 
+import com.noki.vpn.BuildConfig
 import java.util.Locale
 
 object DefaultStoredSettingsFactory {
@@ -70,6 +71,7 @@ object DefaultStoredSettingsFactory {
             ),
             securitySettings = SecuritySettings(),
             advancedSettings = AdvancedSettings(
+                ruRelayEnabled = BuildConfig.RU_RELAY_DEFAULT_ENABLED,
                 anonymousLogsEnabled = isFreshInstall,
                 bypassDomains = listOf(DomainRulePolicy.RUSSIAN_RESOURCES_RULE),
             ),

@@ -22,6 +22,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -32,20 +34,30 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import com.noki.vpn.AppUiState
 import com.noki.vpn.AuthStep
 import com.noki.vpn.MainViewModel
 import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.DeviceSession
 import com.noki.vpn.data.PersonalizationSettings
+import com.noki.vpn.data.ServerSelectionMode
+import com.noki.vpn.data.SettingsRepository
+import com.noki.vpn.vpn.AppVpnServiceCommandTest.InMemoryAndroidKeyStore
 import java.io.File
+import java.security.Provider
+import java.security.Security
 import kotlinx.coroutines.cancel
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -61,6 +73,35 @@ import org.robolectric.annotation.GraphicsMode
 class AdaptiveScreenLayoutTest {
     @get:Rule val compose = createEmptyComposeRule()
     private lateinit var activity: ComponentActivity
+
+    @Before
+    fun provideInMemoryAndroidKeyStore() {
+        android.provider.Settings.Secure.putString(
+            RuntimeEnvironment.getApplication().contentResolver,
+            android.provider.Settings.Secure.ANDROID_ID,
+            "noki-layout-test",
+        )
+        Security.addProvider(object : Provider("NokiAdaptiveScreenTest", 1.0, "Test-only Android keystore") {
+            init { put("KeyStore.AndroidKeyStore", InMemoryAndroidKeyStore::class.java.name) }
+        })
+    }
+
+    @After
+    fun removeInMemoryAndroidKeyStore() {
+        Security.removeProvider("NokiAdaptiveScreenTest")
+    }
+
+    @Test
+    @Config(qualifiers = "w412dp-h915dp-420dpi")
+    fun activityPreservesCurrentDisplayDensity() {
+        val expected = RuntimeEnvironment.getApplication().resources.configuration
+        val controller = Robolectric.buildActivity(com.noki.vpn.MainActivity::class.java)
+        val actual = controller.get().resources.configuration
+        assertEquals(expected.densityDpi, actual.densityDpi)
+        assertEquals(expected.screenWidthDp, actual.screenWidthDp)
+        assertEquals(expected.screenHeightDp, actual.screenHeightDp)
+        assertEquals(expected.smallestScreenWidthDp, actual.smallestScreenWidthDp)
+    }
 
     @Test
     @Config(qualifiers = "w360dp-h800dp-xxhdpi")
@@ -90,16 +131,54 @@ class AdaptiveScreenLayoutTest {
     }
 
     @Test
-    fun serverSheetClosesFromListContent() {
+    fun serverSheetListScrollsWithoutClosing() {
+        val countries = (1..30).map { index ->
+            com.noki.vpn.data.ServerLocation("c$index", "LV", "Страна $index", "Riga", "example.test", isOnline = true)
+        }
+        var collapsed = false
+        render {
+            val backdrop = rememberPrismalGlassLayer()
+            Box(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize().prismalGlassLayer(backdrop).background(HomeBgBase))
+                HomeServerDropdownOverlay(Modifier.fillMaxSize(), true, 1f, AppLanguage.RU,
+                    countries, { collapsed = true }, { _, _ -> },
+                    com.noki.vpn.data.UserProfile())
+            }
+        }.use {
+            val list = compose.onNode(androidx.compose.ui.test.hasScrollAction(), useUnmergedTree = true)
+            val initialScroll = list.fetchSemanticsNode().config[
+                androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange
+            ].value()
+            list.performTouchInput { swipeUp(startY = height * 0.8f, endY = height * 0.2f) }
+            compose.waitForIdle()
+            val finalScroll = list.fetchSemanticsNode().config[
+                androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange
+            ].value()
+            assertTrue("Swipe inside the list must scroll its countries", finalScroll > initialScroll)
+            assertFalse("Scrolling countries must not close the sheet", collapsed)
+        }
+    }
+
+    @Test
+    fun serverSheetClosesFromHandle() {
         var collapsed = false
         render {
             HomeServerDropdownOverlay(Modifier.fillMaxSize(), true, 1f, AppLanguage.RU,
-                emptyList(), null, null, false, false, { collapsed = true }, { _, _ -> },
+                emptyList(), { collapsed = true }, { _, _ -> },
                 com.noki.vpn.data.UserProfile())
         }.use {
             compose.onNodeWithText("Автовыбор").assertIsDisplayed()
-            compose.onRoot().performTouchInput { swipeUp(startY = height * 0.6f, endY = height * 0.2f) }
-            assertTrue("Swipe inside the list must close the sheet", collapsed)
+            val handleInset = NokiUiKitPolicy.homeServerDropdownHandleTouchHeightDp *
+                activity.resources.displayMetrics.density / 2f
+            compose.mainClock.autoAdvance = false
+            try {
+                compose.onRoot().performTouchInput { swipeUp(startY = height - handleInset, endY = height * 0.6f) }
+                compose.runOnIdle {
+                    assertTrue("The close request must not wait for a second animation", collapsed)
+                }
+            } finally {
+                compose.mainClock.autoAdvance = true
+            }
         }
     }
 
@@ -110,7 +189,7 @@ class AdaptiveScreenLayoutTest {
         var selected: Pair<String, com.noki.vpn.data.ServerSelectionMode>? = null
         render {
             HomeServerDropdownOverlay(Modifier.fillMaxSize(), true, 1f, AppLanguage.RU,
-                listOf(country), null, null, false, false, {}, { id, mode -> selected = id to mode },
+                listOf(country), {}, { id, mode -> selected = id to mode },
                 com.noki.vpn.data.UserProfile())
         }.use {
             compose.onNodeWithText("Latvia 1").assertDoesNotExist()
@@ -133,7 +212,7 @@ class AdaptiveScreenLayoutTest {
             }
             render {
                 HomeServerDropdownOverlay(Modifier.fillMaxSize(), true, scale, AppLanguage.RU,
-                    countries, null, null, false, false, {}, { _, _ -> }, com.noki.vpn.data.UserProfile())
+                    countries, {}, { _, _ -> }, com.noki.vpn.data.UserProfile())
             }.use {
                 val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
                 val list = compose.onNode(androidx.compose.ui.test.hasScrollAction(), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
@@ -193,20 +272,20 @@ class AdaptiveScreenLayoutTest {
         PersonalizationScreen(
             state = russianState(), onLanguageChanged = {}, onGlassModeChanged = {},
             onPickAvatarClicked = {}, onDeleteAvatarClicked = {}, onAvatarEditDenied = {},
-            sharedBackdrop = rememberLayerBackdrop(), liveGlassEnabled = false, showBackground = false,
+            sharedBackdrop = rememberPrismalGlassLayer(), liveGlassEnabled = false, showBackground = false,
         )
     }
 
     @Test
     fun wideSupportUsesAvailableWidth() = checkSettingsWidth("Поддержка", "support-wide") {
-        SupportScreen(russianState(), rememberLayerBackdrop(), liveGlassEnabled = false, showBackground = false)
+        SupportScreen(russianState(), rememberPrismalGlassLayer(), liveGlassEnabled = false, showBackground = false)
     }
 
     @Test
     fun wideSecurityUsesAvailableWidth() {
         val viewModel = layoutViewModel()
         checkSettingsWidth("Безопасность", "security-wide") {
-            SecurityScreen(russianState(), viewModel, {}, rememberLayerBackdrop(), liveGlassEnabled = false, showBackground = false)
+            SecurityScreen(russianState(), viewModel, {}, rememberPrismalGlassLayer(), liveGlassEnabled = false, showBackground = false)
         }
     }
 
@@ -214,13 +293,121 @@ class AdaptiveScreenLayoutTest {
     fun wideAdvancedSettingsUsesAvailableWidth() {
         val viewModel = layoutViewModel()
         checkSettingsWidth("Расширенные настройки", "advanced-wide") {
-            AdvancedSettingsScreen(russianState(), viewModel, rememberLayerBackdrop(), liveGlassEnabled = false, showBackground = false)
+            AdvancedSettingsScreen(russianState(), viewModel, rememberPrismalGlassLayer(), liveGlassEnabled = false, showBackground = false)
+        }
+    }
+
+    @Test
+    fun ruRelayModeHidesProtocolAndManualRelayControls() {
+        val viewModel = layoutViewModel()
+        val normal = russianState()
+        render {
+            AdvancedSettingsScreen(normal, viewModel, rememberPrismalGlassLayer(),
+                liveGlassEnabled = false, showBackground = false)
+        }.use {
+            compose.onNodeWithText("MultiHop").assertExists()
+            compose.onNodeWithText("Автовыбор протокола").assertExists()
+            compose.onNodeWithText("Автопуть").assertDoesNotExist()
+        }
+        val ru = normal.copy(advancedSettings = normal.advancedSettings.copy(ruRelayEnabled = true))
+        render {
+            AdvancedSettingsScreen(ru, viewModel, rememberPrismalGlassLayer(),
+                liveGlassEnabled = false, showBackground = false)
+        }.use {
+            compose.onNodeWithText("MultiHop").assertExists()
+            compose.onNodeWithText("Автовыбор протокола").assertDoesNotExist()
+            compose.onNodeWithText("Автопуть").assertDoesNotExist()
+            compose.onNodeWithText("Выбрать сервер реле").assertDoesNotExist()
+            compose.onNodeWithText("RU-реле").assertExists()
+            compose.onNodeWithText("WireGuard").assertDoesNotExist()
+            compose.onNodeWithText("Подключение через российское реле по WireGuard").assertDoesNotExist()
+            compose.onNodeWithText("RU-реле выбирается автоматически с учётом задержки и веса").assertDoesNotExist()
         }
     }
 
     private fun russianState() = com.noki.vpn.SettingsPreparedStatePolicy.withPreparedSettingsState(
         AppUiState(personalizationSettings = PersonalizationSettings(language = AppLanguage.RU)),
     )
+
+    @Test
+    fun multiHopSharedControlsSaveDistinctNodesWithRuWithoutConfirmation() = saveMultiHopPair(ruRelayEnabled = true)
+
+    @Test
+    fun multiHopSharedControlsSaveDistinctNodesWithoutEnablingRu() = saveMultiHopPair(ruRelayEnabled = false)
+
+    private fun saveMultiHopPair(ruRelayEnabled: Boolean) {
+        val viewModel = layoutViewModel()
+        viewModel.setMultiHop(com.noki.vpn.data.MultiHopSettings())
+        viewModel.setRuRelayEnabled(ruRelayEnabled)
+        val normal = russianState()
+        val entryNodeId = "11111111-1111-4111-8111-111111111111"
+        val exitNodeId = "22222222-2222-4222-8222-222222222222"
+        val state = normal.copy(
+            advancedSettings = normal.advancedSettings.copy(ruRelayEnabled = ruRelayEnabled),
+            locations = listOf(com.noki.vpn.data.ServerLocation("lv", "LV", "Латвия", "", "", isOnline = true,
+                servers = listOf(entryNodeId to "Нода a", exitNodeId to "Нода b",
+                    "33333333-3333-4333-8333-333333333333" to "Нода c").map { (id, name) ->
+                    com.noki.vpn.data.VpnServer(id, name, if (name == "Нода c") "AT" else "LV", "lv", "", null, true,
+                        latencyMs = if (name == "Нода a") 25 else null,
+                        multiHopEntryAvailable = true, multiHopExitAvailable = true)
+                })),
+            ruForeignNodes = listOf(
+                com.noki.vpn.data.RuForeignNode(entryNodeId, "Нода a", "LV", latencyMs = 25),
+                com.noki.vpn.data.RuForeignNode(exitNodeId, "Нода b", "LV"),
+                com.noki.vpn.data.RuForeignNode("33333333-3333-4333-8333-333333333333", "Нода c", "AT"),
+            ),
+        )
+        render {
+            MultiHopScreen(state, viewModel, rememberPrismalGlassLayer(),
+                liveGlassEnabled = false, showBackground = false)
+        }.use {
+            compose.onNodeWithText("Входной сервер").assertDoesNotExist()
+            compose.onNode(androidx.compose.ui.test.SemanticsMatcher.expectValue(
+                androidx.compose.ui.semantics.SemanticsProperties.Role,
+                androidx.compose.ui.semantics.Role.Switch,
+            )).performClick()
+            compose.onNodeWithText("Нода a").assertDoesNotExist()
+            compose.onNodeWithText(if (ruRelayEnabled) "RU-реле включено. Выберите разные зарубежные вход и выход."
+                else "RU-реле выключено. Протокол выбирается автоматически. Выберите разные вход и выход.").assertExists()
+            compose.onNodeWithText("Сохранить").performScrollTo().performClick()
+            compose.onNodeWithText("Выберите вход").assertExists()
+            compose.runOnIdle { assertFalse(viewModel.uiState.advancedSettings.multiHop.enabled) }
+            compose.onNodeWithContentDescription("Входной сервер: Выбрать").performScrollTo().performClick()
+            compose.onNodeWithContentDescription("MultiHop server picker: Входной сервер").assertIsDisplayed()
+            compose.onNodeWithText("25 мс").assertIsDisplayed()
+            compose.onNodeWithText("Латвия").assertIsDisplayed()
+            compose.onNodeWithText("Нода a").assertDoesNotExist()
+            compose.onNodeWithText("Нода c").assertDoesNotExist()
+            assertTrue("Countries are grouped before node selection", compose.onNodeWithText("Австрия")
+                .fetchSemanticsNode().boundsInRoot.top < compose.onNodeWithText("Латвия")
+                .fetchSemanticsNode().boundsInRoot.top)
+            saveImage("multihop-server-list-${if (ruRelayEnabled) "ru" else "no-ru"}", includeDialogs = true)
+            compose.onNodeWithContentDescription("Закрыть выбор сервера").performClick()
+            compose.onNodeWithContentDescription("MultiHop server picker: Входной сервер").assertDoesNotExist()
+            compose.onNodeWithText("Нода a").assertDoesNotExist()
+            compose.onNodeWithContentDescription("Входной сервер: Выбрать").performClick()
+            compose.onNodeWithContentDescription("Серверы: Латвия").performClick()
+            compose.onNodeWithText("Нода a").performClick()
+            compose.onNodeWithContentDescription("MultiHop server picker: Входной сервер").assertDoesNotExist()
+            compose.onNodeWithContentDescription("Выходной сервер: Выбрать").performScrollTo().performClick()
+            compose.onNodeWithContentDescription("Серверы: Латвия").performClick()
+            assertEquals(1, compose.onAllNodesWithText("Нода a").fetchSemanticsNodes().size)
+            compose.onNodeWithText("Нода b").performClick()
+            compose.onNodeWithContentDescription("Входной сервер: Нода a").assertExists()
+            compose.onNodeWithContentDescription("Выходной сервер: Нода b").assertExists()
+            saveImage("multihop-simple-${if (ruRelayEnabled) "ru" else "no-ru"}")
+            compose.onNodeWithText("Сохранить").performScrollTo().performClick()
+            compose.onNodeWithText("Выбрать ручной MultiHop?").assertDoesNotExist()
+            compose.onNodeWithText("RU-реле будет выключено.").assertDoesNotExist()
+            compose.runOnIdle {
+                val persisted = SettingsRepository(RuntimeEnvironment.getApplication()).load()
+                assertEquals(ruRelayEnabled, persisted.advancedSettings.ruRelayEnabled)
+                assertTrue(persisted.advancedSettings.multiHop.enabled)
+                assertEquals(entryNodeId, persisted.advancedSettings.multiHop.entry?.nodeId)
+                assertEquals(exitNodeId, persisted.advancedSettings.multiHop.exit?.nodeId)
+            }
+        }
+    }
 
     @Test
     fun emailLoginFieldsScaleWithTheirWidth() {
@@ -235,10 +422,47 @@ class AdaptiveScreenLayoutTest {
     }
 
     @Test
+    @Config(qualifiers = "w412dp-h800dp-xxhdpi")
+    fun loginMovesFieldsAndActionsTogetherAboveKeyboard() {
+        val viewModel = layoutViewModel()
+        render {
+            LoginScreen(russianState().copy(authStep = AuthStep.EMAIL_LOGIN), viewModel, false, {}, {}, {}, {})
+        }.use {
+            val email = compose.onNode(hasSetTextAction() and hasText("E-mail", substring = true))
+            val action = compose.onNode(hasText("Войти") and hasClickAction())
+            val emailBefore = email.fetchSemanticsNode().boundsInRoot
+            val actionBefore = action.fetchSemanticsNode().boundsInRoot
+            val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
+            val imeHeight = 900
+            fun dispatchIme(bottom: Int) = compose.runOnIdle {
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(activity.window, false)
+                androidx.core.view.ViewCompat.dispatchApplyWindowInsets(
+                    activity.window.decorView,
+                    androidx.core.view.WindowInsetsCompat.Builder()
+                        .setInsets(androidx.core.view.WindowInsetsCompat.Type.ime(), androidx.core.graphics.Insets.of(0, 0, 0, bottom))
+                        .setVisible(androidx.core.view.WindowInsetsCompat.Type.ime(), bottom > 0)
+                        .build(),
+                )
+            }
+            dispatchIme(imeHeight)
+            compose.waitForIdle()
+            val emailAfter = email.fetchSemanticsNode().boundsInRoot
+            val actionAfter = action.fetchSemanticsNode().boundsInRoot
+            assertTrue("The whole form must rise", emailAfter.top < emailBefore.top)
+            assertEquals(emailBefore.top - emailAfter.top, actionBefore.top - actionAfter.top, 1f)
+            assertTrue("Login action must clear the keyboard", actionAfter.bottom < root.bottom - imeHeight)
+            saveImage("login-keyboard")
+            dispatchIme(0)
+            compose.waitForIdle()
+            assertEquals(emailBefore.top, email.fetchSemanticsNode().boundsInRoot.top, 1f)
+        }
+    }
+
+    @Test
     fun settingsRowsScaleWithTheirWidth() {
         val viewModel = layoutViewModel()
         render {
-            SettingsScreen(russianState(), viewModel, rememberLayerBackdrop(), liveGlassEnabled = false,
+            SettingsScreen(russianState(), viewModel, rememberPrismalGlassLayer(), liveGlassEnabled = false,
                 showBackground = false, showBottomNavigation = false)
         }.use {
             val row = compose.onNode(hasText("Устройства") and hasClickAction()).fetchSemanticsNode().boundsInRoot
@@ -252,7 +476,7 @@ class AdaptiveScreenLayoutTest {
     fun narrowSettingsRetainOriginalMenuScale() {
         val viewModel = layoutViewModel()
         render {
-            SettingsScreen(russianState(), viewModel, rememberLayerBackdrop(), liveGlassEnabled = false,
+            SettingsScreen(russianState(), viewModel, rememberPrismalGlassLayer(), liveGlassEnabled = false,
                 showBackground = false, showBottomNavigation = false)
         }.use {
             val row = compose.onNode(hasText("Устройства") and hasClickAction()).fetchSemanticsNode().boundsInRoot
@@ -305,7 +529,7 @@ class AdaptiveScreenLayoutTest {
 
     @Test fun applicationsScale() {
         val viewModel = layoutViewModel()
-        render { AppFilterScreen(russianState(), viewModel, rememberLayerBackdrop(), false, false) }.use {
+        render { AppFilterScreen(russianState(), viewModel, rememberPrismalGlassLayer(), false, false) }.use {
             checkActionAspect("Применить")
             saveImage("apps-wide")
         }
@@ -313,6 +537,26 @@ class AdaptiveScreenLayoutTest {
 
     @Test fun alwaysOnRulesScale() = checkRules(SiteRulesMode.ALWAYS_ON, "rules-always-wide")
     @Test fun bypassRulesScale() = checkRules(SiteRulesMode.BYPASS, "rules-bypass-wide")
+    @Test
+    @Config(qualifiers = "w360dp-h800dp-xxhdpi")
+    fun russianResourcesRuleFitsAndShowsOnState() {
+        val viewModel = layoutViewModel()
+        val state = russianState().let { current ->
+            current.copy(advancedSettings = current.advancedSettings.copy(
+                bypassDomains = listOf(com.noki.vpn.data.DomainRulePolicy.RUSSIAN_RESOURCES_RULE),
+            ))
+        }
+        render { SiteRulesScreen(state, viewModel, SiteRulesMode.BYPASS,
+            liveGlassEnabled = false, showBackground = false) }.use {
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            compose.onNodeWithText("Российские ресурсы", useUnmergedTree = true)
+                .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertFalse("Russian resources label must fit", layouts.single().isLineEllipsized(0))
+            compose.onNodeWithText("on").assertIsDisplayed()
+            compose.onNodeWithText("Изм.").assertDoesNotExist()
+            saveImage("rules-bypass-on-narrow")
+        }
+    }
     private fun checkRules(mode: SiteRulesMode, image: String) {
         val viewModel = layoutViewModel()
         render { SiteRulesScreen(russianState(), viewModel, mode, liveGlassEnabled = false, showBackground = false) }.use {
@@ -472,7 +716,7 @@ class AdaptiveScreenLayoutTest {
             HomeScreen(
                 state = AppUiState(personalizationSettings = PersonalizationSettings(language = AppLanguage.RU)),
                 viewModel = viewModel, onConnectClicked = {}, onDisconnectClicked = {},
-                sharedBackdrop = rememberLayerBackdrop(), liveGlassEnabled = false,
+                sharedBackdrop = rememberPrismalGlassLayer(), liveGlassEnabled = false,
                 showBackground = false,
                 // The shared navigation's RuntimeShader requires hardware rendering.
                 showBottomNavigation = false,
@@ -492,7 +736,7 @@ class AdaptiveScreenLayoutTest {
                         DeviceSession("fixture", "Noki — тестовое устройство", "Android", false, false),
                     ),
                 ),
-                viewModel = viewModel, sharedBackdrop = rememberLayerBackdrop(),
+                viewModel = viewModel, sharedBackdrop = rememberPrismalGlassLayer(),
                 showBackground = false, liveGlassEnabled = false,
             )
         }.use {

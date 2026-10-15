@@ -17,10 +17,28 @@ import com.noki.vpn.data.UserProfile
 import com.noki.vpn.data.VlessProfile
 import com.noki.vpn.data.VpnEndpointOption
 import com.noki.vpn.data.VpnProtocol
+import com.noki.vpn.vpn.VpnSettingsTransactionPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class SettingsMutationCoordinatorTest {
+    @Test
+    fun ruOffOnOffInvalidatesAnInFlightCandidateDespiteMatchingFinalSelector() {
+        val baseline = authenticatedSettings()
+        val store = InMemoryAtomicStoredSettingsStore(baseline)
+        val coordinator = SettingsMutationCoordinator(store)
+        val enabled = coordinator.persistUiFields(stateFrom(baseline).copy(
+            advancedSettings = baseline.advancedSettings.copy(ruRelayEnabled = true),
+        ))
+        val disabled = coordinator.persistUiFields(stateFrom(enabled).copy(
+            advancedSettings = enabled.advancedSettings.copy(ruRelayEnabled = false),
+        ))
+
+        assertEquals(baseline.advancedSettings.ruRelaySelection, disabled.advancedSettings.ruRelaySelection)
+        assertEquals(baseline.ruRelaySelectionRevision + 2, disabled.ruRelaySelectionRevision)
+        assertEquals(true, VpnSettingsTransactionPolicy.candidateBecameStale(baseline, disabled))
+    }
+
     @Test
     fun multiHopIntentChangeClearsOldRuntimeAndKeepsDirectPreference() {
         val latest = authenticatedSettings().copy(
@@ -37,6 +55,30 @@ class SettingsMutationCoordinatorTest {
         assertEquals("", saved.profile.uuid)
         assertEquals(emptyList<VpnEndpointOption>(), saved.endpointOptions)
         assertEquals(latest.userProfile.selectedCountryCode, saved.userProfile.selectedCountryCode)
+    }
+
+    @Test
+    fun ruEntryAwayAndBackInvalidatesTheEarlierCandidateWithTheSameFinalTuple() {
+        val chain = MultiHopSettings(true,
+            HopSelection(com.noki.vpn.data.ServerSelectionMode.SERVER,
+                nodeId = "11111111-1111-4111-8111-111111111111"),
+            HopSelection(com.noki.vpn.data.ServerSelectionMode.SERVER,
+                nodeId = "22222222-2222-4222-8222-222222222222"))
+        val defaults = authenticatedSettings()
+        val baseline = defaults.copy(advancedSettings = defaults.advancedSettings.copy(
+            ruRelayEnabled = true, multiHop = chain))
+        val coordinator = SettingsMutationCoordinator(InMemoryAtomicStoredSettingsStore(baseline))
+        val changed = coordinator.persistUiFields(stateFrom(baseline).copy(
+            advancedSettings = baseline.advancedSettings.copy(multiHop = chain.copy(entry =
+                HopSelection(com.noki.vpn.data.ServerSelectionMode.SERVER,
+                    nodeId = "33333333-3333-4333-8333-333333333333"))),
+        ))
+        val restored = coordinator.persistUiFields(stateFrom(changed).copy(
+            advancedSettings = baseline.advancedSettings,
+        ))
+        assertEquals(chain, restored.advancedSettings.multiHop)
+        assertEquals(baseline.ruRelaySelectionRevision + 2, restored.ruRelaySelectionRevision)
+        assertEquals(true, VpnSettingsTransactionPolicy.candidateBecameStale(baseline, restored))
     }
 
     @Test
@@ -241,8 +283,10 @@ class SettingsMutationCoordinatorTest {
         }
     }
 
-    private fun authenticatedSettings(): StoredSettings =
-        DefaultStoredSettingsFactory.create().copy(
+    private fun authenticatedSettings(): StoredSettings {
+        val defaults = DefaultStoredSettingsFactory.create()
+        return defaults.copy(
+            advancedSettings = defaults.advancedSettings.copy(ruRelayEnabled = false),
             profile = VlessProfile(endpointCode = "old-profile", uuid = "old-uuid"),
             userProfile = UserProfile(username = "old-user", email = "old@example.com"),
             endpointOptions = listOf(VpnEndpointOption(code = "old-endpoint")),
@@ -255,6 +299,7 @@ class SettingsMutationCoordinatorTest {
             backendDeviceId = "old-device-id",
             backendDeviceAccessRole = "owner",
         )
+    }
 
     private fun stateFrom(settings: StoredSettings): AppUiState =
         AppUiState(

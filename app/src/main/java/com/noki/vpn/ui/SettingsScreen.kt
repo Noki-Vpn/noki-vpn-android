@@ -41,14 +41,14 @@ import com.noki.vpn.AppUiState
 import com.noki.vpn.MainViewModel
 import com.noki.vpn.R
 import com.noki.vpn.data.AppLanguage
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.colorControls
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.highlight.Highlight
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
+import com.styropyr0.prismal.drawPrismalGlass
+import com.styropyr0.prismal.effects.prismalBlur
+import com.styropyr0.prismal.effects.colorControls
+import com.styropyr0.prismal.effects.prismalLens
+import com.styropyr0.prismal.specular.PrismalSpecular
 
 private const val SettingsDesignTopInset = 44f
 
@@ -81,8 +81,8 @@ internal val SettingsNoFontPaddingTextStyle = TextStyle(
 fun SettingsScreen(
     state: AppUiState,
     viewModel: MainViewModel,
-    sharedBackdrop: LayerBackdrop,
-    menuRowsBackdrop: LayerBackdrop? = null,
+    sharedBackdrop: PrismalGlassLayer,
+    menuRowsBackdrop: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean = true,
     showBackground: Boolean = true,
     showBottomNavigation: Boolean = true,
@@ -113,7 +113,7 @@ fun SettingsScreen(
             }
             val hasSettingsModal = state.dialog == AppDialog.Logout || state.dialog == AppDialog.AccessDenied
             val modalBackdrop = if (effectiveLiveGlassEnabled && hasSettingsModal) {
-                rememberLayerBackdrop {
+                rememberPrismalGlassLayer {
                     drawRect(SettingsBgBase)
                     drawContent()
                 }
@@ -192,7 +192,7 @@ fun SettingsScreen(
                         .fillMaxSize()
                         .then(
                             if (backdrop != null) {
-                                Modifier.layerBackdrop(backdrop)
+                                Modifier.prismalGlassLayer(backdrop)
                             } else {
                                 Modifier
                             },
@@ -207,7 +207,7 @@ fun SettingsScreen(
                     .fillMaxSize()
                     .then(
                         if (effectiveLiveGlassEnabled && modalBackdrop != null) {
-                            Modifier.layerBackdrop(modalBackdrop)
+                            Modifier.prismalGlassLayer(modalBackdrop)
                         } else {
                             Modifier
                         },
@@ -326,7 +326,7 @@ fun SettingsScreen(
 internal fun SettingsAccessDeniedDialog(
     language: AppLanguage,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onDismiss: () -> Unit,
 ) {
@@ -348,7 +348,7 @@ internal fun SettingsAccessDeniedDialog(
                 .clip(shape)
                 .then(
                     if (liveGlassEnabled && backdrop != null) {
-                        Modifier.drawBackdrop(
+                        Modifier.drawPrismalGlass(
                             backdrop = backdrop,
                             shape = { shape },
                             effects = {
@@ -357,14 +357,14 @@ internal fun SettingsAccessDeniedDialog(
                                     contrast = 1f,
                                     brightness = -0.1f,
                                 )
-                                blur(settingsDp(NokiUiKitPolicy.settingsDialogGlassBlurRadiusDp, scale).toPx())
-                                lens(
+                                prismalBlur(settingsDp(NokiUiKitPolicy.settingsDialogGlassBlurRadiusDp, scale).toPx())
+                                prismalLens(
                                     settingsDp(8f, scale).toPx(),
                                     settingsDp(10f, scale).toPx(),
                                 )
                             },
-                            highlight = {
-                                Highlight.Default.copy(alpha = 0.22f)
+                            specular = {
+                                PrismalSpecular.Default.copy(alpha = 0.22f)
                             },
                             onDrawSurface = {
                                 drawRect(SettingsBgLighter.copy(alpha = 0.42f))

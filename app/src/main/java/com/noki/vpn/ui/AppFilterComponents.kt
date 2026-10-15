@@ -43,7 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 import com.noki.vpn.data.AppInfo
 
 @Composable
@@ -51,7 +51,7 @@ internal fun AppSearchField(
     value: String,
     onValueChange: (String) -> Unit,
     placeholder: String,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
 ) {
     val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
@@ -119,7 +119,7 @@ internal fun AppSearchField(
 internal fun AppFilterRow(
     app: AppInfo,
     selected: Boolean,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onClick: () -> Unit,
 ) {
@@ -233,7 +233,7 @@ internal fun SelectionIndicator(
 internal fun AppSystemAppsToggle(
     checked: Boolean,
     language: com.noki.vpn.data.AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
@@ -280,7 +280,7 @@ internal fun AppSystemAppsToggle(
 @Composable
 internal fun AppFilterApplyButton(
     text: String,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
     onClick: () -> Unit,
@@ -319,7 +319,7 @@ internal fun AppFilterApplyButton(
 @Composable
 internal fun AppFilterResetButton(
     description: String,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
     onClick: () -> Unit,

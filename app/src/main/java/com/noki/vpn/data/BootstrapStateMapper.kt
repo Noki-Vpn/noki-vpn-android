@@ -58,6 +58,7 @@ object BootstrapStateMapper {
                 hasRealEmail = bootstrap.user.hasRealEmail,
                 hasPassword = bootstrap.user.hasPassword,
                 telegramLinked = bootstrap.user.telegramLinked,
+                credentialsSetupRequired = bootstrap.user.credentialsSetupRequired,
                 selectedPlanCode = PlanCode.fromBackend(
                     bootstrap.subscription.planCode,
                     currentUserProfile.selectedPlanCode,

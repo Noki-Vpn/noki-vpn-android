@@ -5,7 +5,7 @@ object ActiveProbePolicy {
 
     data class TargetResult(
         val delayMs: Long?,
-        val issue: XrayRuntimeIssue? = null,
+        val issue: VpnCoreIssue? = null,
     )
 
     data class Decision(

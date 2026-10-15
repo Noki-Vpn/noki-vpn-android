@@ -5,6 +5,7 @@ import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import com.noki.vpn.data.StoredSettings
+import com.noki.vpn.data.BackendRuWireGuardConfig
 
 internal interface TunHandle : AutoCloseable {
     val fd: Int
@@ -30,6 +31,30 @@ internal class AndroidTunInterfaceFactory(
             .addDnsServer(VpnTunnelPolicy.DNS_SERVER)
             .addRoute("0.0.0.0", 0)
             .addRoute("::", 0)
+        return establishWithRules(builder, settings, underlay)
+    }
+
+    fun establishWireGuard(
+        settings: StoredSettings,
+        underlay: UnderlyingNetworkSnapshot?,
+        config: BackendRuWireGuardConfig,
+    ): TunHandle? {
+        val builder = service.Builder()
+            .setSession("Noki WireGuard · RU relay")
+            .setMtu(config.mtu)
+            .addAddress(config.address.substringBefore('/'), 32)
+            .addRoute("0.0.0.0", 0)
+        // The RU IPIP path carries IPv4 only. Leave IPv6 blocked by Android;
+        // advertising it makes browsers reach a dead path after TCP accept.
+        config.dns.forEach(builder::addDnsServer)
+        return establishWithRules(builder, settings, underlay)
+    }
+
+    private fun establishWithRules(
+        builder: VpnService.Builder,
+        settings: StoredSettings,
+        underlay: UnderlyingNetworkSnapshot?,
+    ): TunHandle? {
         builder.applyDefaultUnderlyingNetworkMetadata(underlay)
 
         val routingRules = AppVpnRoutingPolicy.rules(

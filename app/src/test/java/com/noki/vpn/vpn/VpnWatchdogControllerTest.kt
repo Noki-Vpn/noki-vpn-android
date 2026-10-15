@@ -8,7 +8,7 @@ import org.junit.Test
 
 class VpnWatchdogControllerTest {
     @Test
-    fun `forced and scheduled requests coalesce to one in-flight Xray probe`() {
+    fun `forced and scheduled requests coalesce to one in-flight VPN probe`() {
         var now = 0L
         val scheduler = WatchdogScheduler()
         val launched = mutableListOf<ConnectedWatchdogPolicy.Owner>()
@@ -22,7 +22,7 @@ class VpnWatchdogControllerTest {
             isLockdown = { false },
         )
         val owner = watchdogOwner(core = 1L)
-        controller.start(owner, DefaultStoredSettingsFactory.create(), initialXrayEvidence = true)
+        controller.start(owner, DefaultStoredSettingsFactory.create(), initialVpnEvidence = true)
 
         now = ConnectedWatchdogPolicy.PROBE_AFTER_IDLE_MS
         scheduler.runPending()
@@ -46,9 +46,9 @@ class VpnWatchdogControllerTest {
         )
         val first = watchdogOwner(core = 1L)
         val second = watchdogOwner(core = 2L)
-        controller.start(first, DefaultStoredSettingsFactory.create(), initialXrayEvidence = true)
+        controller.start(first, DefaultStoredSettingsFactory.create(), initialVpnEvidence = true)
         controller.forceProbe()
-        controller.start(second, DefaultStoredSettingsFactory.create(), initialXrayEvidence = true)
+        controller.start(second, DefaultStoredSettingsFactory.create(), initialVpnEvidence = true)
 
         val stale = controller.completeProbe(first, latencyMs = null)
 
@@ -56,7 +56,7 @@ class VpnWatchdogControllerTest {
     }
 
     @Test
-    fun `UID traffic cannot replace Xray probe evidence`() {
+    fun `UID traffic cannot replace VPN probe evidence`() {
         var now = 1_000L
         val controller = VpnWatchdogController(
             scheduler = WatchdogScheduler(),
@@ -66,16 +66,16 @@ class VpnWatchdogControllerTest {
             evidenceFreshMillis = 5_000L,
         )
         val owner = watchdogOwner(core = 3L)
-        controller.start(owner, DefaultStoredSettingsFactory.create(), initialXrayEvidence = false)
+        controller.start(owner, DefaultStoredSettingsFactory.create(), initialVpnEvidence = false)
 
         controller.recordEvidence(WatchdogEvidence.UID_TRAFFIC)
-        assertFalse(controller.hasFreshXrayEvidence())
+        assertFalse(controller.hasFreshVpnEvidence())
 
-        controller.recordEvidence(WatchdogEvidence.XRAY_PROBE)
-        assertTrue(controller.hasFreshXrayEvidence())
+        controller.recordEvidence(WatchdogEvidence.VPN_PROBE)
+        assertTrue(controller.hasFreshVpnEvidence())
 
         now += 5_001L
-        assertFalse(controller.hasFreshXrayEvidence())
+        assertFalse(controller.hasFreshVpnEvidence())
     }
 
     @Test
@@ -88,13 +88,13 @@ class VpnWatchdogControllerTest {
             isLockdown = { false },
         )
         val owner = watchdogOwner(core = 4L)
-        controller.start(owner, DefaultStoredSettingsFactory.create(), initialXrayEvidence = true)
+        controller.start(owner, DefaultStoredSettingsFactory.create(), initialVpnEvidence = true)
 
         repeat(ConnectedWatchdogPolicy.MAX_RECOVERIES_IN_WINDOW) {
             assertEquals(WatchdogAction.None, failedProbe(controller, owner))
             assertEquals(WatchdogAction.Refresh, failedProbe(controller, owner))
             now += 1L
-            controller.start(owner, DefaultStoredSettingsFactory.create(), initialXrayEvidence = true)
+            controller.start(owner, DefaultStoredSettingsFactory.create(), initialVpnEvidence = true)
         }
 
         assertEquals(WatchdogAction.None, failedProbe(controller, owner))
@@ -110,7 +110,7 @@ class VpnWatchdogControllerTest {
             isLockdown = { false },
         )
         val owner = watchdogOwner(core = 5L)
-        controller.start(owner, DefaultStoredSettingsFactory.create(), initialXrayEvidence = true)
+        controller.start(owner, DefaultStoredSettingsFactory.create(), initialVpnEvidence = true)
 
         assertEquals(WatchdogProbeOutcome.Ignored, controller.completeProbe(owner, latencyMs = 25L))
     }
@@ -129,7 +129,7 @@ class VpnWatchdogControllerTest {
             isLockdown = { false },
         )
         val owner = watchdogOwner(core = 6L)
-        controller.start(owner, DefaultStoredSettingsFactory.create(), initialXrayEvidence = true)
+        controller.start(owner, DefaultStoredSettingsFactory.create(), initialVpnEvidence = true)
 
         controller.forceProbe()
 

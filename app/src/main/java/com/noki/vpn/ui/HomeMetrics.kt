@@ -49,7 +49,7 @@ import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.DeviceTrafficMonitor
 import com.noki.vpn.data.ServerLocation
 import com.noki.vpn.data.VpnConnectionState
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 import java.util.Locale
 import kotlinx.coroutines.delay
 @Composable
@@ -58,7 +58,7 @@ internal fun HomeMetricsPanel(
     scale: Float,
     language: AppLanguage,
     metrics: HomeMetricsSnapshot,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
 ) {
     val speedUnit = "Mb/s"
@@ -114,7 +114,7 @@ internal fun HomeMetricColumn(
     top: HomeMetricRowUi,
     bottom: HomeMetricRowUi,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
 ) {
     HomeSettingsGlassSurface(
@@ -322,7 +322,7 @@ internal fun HomePowerButton(
     modifier: Modifier,
     scale: Float,
     connectionState: VpnConnectionState,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onClick: () -> Unit,
 ) {
@@ -367,7 +367,7 @@ internal fun HomePowerButton(
 internal fun HomeStatusCard(
     modifier: Modifier,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     timeLabel: String,
     statusLabel: String,
@@ -403,9 +403,9 @@ internal fun HomeStatusCard(
                 fontSize = designSp(11f, scale),
                 letterSpacing = 0.11.sp,
                 textAlign = TextAlign.Center,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Clip,
+                maxLines = 2,
+                softWrap = true,
+                overflow = TextOverflow.Ellipsis,
                 style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = true)),
                 modifier = Modifier.width(designDp(150f, scale)),
             )
@@ -425,6 +425,10 @@ internal fun currentMetrics(
 
     val servers = state.locations.flatMap { it.servers }
     val serverLatency = when {
+        state.advancedSettings.ruRelayEnabled ->
+            if (state.userProfile.serverSelectionMode == com.noki.vpn.data.ServerSelectionMode.SERVER) {
+                servers.firstOrNull { it.id == state.userProfile.selectedNodeId }?.latencyMs
+            } else selectedLocation?.latencyMs
         isConnected -> servers.firstOrNull {
             it.locationCode.equals(state.userProfile.selectedServerCode, ignoreCase = true)
         }?.latencyMs

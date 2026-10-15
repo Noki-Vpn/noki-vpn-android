@@ -6,13 +6,18 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
@@ -47,8 +52,8 @@ import com.noki.vpn.AppUiState
 import com.noki.vpn.InviteCodeFormatter
 import com.noki.vpn.MainViewModel
 import com.noki.vpn.R
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 
 private enum class InviteInputMode {
     Code,
@@ -65,7 +70,7 @@ fun InviteDeviceScreen(
     val language = state.personalizationSettings.language
     val form = state.inviteDeviceForm
     var mode by rememberSaveable { mutableStateOf(InviteInputMode.Code) }
-    val authBackdrop = rememberLayerBackdrop()
+    val authBackdrop = rememberPrismalGlassLayer()
 
     Box(
         modifier = Modifier
@@ -78,101 +83,104 @@ fun InviteDeviceScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .then(
-                    if (liveGlassEnabled) Modifier.layerBackdrop(authBackdrop) else Modifier,
+                    if (liveGlassEnabled) Modifier.prismalGlassLayer(authBackdrop) else Modifier,
                 ),
             contentScale = ContentScale.FillBounds,
         )
 
-        Column(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .fillMaxWidth()
-                .padding(horizontal = metrics.contentStart),
-            verticalArrangement = Arrangement.spacedBy(metrics.dp(14f)),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = tr(language, "Подключить устройство", "Connect device"),
-                color = MaterialTheme.colorScheme.onBackground,
-                style = MaterialTheme.typography.headlineSmall,
-                fontSize = metrics.sp(24f),
-                lineHeight = metrics.sp(29f),
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                text = tr(
-                    language,
-                    "Введите код приглашения или отсканируйте QR-код от владельца подписки",
-                    "Enter an invite code or scan the subscription owner's QR code",
-                ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-                fontSize = metrics.sp(14f),
-                lineHeight = metrics.sp(20f),
-                textAlign = TextAlign.Center,
-            )
-            Spacer(modifier = Modifier.height(metrics.dp(4f)))
-            InviteModeSelector(
-                mode = mode,
-                enabled = !form.isLoading,
-                language = language,
-                liveGlassEnabled = liveGlassEnabled,
-                onModeChanged = { mode = it },
-            )
-
-            if (mode == InviteInputMode.Code) {
-                InviteCodeInputField(
-                    value = form.inviteCode,
-                    enabled = !form.isLoading,
-                    onValueChange = viewModel::updateInviteDeviceCode,
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = tr(language, "Код приглашения", "Invite code"),
-                )
-                AuthPrimaryButton(
-                    text = tr(language, "Подключить", "Connect"),
-                    loading = form.isLoading,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(metrics.dp(56f)),
-                    backdrop = authBackdrop,
-                    liveGlassEnabled = liveGlassEnabled,
-                    onClick = viewModel::acceptDeviceInvite,
-                )
-            } else {
-                QrInviteHint(language = language)
-                AuthPrimaryButton(
-                    text = tr(language, "Сканировать QR", "Scan QR"),
-                    loading = false,
-                    enabled = !form.isLoading,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(metrics.dp(56f)),
-                    backdrop = authBackdrop,
-                    liveGlassEnabled = liveGlassEnabled,
-                    onClick = { viewModel.openScreen(AppDestination.INVITE_QR_SCANNER) },
-                )
-            }
-
-            AuthSecondaryButton(
-                text = tr(language, "Назад ко входу", "Back"),
-                enabled = !form.isLoading,
+        BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(metrics.dp(42f)),
-                backdrop = authBackdrop,
-                liveGlassEnabled = liveGlassEnabled,
-                onClick = { viewModel.openScreen(AppDestination.LOGIN) },
-            )
-            if (!form.error.isNullOrBlank()) {
+                    .verticalScroll(rememberScrollState())
+                    .heightIn(min = maxHeight)
+                    .padding(horizontal = metrics.contentStart, vertical = metrics.dp(24f)),
+                verticalArrangement = Arrangement.spacedBy(metrics.dp(14f), Alignment.CenterVertically),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
                 Text(
-                    text = form.error,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                fontSize = metrics.sp(12f),
-                lineHeight = metrics.sp(16f),
+                    text = tr(language, "Подключить устройство", "Connect device"),
+                    color = MaterialTheme.colorScheme.onBackground,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontSize = metrics.sp(24f),
+                    lineHeight = metrics.sp(29f),
+                    fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
                 )
+                Text(
+                    text = tr(
+                        language,
+                        "Введите код приглашения или отсканируйте QR-код от владельца подписки",
+                        "Enter an invite code or scan the subscription owner's QR code",
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = metrics.sp(14f),
+                    lineHeight = metrics.sp(20f),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(modifier = Modifier.height(metrics.dp(4f)))
+                InviteModeSelector(
+                    mode = mode,
+                    enabled = !form.isLoading,
+                    language = language,
+                    liveGlassEnabled = liveGlassEnabled,
+                    onModeChanged = { mode = it },
+                )
+
+                if (mode == InviteInputMode.Code) {
+                    InviteCodeInputField(
+                        value = form.inviteCode,
+                        enabled = !form.isLoading,
+                        onValueChange = viewModel::updateInviteDeviceCode,
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = tr(language, "Код приглашения", "Invite code"),
+                    )
+                    AuthPrimaryButton(
+                        text = tr(language, "Подключить", "Connect"),
+                        loading = form.isLoading,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(metrics.dp(56f)),
+                        backdrop = authBackdrop,
+                        liveGlassEnabled = liveGlassEnabled,
+                        onClick = viewModel::acceptDeviceInvite,
+                    )
+                } else {
+                    QrInviteHint(language = language)
+                    AuthPrimaryButton(
+                        text = tr(language, "Сканировать QR", "Scan QR"),
+                        loading = false,
+                        enabled = !form.isLoading,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(metrics.dp(56f)),
+                        backdrop = authBackdrop,
+                        liveGlassEnabled = liveGlassEnabled,
+                        onClick = { viewModel.openScreen(AppDestination.INVITE_QR_SCANNER) },
+                    )
+                }
+
+                AuthSecondaryButton(
+                    text = tr(language, "Назад ко входу", "Back"),
+                    enabled = !form.isLoading,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(metrics.dp(42f)),
+                    backdrop = authBackdrop,
+                    liveGlassEnabled = liveGlassEnabled,
+                    onClick = { viewModel.openScreen(AppDestination.LOGIN) },
+                )
+                if (!form.error.isNullOrBlank()) {
+                    Text(
+                        text = form.error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    fontSize = metrics.sp(12f),
+                    lineHeight = metrics.sp(16f),
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
         }
     }

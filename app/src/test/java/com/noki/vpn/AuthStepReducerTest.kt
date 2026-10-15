@@ -10,6 +10,67 @@ import org.junit.Test
 
 class AuthStepReducerTest {
     @Test
+    fun pendingCredentialsRouteRestoredAccountAndNavigationToExistingProfileStep() {
+        val restored = AppUiState(
+            isAuthenticated = true,
+            userProfile = UserProfile(username = "telegram_user", credentialsSetupRequired = true),
+            telegramLoginState = TelegramLoginState.Error("Telegram did not complete sign-in", TelegramAuthPurpose.LINK),
+        )
+        for (destination in AppDestination.entries) {
+            val gated = AuthStepReducer.requireCredentialsSetup(restored.copy(screenStack = listOf(destination)))
+
+            assertEquals(listOf(AppDestination.REGISTRATION), gated.screenStack)
+            assertEquals(AuthStep.REGISTRATION_PROFILE, gated.authStep)
+            assertEquals("telegram_user", gated.registrationForm.username)
+            assertTrue(gated.isAuthenticated)
+            assertEquals(restored.telegramLoginState, gated.telegramLoginState)
+        }
+    }
+
+    @Test
+    fun pendingCredentialsRetainPasswordStepAndFormWhenNavigationIsAttempted() {
+        val form = RegistrationFormState(username = "chosen_name", password = "secret123", passwordRepeat = "secret123")
+        val pending = AppUiState(
+            isAuthenticated = true,
+            userProfile = UserProfile(credentialsSetupRequired = true),
+            authStep = AuthStep.REGISTRATION_PASSWORD,
+            screenStack = listOf(AppDestination.REGISTRATION, AppDestination.HOME),
+            registrationForm = form,
+        )
+
+        val gated = AuthStepReducer.requireCredentialsSetup(pending)
+        val profile = AuthStepReducer.previousRegistrationStep(gated)
+
+        assertEquals(listOf(AppDestination.REGISTRATION), gated.screenStack)
+        assertEquals(AuthStep.REGISTRATION_PASSWORD, gated.authStep)
+        assertEquals(form, gated.registrationForm)
+        assertEquals(AuthStep.REGISTRATION_PROFILE, profile.authStep)
+    }
+
+    @Test
+    fun completedCredentialsClearSecretsAndOpenHomeWhileOrdinarySessionsKeepTheirRoute() {
+        val pending = AppUiState(
+            isAuthenticated = true,
+            userProfile = UserProfile(credentialsSetupRequired = true),
+            screenStack = listOf(AppDestination.REGISTRATION),
+            authStep = AuthStep.REGISTRATION_PASSWORD,
+            registrationForm = RegistrationFormState(password = "secret123", passwordRepeat = "secret123", isLoading = true),
+        )
+        val completed = AuthStepReducer.requireCredentialsSetup(
+            pending.copy(userProfile = pending.userProfile.copy(credentialsSetupRequired = false, hasPassword = true)),
+            pending,
+        )
+        val ordinary = completed.copy(screenStack = listOf(AppDestination.HOME, AppDestination.SECURITY))
+        val loggedOut = pending.copy(isAuthenticated = false, screenStack = listOf(AppDestination.LOGIN))
+
+        assertEquals(listOf(AppDestination.HOME), completed.screenStack)
+        assertEquals(RegistrationFormState(), completed.registrationForm)
+        assertEquals(AuthStep.WELCOME, completed.authStep)
+        assertEquals(ordinary, AuthStepReducer.requireCredentialsSetup(ordinary))
+        assertEquals(loggedOut, AuthStepReducer.requireCredentialsSetup(loggedOut, pending))
+    }
+
+    @Test
     fun defaultAuthStepIsWelcomeSoCodeLoginCanStayOnFirstScreen() {
         assertEquals(AuthStep.WELCOME, AppUiState().authStep)
     }

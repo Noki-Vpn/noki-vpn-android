@@ -5,6 +5,15 @@ import org.junit.Test
 
 class EndpointRankingPolicyTest {
     @Test
+    fun directHealthDoesNotAdoptRetiredRouteScopedRows() {
+        val direct = EndpointHealth(score = 90)
+        val route = EndpointHealth(score = 10)
+        val scoped = EndpointHealthScope.forNetwork(mapOf("wifi|tcp" to direct,
+            "wifi|mh|entry|exit|tcp" to route), EndpointRankingPolicy.NetworkKind.WIFI)
+        assertEquals(mapOf("tcp" to direct), scoped)
+    }
+
+    @Test
     fun handoverKeepsCurrentOnlyWhenItRemainsInTheBestTier() {
         val tcp = tcpCandidate("tcp")
         val xhttp = tcp.copy(code = "xhttp", transport = "xhttp", transportMode = "stream-up", flow = null)

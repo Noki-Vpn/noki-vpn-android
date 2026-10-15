@@ -1,50 +1,23 @@
-NOKI SOURCE CODE VIEW-ONLY LICENSE
-Version 1.0, 1 September 2026
+Noki Android Client
+SPDX-License-Identifier: GPL-3.0-or-later
 
-Copyright (c) 2026 YkinoTrue. All rights reserved.
+Copyright (C) 2026 YkinoTrue
 
-1. Limited Permission
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-You may access and view the source code in this repository solely for personal
-inspection, evaluation, and security review.
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
 
-2. Restrictions
+You should have received a copy of the GNU General Public License
+along with this program. See COPYING. If not, see
+<https://www.gnu.org/licenses/>.
 
-Except for the limited rights that GitHub's Terms of Service necessarily grant
-for content hosted in a public repository, no permission is granted to:
-
-a. use, execute, install, deploy, or operate the source code or any part of it;
-b. compile, build, or otherwise transform the source code into executable form;
-c. copy or reproduce the source code outside GitHub's permitted functionality;
-d. modify, adapt, translate, reverse engineer, or create derivative works;
-e. publish, redistribute, sublicense, sell, rent, lease, or otherwise transfer
-   the source code or any derivative work;
-f. incorporate the source code into another product, service, project, dataset,
-   or artificial-intelligence or machine-learning system; or
-g. remove or alter copyright, license, authorship, or attribution notices.
-
-Any right not expressly granted by this License is reserved by the copyright
-holder. Permission for any use beyond viewing requires prior written
-authorization from the copyright holder.
-
-3. Third-Party Material
-
-This License applies only to original Noki source code. Third-party libraries,
-assets, notices, and other materials remain governed by their respective
-licenses. Nothing in this License limits rights granted by those third-party
-licenses.
-
-4. Termination
-
-The limited permission granted by this License terminates automatically upon
-any breach. Upon termination, you must stop exercising rights granted by this
-License and delete copies made outside functionality expressly permitted by
-GitHub's Terms of Service.
-
-5. No Warranty
-
-THE SOURCE CODE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
-PURPOSE, TITLE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
-LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM ACCESS TO OR
-VIEWING OF THE SOURCE CODE.
+This license applies to the original Noki Android source code, build
+scripts and application assets in this directory. Third-party components
+retain their own copyright notices, licenses and attribution requirements.
+No trademark rights to the Noki name or branding are granted by this license.

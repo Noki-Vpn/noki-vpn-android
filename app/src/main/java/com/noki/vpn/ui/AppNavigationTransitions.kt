@@ -26,9 +26,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.LaunchedEffect
 import com.noki.vpn.AppDestination
-import com.kyant.backdrop.drawPlainBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.runtimeShaderEffect
+import com.styropyr0.prismal.drawPlainPrismalGlass
+import com.styropyr0.prismal.effects.prismalBlur
+import com.styropyr0.prismal.effects.prismalAGSLShaderEffect
 
 internal enum class SharedDestinationVisibility {
     Precomposing,
@@ -122,17 +122,17 @@ private fun DrawScope.drawProgressiveBottomDim() {
 @Composable
 internal fun ProgressiveBottomBlur(
     modifier: Modifier,
-    backdrop: com.kyant.backdrop.Backdrop,
+    backdrop: com.styropyr0.prismal.PrismalBackdrop,
     scale: Float,
     liveGlassEnabled: Boolean,
 ) {
     val effectModifier = if (liveGlassEnabled) {
-        modifier.drawPlainBackdrop(
+        modifier.drawPlainPrismalGlass(
             backdrop = backdrop,
             shape = { RectangleShape },
             effects = {
-                blur(NokiUiKitPolicy.bottomProgressiveBlurRadiusDp * scale)
-                runtimeShaderEffect(
+                prismalBlur(NokiUiKitPolicy.bottomProgressiveBlurRadiusDp * scale)
+                prismalAGSLShaderEffect(
                     key = "NokiBottomProgressiveBlurAlphaMask",
                     shaderString = """
                         uniform shader content;
@@ -188,6 +188,7 @@ internal fun AppDestination.navigationOrder(): Int {
         AppDestination.PERSONALIZATION -> 11
         AppDestination.DEVICES -> 12
         AppDestination.SPLASH,
+        AppDestination.ONBOARDING,
         AppDestination.LOGIN,
         AppDestination.REGISTRATION,
         AppDestination.PASSWORD_RECOVERY,

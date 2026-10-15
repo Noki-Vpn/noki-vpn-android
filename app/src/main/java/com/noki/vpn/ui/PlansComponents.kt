@@ -54,7 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 import com.noki.vpn.AppUiState
 import com.noki.vpn.PaymentCheckoutState
 import com.noki.vpn.PaymentCheckoutResult
@@ -193,7 +193,7 @@ internal fun CheckoutBillingCycleSelector(
     language: AppLanguage,
     activeColor: Color,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier = Modifier,
     onCycleChanged: (BillingCycle) -> Unit,
@@ -304,7 +304,7 @@ internal fun PlanTariffCard(
     cycle: BillingCycle,
     language: AppLanguage,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
     onCycleChanged: (BillingCycle) -> Unit,
@@ -527,7 +527,7 @@ internal fun PlanActionButton(
     text: String,
     scale: Float,
     modifier: Modifier,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onClick: () -> Unit,
     enabled: Boolean = true,
@@ -570,7 +570,7 @@ internal fun PaymentResultDialog(
     result: PaymentCheckoutResult,
     language: AppLanguage,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onDismiss: () -> Unit,
 ) {
@@ -675,7 +675,7 @@ internal fun PlanCheckoutScreen(
     cycle: BillingCycle,
     language: AppLanguage,
     onCycleChanged: (BillingCycle) -> Unit,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     scale: Float,
     modifier: Modifier,
@@ -816,7 +816,7 @@ internal fun PlanCheckoutScreen(
                 backdrop = backdrop,
                 liveGlassEnabled = liveGlassEnabled,
                 keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
-                buttonEndInset = 20f,
+                buttonEndInset = 6f,
             )
             (checkout.promoError ?: checkout.promoMessage)?.let { Text(it, color = if (checkout.promoError != null) SettingsError else SettingsTextPrimary) }
             SettingsText(

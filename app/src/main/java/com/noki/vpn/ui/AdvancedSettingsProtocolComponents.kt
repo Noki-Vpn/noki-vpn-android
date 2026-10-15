@@ -34,8 +34,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.EndpointGroupPolicy
 import com.noki.vpn.data.VpnEndpointOption
@@ -45,7 +45,7 @@ import com.noki.vpn.data.VpnProtocol
 internal fun AdvancedToggleCard(
     enabled: Boolean,
     title: String,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
     onEnabledChanged: (Boolean) -> Unit,
@@ -86,17 +86,17 @@ internal fun AdvancedToggleCard(
 internal fun AdvancedManualProtocolCard(
     selectedEndpoint: String,
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
     onChangeProtocol: () -> Unit,
 ) {
     val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
-    val panelBackdrop = rememberLayerBackdrop()
+    val panelBackdrop = rememberPrismalGlassLayer()
     AdvancedPanelSurface(
         backdrop = backdrop,
         liveGlassEnabled = liveGlassEnabled,
-        exportedBackdrop = panelBackdrop,
+        nestedGlassSource = panelBackdrop,
         modifier = modifier,
     ) {
         Row(
@@ -143,7 +143,7 @@ internal fun AdvancedProtocolSheet(
     endpointOptions: List<VpnEndpointOption>,
     selectedEndpointGroupKey: String,
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     bottomNavigationClearance: Dp,
     onDismiss: () -> Unit,

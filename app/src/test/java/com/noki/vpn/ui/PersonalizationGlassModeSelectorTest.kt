@@ -33,6 +33,18 @@ class PersonalizationGlassModeSelectorTest {
     }
 
     @Test
+    fun `appearance choice uses real Aurora without a VPN only in full mode`() {
+        assertTrue(shouldShowConnectedAurora(liveGlassEnabled = true, connected = false,
+            appearanceChooserVisible = true))
+        assertFalse(shouldShowConnectedAurora(liveGlassEnabled = false, connected = false,
+            appearanceChooserVisible = true))
+        assertFalse(shouldShowConnectedAurora(liveGlassEnabled = false, connected = true,
+            appearanceChooserVisible = true))
+        assertFalse(shouldShowConnectedAurora(liveGlassEnabled = true, connected = false,
+            appearanceChooserVisible = false))
+    }
+
+    @Test
     fun `simple mode uses the flat original graphite background`() {
         assertFalse(shouldDrawHomeBackgroundEffects(liveGlassEnabled = false))
         assertEquals(Color(0xFF080B10), homeBackgroundColor(liveGlassEnabled = false))

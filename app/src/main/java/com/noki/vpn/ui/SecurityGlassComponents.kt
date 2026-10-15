@@ -42,20 +42,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 
 @Composable
 internal fun SecurityPanelSurface(
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
     onClick: (() -> Unit)? = null,
-    exportedBackdrop: LayerBackdrop? = null,
+    nestedGlassSource: PrismalGlassLayer? = null,
     content: @Composable () -> Unit,
 ) {
     val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
@@ -81,7 +81,7 @@ internal fun SecurityPanelSurface(
                 shadowAlpha = 0.25f,
                 surfaceColor = SecurityBgLighter.copy(alpha = 0.80f),
                 blurAndLensEnabled = false,
-                exportedBackdrop = exportedBackdrop,
+                nestedGlassSource = nestedGlassSource,
                 layerBlock = {
                     scaleX = pressScale
                     scaleY = pressScale
@@ -109,7 +109,7 @@ internal fun SecurityPanelSurface(
 internal fun SecurityLiquidToggle(
     selected: Boolean,
     onSelectedChange: (Boolean) -> Unit,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier = Modifier,
     sizeFactor: Float = 1f,
@@ -170,7 +170,7 @@ internal fun SecurityLiquidToggle(
         }
     }
 
-    val trackBackdrop = rememberLayerBackdrop()
+    val trackBackdrop = rememberPrismalGlassLayer()
     val trackShape = RoundedCornerShape(percent = 50)
     val activeTrackColor = SecurityAccent.copy(alpha = 0.68f)
     val inactiveTrackColor = lerpColor(SecurityBgLighter, SecurityBgSoft, 0.65f)
@@ -194,7 +194,7 @@ internal fun SecurityLiquidToggle(
     ) {
         Box(
             modifier = Modifier
-                .then(if (liveGlassEnabled) Modifier.layerBackdrop(trackBackdrop) else Modifier)
+                .then(if (liveGlassEnabled) Modifier.prismalGlassLayer(trackBackdrop) else Modifier)
                 .clip(trackShape)
                 .drawBehind {
                     drawRect(

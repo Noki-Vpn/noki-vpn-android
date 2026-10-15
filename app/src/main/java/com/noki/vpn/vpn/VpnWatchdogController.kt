@@ -13,7 +13,7 @@ internal sealed interface WatchdogAction {
 }
 
 internal enum class WatchdogEvidence {
-    XRAY_PROBE,
+    VPN_PROBE,
     UID_TRAFFIC,
 }
 
@@ -36,20 +36,20 @@ internal class VpnWatchdogController(
     private var activeProbe: CancelableTask? = null
     private var failureCount = 0
     private var lastHealthyMillis: Long? = null
-    private var lastXrayEvidenceMillis: Long? = null
+    private var lastVpnEvidenceMillis: Long? = null
     private val recoveryTimes = ArrayDeque<Long>()
 
     @Synchronized
     fun start(
         owner: ConnectedWatchdogPolicy.Owner,
         settings: StoredSettings,
-        initialXrayEvidence: Boolean,
+        initialVpnEvidence: Boolean,
     ) {
         stop(null)
         activeOwner = owner
         this.settings = settings
         failureCount = 0
-        if (initialXrayEvidence) recordEvidence(WatchdogEvidence.XRAY_PROBE)
+        if (initialVpnEvidence) recordEvidence(WatchdogEvidence.VPN_PROBE)
         scheduleNext(owner)
     }
 
@@ -64,7 +64,7 @@ internal class VpnWatchdogController(
         settings = null
         failureCount = 0
         lastHealthyMillis = null
-        lastXrayEvidenceMillis = null
+        lastVpnEvidenceMillis = null
     }
 
     @Synchronized
@@ -86,7 +86,7 @@ internal class VpnWatchdogController(
         val healthy = VpnReadinessPolicy.accept(latencyMs)
         if (healthy) {
             failureCount = 0
-            recordEvidence(WatchdogEvidence.XRAY_PROBE)
+            recordEvidence(WatchdogEvidence.VPN_PROBE)
             return WatchdogProbeOutcome.Healthy
         }
         return when (ConnectedWatchdogPolicy.probeDecision(false, failureCount)) {
@@ -125,16 +125,16 @@ internal class VpnWatchdogController(
 
     @Synchronized
     fun recordEvidence(evidence: WatchdogEvidence) {
-        if (evidence != WatchdogEvidence.XRAY_PROBE || activeOwner == null) return
+        if (evidence != WatchdogEvidence.VPN_PROBE || activeOwner == null) return
         val now = nowMillis()
         lastHealthyMillis = now
-        lastXrayEvidenceMillis = now
+        lastVpnEvidenceMillis = now
         failureCount = 0
     }
 
     @Synchronized
-    fun hasFreshXrayEvidence(): Boolean {
-        val evidenceAt = lastXrayEvidenceMillis ?: return false
+    fun hasFreshVpnEvidence(): Boolean {
+        val evidenceAt = lastVpnEvidenceMillis ?: return false
         return nowMillis() - evidenceAt in 0..evidenceFreshMillis
     }
 

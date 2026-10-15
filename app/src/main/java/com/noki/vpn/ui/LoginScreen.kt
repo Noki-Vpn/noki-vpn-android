@@ -1,8 +1,5 @@
 package com.noki.vpn.ui
 
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -18,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -32,8 +30,8 @@ import com.noki.vpn.R
 import com.noki.vpn.TelegramLoginStateReducer
 import com.noki.vpn.data.VpnConnectionState
 import com.noki.vpn.vpn.VpnRuntimeMode
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 @Composable
 fun LoginScreen(
     state: AppUiState,
@@ -62,19 +60,18 @@ fun LoginScreen(
 
         val forgotPasswordInteractionSource = remember { MutableInteractionSource() }
         val inviteCodeInteractionSource = remember { MutableInteractionSource() }
-        val authBackdrop = rememberLayerBackdrop()
+        val authBackdrop = rememberPrismalGlassLayer()
 
         AuthBackground(
             backgroundRes = R.drawable.login_background,
             modifier = Modifier.then(
-                if (liveGlassEnabled) Modifier.layerBackdrop(authBackdrop) else Modifier,
+                if (liveGlassEnabled) Modifier.prismalGlassLayer(authBackdrop) else Modifier,
             ),
         )
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
+                .authFormScroll(maxHeight, loginContentTop + loginContentHeight)
                 .height(maxHeight.coerceAtLeast((loginContentTop + loginContentHeight) + authMetrics.dp(24f))),
         ) scrollForm@ {
             if (showEmailLogin) {
@@ -126,6 +123,7 @@ fun LoginScreen(
                 onValueChange = viewModel::updateLoginEmail,
                 placeholder = tr(language, "E-mail / Логин", "E-mail / Login"),
                 keyboardType = KeyboardType.Text,
+                autofillContentType = ContentType.Username,
                 modifier = Modifier
                     .offset(x = authMetrics.contentStart, y = authMetrics.dp(338f) + loginYOffset)
                     .width(authMetrics.contentWidth)
@@ -138,6 +136,7 @@ fun LoginScreen(
                 placeholder = tr(language, "Пароль", "Password"),
                 keyboardType = KeyboardType.Password,
                 isPassword = true,
+                autofillContentType = ContentType.Password,
                 modifier = Modifier
                     .offset(x = authMetrics.contentStart, y = authMetrics.dp(403f) + loginYOffset)
                     .width(authMetrics.contentWidth)

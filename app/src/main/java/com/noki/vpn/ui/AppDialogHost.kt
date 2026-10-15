@@ -1,16 +1,19 @@
 package com.noki.vpn.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +32,7 @@ import com.noki.vpn.AppDestination
 import com.noki.vpn.AppDialog
 import com.noki.vpn.AppUiState
 import com.noki.vpn.MainViewModel
+import com.noki.vpn.showsInstallAppearanceDialog
 
 @Composable
 internal fun AppDialogHost(
@@ -36,6 +40,10 @@ internal fun AppDialogHost(
     viewModel: MainViewModel,
     onOpenVpnSettings: () -> Unit,
 ) {
+    if (showsInstallAppearanceDialog(state)) {
+        InstallAppearanceDialog(state, viewModel)
+        return
+    }
     when (state.dialog) {
         AppDialog.FreeTrafficLimitReached -> LimitNoticeDialog(
             title = tr(state.personalizationSettings.language, "Трафик закончился", "Traffic limit reached"),
@@ -103,6 +111,73 @@ internal fun AppDialogHost(
             )
         }
         else -> Unit
+    }
+}
+
+@Composable
+private fun InstallAppearanceDialog(state: AppUiState, viewModel: MainViewModel) {
+    val language = state.personalizationSettings.language
+    BackHandler(onBack = viewModel::advanceInstallOnboarding)
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.14f))
+            .clickable(remember { MutableInteractionSource() }, indication = null, onClick = viewModel::advanceInstallOnboarding),
+    ) {
+        val metrics = nokiAdaptiveMetrics(maxWidth)
+        val shape = RoundedCornerShape(metrics.dp(24f))
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = metrics.dp(110f))
+                .width(metrics.contentWidth)
+                .clip(shape)
+                .background(NokiBgLighter, shape)
+                .border(BorderStroke(1.dp, NokiStroke), shape)
+                .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {})
+                .padding(metrics.dp(20f)),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(metrics.dp(16f)),
+        ) {
+            Text(
+                tr(language, "Ваш интерфейс", "Your interface"),
+                color = NokiTextPrimary,
+                fontFamily = ManropeFontFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = metrics.sp(20f),
+                textAlign = TextAlign.Center,
+            )
+            GlassSegmentedControl(
+                labelFontSize = metrics.sp(14f),
+                labelLineHeight = metrics.sp(17f),
+                capsulePadding = metrics.dp(5f),
+                labels = listOf("Full Glass", "Simple"),
+                selectedIndex = if (fullGlassEnabled(state.personalizationSettings.glassMode)) 0 else 1,
+                onSelectedIndexChanged = { viewModel.setGlassMode(glassModeForFullGlassEnabled(it == 0)) },
+                modifier = Modifier.fillMaxWidth().height(metrics.dp(60f)),
+                activeBlur = 0.dp,
+                lensRefractionHeight = metrics.dp(24f),
+                lensRefractionAmount = metrics.dp(24f),
+                depthEffectEnabled = true,
+                maxPressedScaleX = 1.1f,
+                liveGlassEnabled = fullGlassEnabled(state.personalizationSettings.glassMode),
+            )
+            Text(
+                tr(language, "Оцените оформление на главном экране. Позже его можно изменить в настройках.",
+                    "Try the look on your home screen. You can change it later in settings."),
+                color = NokiTextSecondary,
+                fontFamily = ManropeFontFamily,
+                fontSize = metrics.sp(12f),
+                lineHeight = metrics.sp(18f),
+                textAlign = TextAlign.Center,
+            )
+            AuthInlineError(error = state.inlineMessage)
+            AuthPrimaryButton(
+                text = tr(language, "Готово", "Done"),
+                loading = false,
+                modifier = Modifier.fillMaxWidth().height(metrics.dp(48f)),
+                onClick = viewModel::advanceInstallOnboarding,
+            )
+        }
     }
 }
 

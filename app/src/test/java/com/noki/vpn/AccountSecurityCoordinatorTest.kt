@@ -175,6 +175,14 @@ class AccountSecurityCoordinatorTest {
             return user().copy(username = username)
         }
 
+        override suspend fun setupAccountCredentials(
+            token: String,
+            username: String,
+            password: String,
+            currentDeviceId: String?,
+            currentDeviceKey: String?,
+        ): BackendUser = user(hasPassword = true).copy(username = username)
+
         override suspend fun linkTelegramAccount(
             token: String,
             idToken: String,

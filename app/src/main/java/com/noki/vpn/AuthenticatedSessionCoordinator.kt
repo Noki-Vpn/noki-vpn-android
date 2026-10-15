@@ -39,25 +39,28 @@ internal class AuthenticatedSessionCoordinator(
             throw error
         }
 
-        authSessionCoordinator.commit(boundTokens)
+        val sessionTokens = boundTokens.copy(credentialsSetupRequired = tokens.credentialsSetupRequired || boundTokens.credentialsSetupRequired)
+        authSessionCoordinator.commit(sessionTokens)
         stageTemporaryVpnForRevoke()
         stopTemporaryVpn()
 
-        val fallbackState = preparedState.copy(
+        val fallbackState = AuthStepReducer.requireCredentialsSetup(preparedState.copy(
+            userProfile = preparedState.userProfile.copy(credentialsSetupRequired = sessionTokens.credentialsSetupRequired),
             connectionState = VpnConnectionState.DISCONNECTED,
             connectedAtMillis = null,
             vpnRuntimeMode = VpnRuntimeMode.ACCOUNT,
-        )
-        val state = try {
+        ))
+        val syncedState = try {
             syncBootstrap(boundTokens.accessToken, fallbackState)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
             if (BackendRetryPolicy.isTransient(error)) fallbackState else throw error
         }
+        val state = AuthStepReducer.requireCredentialsSetup(syncedState, fallbackState)
         publishAuthenticatedState(state)
         return Result(
-            tokens = boundTokens,
+            tokens = sessionTokens,
             device = device,
             state = state,
         )

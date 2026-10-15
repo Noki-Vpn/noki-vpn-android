@@ -23,8 +23,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import com.noki.vpn.data.AppFilterMode
 import com.noki.vpn.data.AppLanguage
 
@@ -32,14 +32,14 @@ import com.noki.vpn.data.AppLanguage
 internal fun AdvancedFilterCard(
     mode: AppFilterMode,
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
     onModeChanged: (AppFilterMode) -> Unit,
     onConfigure: () -> Unit,
 ) {
     val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
-    val panelBackdrop = rememberLayerBackdrop()
+    val panelBackdrop = rememberPrismalGlassLayer()
     val options = listOf(
         AppFilterMode.ALL_APPS to tr(language, "Все приложения", "All apps"),
         AppFilterMode.ONLY_SELECTED to tr(language, "Только отмеченные", "Selected only"),
@@ -48,7 +48,7 @@ internal fun AdvancedFilterCard(
     AdvancedPanelSurface(
         backdrop = backdrop,
         liveGlassEnabled = liveGlassEnabled,
-        exportedBackdrop = panelBackdrop,
+        nestedGlassSource = panelBackdrop,
         modifier = modifier,
     ) {
         Column(
@@ -104,49 +104,6 @@ internal fun AdvancedFilterCard(
                 liveGlassEnabled = liveGlassEnabled,
                 glassEnabled = true,
                 onClick = onConfigure,
-            )
-        }
-    }
-}
-
-@Composable
-internal fun AdvancedYoutubeNoAdsRow(
-    language: AppLanguage,
-    enabled: Boolean,
-    onEnabledChanged: (Boolean) -> Unit,
-    backdrop: LayerBackdrop?,
-    liveGlassEnabled: Boolean,
-    modifier: Modifier,
-) {
-    val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
-    AdvancedPanelSurface(
-        backdrop = backdrop,
-        liveGlassEnabled = liveGlassEnabled,
-        modifier = modifier,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = metrics.dp(20f)),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            AdvancedText(
-                text = tr(language, "YouTube без рекламы", "YouTube without ads"),
-                fontSize = 18f,
-                lineHeight = 21.6f,
-                color = AdvancedTextPrimary,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(end = metrics.dp(12f)),
-            )
-            NokiLiquidToggle(
-                sizeFactor = metrics.contentScale,
-                selected = enabled,
-                onSelectedChange = onEnabledChanged,
-                backdrop = backdrop,
-                liveGlassEnabled = liveGlassEnabled,
-                modifier = Modifier.padding(start = metrics.dp(14f)),
             )
         }
     }
@@ -225,17 +182,17 @@ internal fun AdvancedDomainRuleWideCard(
     count: Int,
     detail: String,
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
     onConfigure: () -> Unit,
 ) {
     val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
-    val panelBackdrop = rememberLayerBackdrop()
+    val panelBackdrop = rememberPrismalGlassLayer()
     AdvancedPanelSurface(
         backdrop = backdrop,
         liveGlassEnabled = liveGlassEnabled,
-        exportedBackdrop = panelBackdrop,
+        nestedGlassSource = panelBackdrop,
         modifier = modifier,
     ) {
         Row(

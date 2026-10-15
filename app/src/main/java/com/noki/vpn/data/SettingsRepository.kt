@@ -8,6 +8,7 @@ import android.util.Base64
 import androidx.core.content.edit
 import com.noki.vpn.FcmRegistrationStatePolicy
 import org.json.JSONObject
+import org.json.JSONArray
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.Locale
@@ -44,6 +45,10 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
     private val settingsCodec = StoredSettingsCodec(::defaultSettings)
     private val cipher = SettingsCipher()
     private val markersStore = SettingsMarkersStore(preferences, ::appVersionCode)
+
+    fun loadInstallOnboardingStep() = markersStore.loadInstallOnboardingStep()
+
+    fun saveInstallOnboardingStep(step: InstallOnboardingStep) = markersStore.saveInstallOnboardingStep(step)
 
     fun clearVpnRuntimeState() = markersStore.clearVpnRuntimeState()
 
@@ -105,6 +110,79 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
                 .remove(KEY_TEMPORARY_VPN_PENDING_REVOKE_ENCRYPTED)
                 .commit()
             check(persisted) { "temporary_vpn_pending_revoke_clear_failed" }
+        }
+    }
+
+    fun loadPendingRuWireGuardRevokes(): List<PendingRuWireGuardRevoke> =
+        synchronized(RU_WIREGUARD_REVOKE_LOCK) { loadPendingRuWireGuardRevokesLocked() }
+
+    private fun loadPendingRuWireGuardRevokesLocked(): List<PendingRuWireGuardRevoke> {
+        val encrypted = preferences.getString(KEY_RU_WIREGUARD_PENDING_REVOKE, null) ?: return emptyList()
+        val json = JSONArray(checkNotNull(cipher.decrypt(encrypted)) { "ru_revoke_decrypt_failed" })
+        return (0 until json.length()).map { index ->
+            val item = json.getJSONObject(index)
+            PendingRuWireGuardRevoke(
+                sessionId = item.getString("session_id"),
+                revokeToken = item.getString("revoke_token"),
+                provisional = item.optBoolean("provisional", false),
+            )
+        }
+    }
+
+    private fun savePendingRuWireGuardRevokesLocked(items: List<PendingRuWireGuardRevoke>) {
+        val editor = preferences.edit()
+        if (items.isEmpty()) editor.remove(KEY_RU_WIREGUARD_PENDING_REVOKE) else {
+            val json = JSONArray()
+            items.forEach { pending -> json.put(JSONObject()
+                .put("session_id", pending.sessionId)
+                .put("revoke_token", pending.revokeToken)
+                .put("provisional", pending.provisional)) }
+            editor.putString(KEY_RU_WIREGUARD_PENDING_REVOKE, cipher.encrypt(json.toString()))
+        }
+        check(editor.commit()) { "ru_revoke_persist_failed" }
+    }
+
+    fun stageRuWireGuardRevoke(pending: PendingRuWireGuardRevoke) {
+        synchronized(RU_WIREGUARD_REVOKE_LOCK) {
+            val existing = loadPendingRuWireGuardRevokesLocked()
+            val previous = existing.firstOrNull { it.sessionId == pending.sessionId }
+            check(previous == null || previous.revokeToken == pending.revokeToken) {
+                "ru_revoke_token_changed"
+            }
+            if (previous == pending || (previous != null && !previous.provisional)) return@synchronized
+            savePendingRuWireGuardRevokesLocked(existing.filterNot { it.sessionId == pending.sessionId } + pending)
+        }
+    }
+
+    fun recoverProvisionalRuWireGuardRevokes(
+        activeSessionId: String?,
+        preparationActive: Boolean,
+    ): Boolean = synchronized(RU_WIREGUARD_REVOKE_LOCK) {
+        val existing = loadPendingRuWireGuardRevokesLocked()
+        val recovered = existing.map { pending ->
+            if (pending.provisional && !preparationActive && pending.sessionId != activeSessionId)
+                pending.copy(provisional = false) else pending
+        }
+        if (recovered != existing) savePendingRuWireGuardRevokesLocked(recovered)
+        recovered.any { !it.provisional }
+    }
+
+    fun clearPendingRuWireGuardRevoke(sessionId: String) {
+        synchronized(RU_WIREGUARD_REVOKE_LOCK) {
+            val existing = loadPendingRuWireGuardRevokesLocked()
+            if (existing.any { it.sessionId == sessionId })
+                savePendingRuWireGuardRevokesLocked(existing.filterNot { it.sessionId == sessionId })
+        }
+    }
+
+    fun clearProvisionalRuWireGuardRevoke(sessionId: String, revokeToken: String) {
+        synchronized(RU_WIREGUARD_REVOKE_LOCK) {
+            val existing = loadPendingRuWireGuardRevokesLocked()
+            if (existing.none { it.sessionId == sessionId && it.revokeToken == revokeToken && it.provisional })
+                return@synchronized
+            savePendingRuWireGuardRevokesLocked(existing.filterNot {
+                it.sessionId == sessionId && it.revokeToken == revokeToken && it.provisional
+            })
         }
     }
 
@@ -329,7 +407,8 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
             val health = loadEndpointHealthLocked().toMutableMap()
             val now = System.currentTimeMillis()
             val key = EndpointHealthScope.key(networkKind, code)
-            val previous = health[key] ?: EndpointHealthScope.forNetwork(health, networkKind)[code] ?: EndpointHealth()
+            val previous = health[key] ?: EndpointHealthScope.forNetwork(health, networkKind)[code]
+                ?: EndpointHealth()
             updated = EndpointRankingPolicy.updateAfterResult(
                 previous = previous,
                 success = success,
@@ -609,6 +688,7 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
             AuthSettingsTransition(
                 settings = current.copy(
                     isAuthenticated = true,
+                    userProfile = current.userProfile.copy(credentialsSetupRequired = tokens.credentialsSetupRequired),
                     backendAccessToken = tokens.accessToken,
                     backendRefreshToken = refreshToken,
                     backendRefreshRequestId = null,
@@ -887,6 +967,7 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
         val ENDPOINT_HEALTH_LOCK = Any()
         val ENDPOINT_ROTATION_LOCK = Any()
         val TEMPORARY_VPN_LEASE_LOCK = Any()
+        val RU_WIREGUARD_REVOKE_LOCK = Any()
         val PENDING_LOGOUT_REVOCATION_LOCK = Any()
         val APP_NOTIFICATION_HISTORY_LOCK = Any()
         const val KEY_ENCRYPTED_SETTINGS = "settings_json_encrypted_v2"
@@ -903,6 +984,7 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
         const val KEY_TEMPORARY_VPN_LEASE_ENCRYPTED = "temporary_vpn_lease_encrypted_v1"
         const val KEY_TEMPORARY_VPN_PENDING_REVOKE_ENCRYPTED =
             "temporary_vpn_pending_revoke_encrypted_v1"
+        const val KEY_RU_WIREGUARD_PENDING_REVOKE = "ru_wireguard_pending_revoke_encrypted_v1"
         const val KEY_PENDING_LOGOUT_REVOCATIONS_ENCRYPTED =
             "pending_logout_revocations_encrypted_v1"
         const val KEY_APP_NOTIFICATION_HISTORY_ENCRYPTED_PREFIX =

@@ -65,6 +65,7 @@ internal fun AppUiRuntime.updateRegistrationEmail(value: String) {
 
 internal fun AppUiRuntime.scheduleRegistrationUsernameAvailabilityCheck() {
     if (uiState.authStep != AuthStep.REGISTRATION_PROFILE) return
+    if (uiState.isAuthenticated && uiState.userProfile.credentialsSetupRequired) return
     val language = uiState.personalizationSettings.language
     val form = uiState.registrationForm
     val username = form.username.trim()
@@ -370,6 +371,16 @@ internal fun AppUiRuntime.nextRegistrationStep() {
         val staleUsernameCheck = registrationUsernameCheckJob
         registrationUsernameCheckJob = null
         staleUsernameCheck?.cancel()
+        if (uiState.isAuthenticated && uiState.userProfile.credentialsSetupRequired) {
+            registrationWorkflow.invalidate()
+            val transition = AuthStepReducer.nextRegistrationStep(
+                current = uiState.copy(registrationForm = form.copy(username = username)),
+                language = language,
+                isValidEmail = ::isValidEmailAddress,
+            )
+            if (transition is AuthStepReducer.RegistrationStepTransition.UpdateState) uiState = transition.state
+            return
+        }
         val requestKey = "username-submit:$username"
         val workflowOwner = registrationWorkflow.begin(requestKey)
         val job = scope.launch(start = CoroutineStart.LAZY) {
@@ -445,6 +456,42 @@ internal fun AppUiRuntime.nextRegistrationStep() {
     )) {
         is AuthStepReducer.RegistrationStepTransition.UpdateState -> uiState = transition.state
         is AuthStepReducer.RegistrationStepTransition.Submit -> {
+            if (uiState.userProfile.credentialsSetupRequired) {
+                val deviceId = backendDeviceId.ifBlank { null }
+                val deviceKey = backendDeviceKey.ifBlank { null }
+                launchAuthenticatedSessionOperation(
+                    replaceDeviceRead = true,
+                    onStarted = { uiState = transition.state },
+                    operation = { attempt ->
+                        authSessionCoordinator.run(attempt) { token ->
+                            backendApi.setupAccountCredentials(
+                                token = token,
+                                username = transition.form.username.trim(),
+                                password = transition.form.password,
+                                currentDeviceId = deviceId,
+                                currentDeviceKey = deviceKey,
+                            )
+                        }
+                    },
+                    onSuccess = { user ->
+                        cancelBackendRefresh()
+                        applyAccountSecurityUser(user)
+                    },
+                    onFailure = { error ->
+                        uiState = RegistrationStateReducer.registrationFailed(
+                            current = uiState,
+                            error = AppErrorMapper.readableRegistrationError(language, error),
+                        )
+                        if (error is BackendException && error.statusCode == 409 &&
+                            error.message == "Credentials setup is not required"
+                        ) {
+                            cancelBackendRefresh()
+                            launchBackendRefresh(BackendRefreshTrigger.Initial)
+                        }
+                    },
+                )
+                return
+            }
             launchSessionOperation(
                 onStarted = { uiState = transition.state },
                 operation = {

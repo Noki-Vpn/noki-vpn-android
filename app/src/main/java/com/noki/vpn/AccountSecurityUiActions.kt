@@ -138,6 +138,7 @@ internal fun AppUiRuntime.applyAccountSecurityUser(
             hasRealEmail = user.hasRealEmail,
             hasPassword = user.hasPassword,
             telegramLinked = user.telegramLinked,
+            credentialsSetupRequired = user.credentialsSetupRequired,
         ),
         telegramLoginState = telegramState,
         accountSecurityState = AccountSecurityUiState(),

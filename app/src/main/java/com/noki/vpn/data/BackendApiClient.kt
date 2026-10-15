@@ -6,6 +6,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -232,6 +233,22 @@ class BackendApiClient(
         ),
     )
 
+    override suspend fun setupAccountCredentials(
+        token: String,
+        username: String,
+        password: String,
+        currentDeviceId: String?,
+        currentDeviceKey: String?,
+    ): BackendUser = BackendUserResponseParser.parse(
+        postJson(
+            path = "/app/security/credentials",
+            payload = JSONObject().put("username", username).put("password", password),
+            token = token,
+            currentDeviceId = currentDeviceId,
+            currentDeviceKey = currentDeviceKey,
+        ),
+    )
+
     override suspend fun linkTelegramAccount(
         token: String,
         idToken: String,
@@ -269,10 +286,7 @@ class BackendApiClient(
         val request = Request.Builder()
             .url("$baseUrl$API_PREFIX/app/bootstrap")
             .header("Authorization", "Bearer $token")
-            .apply {
-                deviceId?.takeIf { it.isNotBlank() }?.let { header("X-Device-Id", it) }
-                deviceKey?.takeIf { it.isNotBlank() }?.let { header("X-Device-Key", it) }
-            }
+            .currentDeviceHeaders(deviceId, deviceKey)
             .get()
             .build()
         val json = withContext(Dispatchers.IO) { execute(request) }
@@ -295,10 +309,7 @@ class BackendApiClient(
         val request = Request.Builder()
             .url("$baseUrl$API_PREFIX/vpn/access")
             .header("Authorization", "Bearer $token")
-            .apply {
-                deviceId?.takeIf { it.isNotBlank() }?.let { header("X-Device-Id", it) }
-                deviceKey?.takeIf { it.isNotBlank() }?.let { header("X-Device-Key", it) }
-            }
+            .currentDeviceHeaders(deviceId, deviceKey)
             .get()
             .build()
         execute(request).toBackendVpnAccess()
@@ -349,35 +360,152 @@ class BackendApiClient(
         nodeId: String?,
         multiHop: MultiHopSettings?,
     ): BackendVpnSession {
+        val hops = multiHop?.explicitNodeIds()
+        require(hops == null || (countryCode == null && locationCode == null &&
+            excludeLocationCode == null && nodeId == null)) { "multihop_direct_selector_invalid" }
         val payload = JSONObject()
             .put("device_key", deviceKey)
             .put("device_id", deviceId)
             .put("device_nonce", deviceNonce)
             .put("device_signature", deviceSignature)
-            .put("profile_code", if (multiHop?.enabled == true) "auto" else profileCode)
-        if (multiHop?.enabled == true) {
-            fun hop(selection: HopSelection?): JSONObject {
-                val selected = requireNotNull(selection) { "multihop_selector_missing" }
-                return when (selected.kind) {
-                    ServerSelectionMode.COUNTRY -> JSONObject()
-                        .put("kind", "country").put("country_code", selected.countryCode)
-                    ServerSelectionMode.SERVER -> JSONObject()
-                        .put("kind", "node").put("node_id", selected.nodeId)
-                    ServerSelectionMode.AUTO -> throw IllegalArgumentException("multihop_selector_invalid")
-                }
-            }
-            payload.put("multihop", JSONObject().put("entry", hop(multiHop.entry)).put("exit", hop(multiHop.exit)))
-        } else {
-            payload.put("country_code", countryCode)
-                .put("location_code", locationCode)
-                .put("exclude_location_code", excludeLocationCode)
-                .put("node_id", nodeId)
-        }
+            .put("profile_code", if (hops != null) "auto" else profileCode)
+            .put("country_code", countryCode)
+            .put("location_code", locationCode)
+            .put("exclude_location_code", excludeLocationCode)
+            .put("node_id", nodeId)
+        if (hops != null) payload.put("multihop", JSONObject()
+            .put("version", 2)
+            .put("entry", JSONObject().put("kind", "node").put("node_id", hops.first))
+            .put("exit", JSONObject().put("kind", "node").put("node_id", hops.second))
+            .put("excluded_pairs", JSONArray()))
         return postJson("/vpn/session", payload, token).toBackendVpnSession()
     }
 
     override suspend fun serverLocations(token: String, deviceId: String?, deviceKey: String?): List<BackendLocation> =
         bootstrap(token, deviceId, deviceKey).locations
+
+    suspend fun ruRelayCatalog(
+        token: String,
+        deviceId: String,
+        deviceKey: String?,
+        exitNodeId: String? = null,
+        entryNodeId: String? = null,
+        routeVersion: Int = 1,
+    ): RuRelayCatalog = withContext(Dispatchers.IO) {
+        require(routeVersion == 1) { "ru_route_version_invalid" }
+        val exitId = exitNodeId?.let(::canonicalRuUuid)
+        val entryId = entryNodeId?.let(::canonicalRuUuid)
+        require((entryId == null || entryId != exitId) && (exitId != null || entryId == null)) { "ru_route_identity_invalid" }
+        val url = jsonApi.apiUrl("/vpn/ru-relays").toHttpUrl().newBuilder()
+            .addQueryParameter("route_version", routeVersion.toString())
+            .apply { exitId?.let { addQueryParameter("exit_node_id", it) } }
+            .apply { entryId?.let { addQueryParameter("entry_node_id", it) } }
+            .addQueryParameter("device_id", deviceId)
+            .build()
+        val json = execute(Request.Builder().url(url)
+            .header("Authorization", "Bearer $token")
+            .currentDeviceHeaders(deviceId, deviceKey)
+            .get().build())
+        RuRelayCatalogJsonParser.parse(json, exitId, entryId, routeVersion)
+    }
+
+    override suspend fun createRuWireGuardSession(
+        token: String,
+        request: RuWireGuardSessionRequest,
+    ): BackendRuWireGuardSession = RuWireGuardSessionJsonParser.parse(
+        postJson("/vpn/session", request.toBackendJson(), token),
+        RuWireGuardSessionExpectation(
+            requestId = request.requestId,
+            publicKeyId = request.publicKeyId,
+            exitNodeId = request.exitNodeId,
+            relaySelection = request.relaySelection,
+            entryNodeId = request.entryNodeId,
+            routeVersion = request.routeVersion,
+        ),
+    )
+
+    suspend fun pollRuWireGuardSession(
+        token: String,
+        deviceId: String,
+        deviceKey: String?,
+        identity: BackendRuWireGuardIdentity,
+    ): BackendRuWireGuardSession = withContext(Dispatchers.IO) {
+        val url = jsonApi.apiUrl("/vpn/sessions/${identity.sessionId}").toHttpUrl().newBuilder()
+            .addQueryParameter("device_id", deviceId).build()
+        val json = execute(Request.Builder().url(url)
+            .header("Authorization", "Bearer $token")
+            .currentDeviceHeaders(deviceId, deviceKey)
+            .get().build())
+        parseExistingRuSession(json, identity)
+    }
+
+    suspend fun activateRuWireGuardSession(
+        token: String,
+        deviceId: String,
+        deviceKey: String?,
+        identity: BackendRuWireGuardIdentity,
+    ): BackendRuWireGuardSession = withContext(Dispatchers.IO) {
+        val url = jsonApi.apiUrl("/vpn/sessions/${identity.sessionId}/activate").toHttpUrl().newBuilder()
+            .addQueryParameter("device_id", deviceId).build()
+        val json = execute(Request.Builder().url(url)
+            .header("Authorization", "Bearer $token")
+            .currentDeviceHeaders(deviceId, deviceKey)
+            .post("{}".toRequestBody(JSON_MEDIA_TYPE)).build())
+        parseExistingRuSession(json, identity)
+    }
+
+    suspend fun revokeRuWireGuardSession(
+        sessionId: String,
+        revokeToken: String,
+    ): Unit = withContext(Dispatchers.IO) {
+        execute(Request.Builder().url(jsonApi.apiUrl("/vpn/sessions/$sessionId"))
+            .header("X-Ru-Revoke-Token", revokeToken)
+            .delete().build())
+        Unit
+    }
+
+    private fun parseExistingRuSession(
+        json: JSONObject,
+        identity: BackendRuWireGuardIdentity,
+    ): BackendRuWireGuardSession = RuWireGuardSessionJsonParser.parse(json, RuWireGuardSessionExpectation(
+        requestId = identity.requestId,
+        publicKeyId = identity.publicKeyId,
+        exitNodeId = identity.exitNodeId,
+        relaySelection = identity.relaySelection,
+        entryNodeId = identity.entryNodeId,
+        routeVersion = identity.routeVersion,
+    )).also {
+        require(it.identity.hasSameAuthorization(identity)) {
+            "ru_wireguard_session_changed"
+        }
+    }
+
+    suspend fun registerRuWireGuardKey(
+        token: String,
+        deviceId: String,
+        deviceKey: String?,
+        deviceNonce: String,
+        deviceSignature: String,
+        publicKey: String,
+    ): BackendRuWireGuardKey {
+        java.util.UUID.fromString(deviceId)
+        val keyBytes = java.util.Base64.getDecoder().decode(publicKey)
+        require(keyBytes.size == 32 && keyBytes.any { it.toInt() != 0 } &&
+            java.util.Base64.getEncoder().encodeToString(keyBytes) == publicKey) {
+            "ru_wireguard_public_key_invalid"
+        }
+        val payload = JSONObject()
+            .put("device_id", deviceId)
+            .put("device_key", deviceKey)
+            .put("device_nonce", deviceNonce)
+            .put("device_signature", deviceSignature)
+            .put("public_key", publicKey)
+        val json = postJson("/vpn/wireguard-keys", payload, token, deviceId, deviceKey)
+        val id = json.getString("id")
+        java.util.UUID.fromString(id)
+        require(json.getString("public_key") == publicKey) { "ru_wireguard_public_key_mismatch" }
+        return BackendRuWireGuardKey(id, publicKey)
+    }
 
     override suspend fun createTemporaryVpnChallenge(
         publicKey: String,
@@ -516,10 +644,7 @@ class BackendApiClient(
         val request = Request.Builder()
             .url("$baseUrl$API_PREFIX/devices/invites")
             .header("Authorization", "Bearer $token")
-            .apply {
-                currentDeviceId?.takeIf { it.isNotBlank() }?.let { header("X-Device-Id", it) }
-                currentDeviceKey?.takeIf { it.isNotBlank() }?.let { header("X-Device-Key", it) }
-            }
+            .currentDeviceHeaders(currentDeviceId, currentDeviceKey)
             .post(JSONObject().toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
         execute(request).toBackendDeviceInvite()
@@ -632,6 +757,10 @@ class BackendApiClient(
         versionCode: Long,
         abis: List<String>,
     ): Boolean = contentClient.androidUpdateAvailable(token, versionCode, abis)
+
+    suspend fun geositeMetadata(): Pair<String, Int> = contentClient.geositeMetadata()
+
+    suspend fun downloadGeosite(expectedSize: Int): ByteArray = contentClient.downloadGeosite(expectedSize)
 
     suspend fun uploadAvatar(
         token: String,

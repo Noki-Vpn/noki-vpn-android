@@ -54,8 +54,8 @@ import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
 import com.noki.vpn.AppUiState
 import com.noki.vpn.AccountSecurityActionState
 import com.noki.vpn.AppDialog
@@ -64,6 +64,8 @@ import com.noki.vpn.TelegramAuthPurpose
 import com.noki.vpn.TelegramLoginStateReducer
 
 private val SecurityBgBase = Color(0xFF07111A)
+internal const val NokiTermsUrl = "https://noki.ykino.tech/legal/terms"
+internal const val NokiPrivacyUrl = "https://noki.ykino.tech/legal/privacy"
 internal val SecurityBgLighter = Color(0xFF0D1B2A)
 internal val SecurityBgSoft = Color(0xFF132635)
 internal val SecurityStroke = Color(0xFF29404E)
@@ -87,8 +89,8 @@ fun SecurityScreen(
     state: AppUiState,
     viewModel: MainViewModel,
     onTelegramLinkClick: () -> Unit,
-    sharedBackdrop: LayerBackdrop,
-    menuRowsBackdrop: LayerBackdrop? = null,
+    sharedBackdrop: PrismalGlassLayer,
+    menuRowsBackdrop: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean = true,
     showBackground: Boolean = true,
 ) {
@@ -120,7 +122,7 @@ fun SecurityScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
+                        .then(if (backdrop != null) Modifier.prismalGlassLayer(backdrop) else Modifier),
                 ) {
                     HomeBackground(liveGlassEnabled = liveGlassEnabled)
                 }
@@ -407,8 +409,8 @@ internal fun SecurityAboutSheet(
             Spacer(Modifier.height(metrics.dp(20f)))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 listOf(
-                    tr(language, "Условия использования", "Terms of use") to "https://noki.ykino.tech/legal/terms",
-                    tr(language, "Политика конфиденциальности", "Privacy policy") to "https://noki.ykino.tech/legal/privacy",
+                    tr(language, "Условия использования", "Terms of use") to NokiTermsUrl,
+                    tr(language, "Политика конфиденциальности", "Privacy policy") to NokiPrivacyUrl,
                 ).forEach { (label, url) ->
                     Text(label, fontFamily = ManropeFontFamily, fontSize = metrics.sp(14f),
                         textDecoration = TextDecoration.Underline,

@@ -19,6 +19,7 @@ object EndpointOptionsStateReducer {
         result: VpnSessionCoordinator.EndpointOptionsResult,
         syncedDevices: List<BackendDevice>,
     ): Result? {
+        if (current.advancedSettings.ruRelayEnabled || current.advancedSettings.multiHop.enabled) return null
         val options = result.endpointOptions
         if (options.isEmpty()) return null
 

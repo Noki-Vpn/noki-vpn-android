@@ -2,9 +2,24 @@ package com.noki.vpn.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EndpointStartupPreflightPolicyTest {
+    @Test
+    fun nativeSecurityPolicyRejectsPacketUpgradeAndUnspecifiedXhttpMode() {
+        val stream = tcpCandidate("stream").copy(transport = "xhttp", transportMode = "stream-up", flow = null)
+        assertTrue(EndpointSecurityPolicy.isAllowedCandidate(stream))
+        for (candidate in listOf(stream.copy(transportMode = "packet-up"),
+            stream.copy(transportMode = null), stream.copy(transport = "httpupgrade"),
+            stream.copy(transport = "unknown"))) {
+            assertFalse(candidate.code, EndpointSecurityPolicy.isAllowedCandidate(candidate))
+        }
+        assertTrue(EndpointSecurityPolicy.isAllowedCandidate(tcpCandidate("vision")))
+        assertTrue(EndpointSecurityPolicy.isAllowedCandidate(tcpCandidate("tls").copy(security = "tls")))
+        assertTrue(EndpointSecurityPolicy.isAllowedCandidate(hysteriaCandidate("hy2")))
+    }
+
     @Test
     fun autoReachesHysteriaAfterAllTcpFailuresInOneSelectionOnEveryNetwork() {
         for (network in EndpointRankingPolicy.NetworkKind.entries) {

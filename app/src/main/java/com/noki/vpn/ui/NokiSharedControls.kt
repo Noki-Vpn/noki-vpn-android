@@ -10,20 +10,20 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp as lerpColor
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.rememberBackdrop
-import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.backdrop.shadow.InnerShadow
-import com.kyant.backdrop.shadow.Shadow
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalWrappedSource
+import com.styropyr0.prismal.sources.rememberPrismalMergedSource
+import com.styropyr0.prismal.drawPrismalGlass
+import com.styropyr0.prismal.effects.prismalLens
+import com.styropyr0.prismal.specular.PrismalSpecular
+import com.styropyr0.prismal.depth.PrismalDepthInset
+import com.styropyr0.prismal.depth.PrismalDepthShadow
 
 @Composable
 internal fun NokiLiquidToggle(
     selected: Boolean,
     onSelectedChange: (Boolean) -> Unit,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier = Modifier,
     sizeFactor: Float = 1f,
@@ -42,8 +42,8 @@ internal fun NokiLiquidToggle(
 internal fun NokiLiquidThumb(
     modifier: Modifier,
     animation: DampedDragAnimation,
-    backdrop: LayerBackdrop?,
-    trackBackdrop: LayerBackdrop,
+    backdrop: PrismalGlassLayer?,
+    trackBackdrop: PrismalGlassLayer,
     liveGlassEnabled: Boolean,
     inactiveColor: Color,
     activeColor: Color,
@@ -53,42 +53,42 @@ internal fun NokiLiquidThumb(
     val shape = RoundedCornerShape(percent = 50)
     if (liveGlassEnabled && backdrop != null) {
         Box(
-            modifier = modifier.drawBackdrop(
-                backdrop = rememberCombinedBackdrop(
+            modifier = modifier.drawPrismalGlass(
+                backdrop = rememberPrismalMergedSource(
                     backdrop,
-                    rememberBackdrop(trackBackdrop) { drawBackdrop ->
+                    rememberPrismalWrappedSource(trackBackdrop) { drawPrismalGlass ->
                         val progress = animation.pressProgress
                         val scaleX = lerpFloat(2f / 3f, 0.92f, progress)
                         val scaleY = lerpFloat(0f, 0.75f, progress)
                         scale(scaleX, scaleY) {
-                            drawBackdrop()
+                            drawPrismalGlass()
                         }
                     },
                 ),
                 shape = { shape },
                 effects = {
                     val progress = animation.pressProgress
-                    lens(
+                    prismalLens(
                         (5f * sizeFactor).dp.toPx() * progress,
                         (10f * sizeFactor).dp.toPx() * progress,
-                        chromaticAberration = true,
+                        chromaticAberration = 1f,
                     )
                 },
-                highlight = {
-                    Highlight.Ambient.copy(
-                        width = Highlight.Ambient.width / 1.5f,
-                        blurRadius = Highlight.Ambient.blurRadius / 1.5f,
+                specular = {
+                    PrismalSpecular.Ambient.copy(
+                        width = PrismalSpecular.Ambient.width / 1.5f,
+                        blurRadius = PrismalSpecular.Ambient.blurRadius / 1.5f,
                         alpha = animation.pressProgress,
                     )
                 },
-                shadow = {
-                    Shadow(
+                depthShadow = {
+                    PrismalDepthShadow(
                         radius = (4f * sizeFactor).dp,
                         color = Color.Black.copy(alpha = 0.05f),
                     )
                 },
-                innerShadow = {
-                    InnerShadow(
+                depthInset = {
+                    PrismalDepthInset(
                         radius = (4f * sizeFactor).dp * animation.pressProgress,
                         alpha = animation.pressProgress,
                     )

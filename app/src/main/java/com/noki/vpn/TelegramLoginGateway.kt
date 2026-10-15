@@ -3,7 +3,10 @@ package com.noki.vpn
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.verify.domain.DomainVerificationManager
+import android.content.pm.verify.domain.DomainVerificationUserState
 import android.net.Uri
+import android.os.Build
 import androidx.core.net.toUri
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -97,6 +100,20 @@ internal class TelegramLoginGateway(
     ): Boolean {
         val uri = telegramUrl.toUri()
         require(isAllowedTelegramUrl(uri)) { "telegram_launch_url_invalid" }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Unapproved HTTPS callbacks open the browser on Android 12+.
+            val callbackSupported = runCatching {
+                val state = activity.getSystemService(DomainVerificationManager::class.java)
+                    ?.getDomainVerificationUserState(activity.packageName) ?: return@runCatching false
+                state.isLinkHandlingAllowed &&
+                    when (state.hostToStateMap[BuildConfig.TELEGRAM_LOGIN_REDIRECT_URI.toUri().host]) {
+                        DomainVerificationUserState.DOMAIN_STATE_VERIFIED,
+                        DomainVerificationUserState.DOMAIN_STATE_SELECTED -> true
+                        else -> false
+                    }
+            }.getOrDefault(false)
+            if (!callbackSupported) return false
+        }
         return try {
             activity.startActivity(Intent(Intent.ACTION_VIEW, uri))
             true

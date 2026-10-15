@@ -19,6 +19,7 @@ import com.noki.vpn.data.SettingsRepository
 import com.noki.vpn.data.StoredSettings
 import com.noki.vpn.data.hasSameAuthSessionAs
 import java.util.concurrent.atomic.AtomicReferenceArray
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -31,14 +32,13 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.withContext
-import libv2ray.Libv2ray
 
 data class EndpointProbeOutcome(
     val endpointCode: String,
     val tcpPrecheckRequired: Boolean,
     val tcpConnectMs: Int?,
-    val xrayDelayMs: Long?,
-    val runtimeIssue: XrayRuntimeIssue?,
+    val vpnDelayMs: Long?,
+    val runtimeIssue: VpnCoreIssue?,
     val successfulHttpTargets: Int,
     val totalHttpTargets: Int,
     val success: Boolean,
@@ -50,10 +50,20 @@ class EndpointProbeRunner(
     private val repository: SettingsRepository,
     private val endpointHealthReporter: EndpointHealthEventReporter = EndpointHealthEventReporter(repository),
     private val measureNativeDelay: suspend (String, String) -> Long = { config, url ->
-        val probe = Libv2ray.newOutboundProbe()
+        val probe = VpnCoreController(context)
+        val cancelled = AtomicBoolean(false)
         awaitNativeProbe(
-            measure = { probe.measure(config, url, 12_000L, 256L * 1024L) },
-            cancel = probe::cancel,
+            measure = {
+                try {
+                    synchronized(probe) {
+                        check(!cancelled.get()) { "vpn_probe_cancelled" }
+                        check(probe.start(config, -1)) { "vpn_probe_start_failed" }
+                    }
+                    val result = probe.measureDelay(url, 12_000L)
+                    result.delayMs ?: error(result.issue?.logMessage ?: "vpn_probe_failed")
+                } finally { probe.stop() }
+            },
+            cancel = { cancelled.set(true); probe.stop() },
         )
     },
     private val measureTcpDelay: (String, Int, Int) -> Int? = { host, port, timeout ->
@@ -101,8 +111,6 @@ class EndpointProbeRunner(
 
         return withContext(Dispatchers.IO) {
             ensureCurrent()
-            initCoreEnv()
-            ensureCurrent()
             collectCandidateProbes(candidates, deadlineMillis, staggerMillis) { candidate ->
                 probeCandidate(session, candidate, ::ensureCurrent)
             }.onEach { outcome ->
@@ -112,7 +120,7 @@ class EndpointProbeRunner(
                     endpointCode = outcome.endpointCode,
                     success = success,
                     slow = outcome.slow,
-                    latencyMs = outcome.xrayDelayMs,
+                    latencyMs = outcome.vpnDelayMs,
                     networkKind = networkKind,
                 )
                 ensureCurrent()
@@ -148,14 +156,6 @@ class EndpointProbeRunner(
         }
     }
 
-    private fun initCoreEnv() {
-        runCatching {
-            Libv2ray.initCoreEnv(context.noBackupFilesDir.absolutePath, "")
-        }.onFailure { error ->
-            SafeLog.w(TAG, "Failed to initialize Xray probe env", error)
-        }
-    }
-
     private suspend fun probeCandidate(
         session: BackendVpnSession,
         candidate: BackendEndpointCandidate,
@@ -174,8 +174,8 @@ class EndpointProbeRunner(
                 endpointCode = candidate.code,
                 tcpPrecheckRequired = true,
                 tcpConnectMs = null,
-                xrayDelayMs = null,
-                runtimeIssue = XrayRuntimeIssue.PROXY_TCP_TIMEOUT,
+                vpnDelayMs = null,
+                runtimeIssue = VpnCoreIssue.PROXY_TCP_TIMEOUT,
                 successfulHttpTargets = 0,
                 totalHttpTargets = VpnProbePlanPolicy.candidateTargets().size,
                 success = false,
@@ -184,7 +184,7 @@ class EndpointProbeRunner(
         }
 
         val profile = EndpointSelector.profileFromCandidate(session, candidate)
-        val config = XrayConfigFactory.buildProbe(profile)
+        val config = VpnConfigFactory.buildProbe(profile)
         val targetResults = mutableListOf<ActiveProbePolicy.TargetResult>()
         for (target in VpnProbePlanPolicy.candidateTargets()) {
             ensureCurrent()
@@ -200,7 +200,7 @@ class EndpointProbeRunner(
         val decision = ActiveProbePolicy.evaluate(
             targetResults = targetResults,
             previousFailures = 0,
-            slowDelayMs = SLOW_XRAY_DELAY_MS,
+            slowDelayMs = SLOW_VPN_DELAY_MS,
         )
         val success = decision.treatAsHealthy
         val slowTcp = tcpMs != null && tcpMs >= SLOW_TCP_CONNECT_MS
@@ -209,7 +209,7 @@ class EndpointProbeRunner(
             endpointCode = candidate.code,
             tcpPrecheckRequired = tcpPrecheckRequired,
             tcpConnectMs = tcpMs,
-            xrayDelayMs = delayMs,
+            vpnDelayMs = delayMs,
             runtimeIssue = probeRuntimeIssue(targetResults, decision),
             successfulHttpTargets = targetResults.count { it.delayMs != null },
             totalHttpTargets = targetResults.size,
@@ -218,35 +218,35 @@ class EndpointProbeRunner(
         )
     }
 
-    private suspend fun measureOutboundDelay(config: String, url: String): XrayDelayResult =
+    private suspend fun measureOutboundDelay(config: String, url: String): VpnProbeResult =
         try {
-            XrayDelayResult(delayMs = measureNativeDelay(config, url).takeIf { it > 0L })
+            VpnProbeResult(delayMs = measureNativeDelay(config, url).takeIf { it > 0L })
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
-            XrayDelayResult(delayMs = null, issue = XrayRuntimeIssue.fromThrowable(error))
+            VpnProbeResult(delayMs = null, issue = VpnCoreIssue.fromThrowable(error))
         }
 
     private fun probeRuntimeIssue(
         targetResults: List<ActiveProbePolicy.TargetResult>,
         decision: ActiveProbePolicy.Decision,
-    ): XrayRuntimeIssue? {
+    ): VpnCoreIssue? {
         if (decision.treatAsHealthy) return null
         val issues = targetResults.mapNotNull { it.issue }
-        return issues.firstOrNull { it == XrayRuntimeIssue.DNS_TIMEOUT } ?: issues.firstOrNull()
+        return issues.firstOrNull { it == VpnCoreIssue.DNS_TIMEOUT } ?: issues.firstOrNull()
     }
 
     private fun recordRuntimeIssue(
         networkKind: EndpointRankingPolicy.NetworkKind,
         outcome: EndpointProbeOutcome,
-        issue: XrayRuntimeIssue,
+        issue: VpnCoreIssue,
         endpointCodes: List<String>,
     ) {
         repository.recordAppLog(
             category = "vpn",
             level = "error",
             message = issue.logMessage,
-            details = "source=candidate_probe; tcp_precheck=${outcome.tcpPrecheckRequired}; xray_ok=${outcome.successfulHttpTargets > 0}",
+            details = "source=candidate_probe; tcp_precheck=${outcome.tcpPrecheckRequired}; vpn_ok=${outcome.successfulHttpTargets > 0}",
             errorType = issue.logMessage,
             connectionSuccess = false,
             endpointRating = repository.endpointRatingSnapshot(endpointCodes, networkKind),
@@ -261,10 +261,10 @@ class EndpointProbeRunner(
                 outcome.tcpConnectMs != null -> "ok"
                 else -> "fail"
             }
-            val xrayOk = outcome.successfulHttpTargets > 0
+            val vpnOk = outcome.successfulHttpTargets > 0
             val httpOk = outcome.success
             val issue = outcome.runtimeIssue?.logMessage?.let { ",issue=$it" }.orEmpty()
-            "${outcome.endpointCode}:tcp=$tcpState,xray_ok=$xrayOk,http_ok=$httpOk$issue"
+            "${outcome.endpointCode}:tcp=$tcpState,vpn_ok=$vpnOk,http_ok=$httpOk$issue"
         }.take(2048)
     }
 
@@ -312,6 +312,6 @@ class EndpointProbeRunner(
         private const val DEFAULT_MAX_CANDIDATES = 2
         private const val TCP_CONNECT_TIMEOUT_MS = 1_200
         private const val SLOW_TCP_CONNECT_MS = 900
-        private const val SLOW_XRAY_DELAY_MS = 2_500L
+        private const val SLOW_VPN_DELAY_MS = 2_500L
     }
 }

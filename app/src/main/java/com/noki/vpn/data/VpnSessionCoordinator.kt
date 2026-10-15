@@ -58,9 +58,13 @@ class VpnSessionCoordinator(
             countryCode = settings.userProfile.selectedCountryCode,
         ),
     ): Result = withContext(Dispatchers.IO) {
+        require(!settings.advancedSettings.ruRelayEnabled) {
+            "ru_relay_requires_wireguard_coordinator"
+        }
         val network = context?.let { com.noki.vpn.vpn.AndroidUnderlyingNetworkSource(it).currentSnapshot()?.network }
         sessionApi = if (backendApi is BackendApiClient && network != null) backendApi.onNetwork(network) else backendApi
         if (settings.advancedSettings.multiHop.enabled) {
+            settings.advancedSettings.multiHop.explicitNodeIds()
             val prepared = prepareAtNode(token, settings, knownDevices, VpnSessionSelection(countryCode = ""))
             if (!VpnProfileValidator.isUsable(prepared.settings)) throw UnusableFreshProfileException()
             return@withContext prepared
@@ -77,13 +81,19 @@ class VpnSessionCoordinator(
                 else -> profile
             }
         }
-        val nodes = EndpointRankingPolicy.rankServers(
-            locations.flatMap { it.withClientLatencies(samples).servers }.filter {
-                it.id !in sessionSelection.excludedNodeIds &&
-                    (sessionSelection.locationCode == null || it.locationCode == sessionSelection.locationCode) &&
-                    it.locationCode != sessionSelection.excludeLocationCode
-            }, scope,
-        )
+        val visibleNodes = locations.flatMap { it.withClientLatencies(samples).servers }.filter {
+            it.id !in sessionSelection.excludedNodeIds && it.locationCode != sessionSelection.excludeLocationCode
+        }
+        val scopedNodes = visibleNodes.filter {
+            sessionSelection.locationCode == null || it.locationCode == sessionSelection.locationCode
+        }
+        val preferredNodes = EndpointRankingPolicy.rankServers(scopedNodes, scope)
+        // Saved node/country selections may disappear after an admin changes visibility.
+        val fellBackToAuto = preferredNodes.isEmpty() &&
+            (scope.serverSelectionMode != ServerSelectionMode.AUTO || sessionSelection.locationCode != null)
+        val nodes = if (fellBackToAuto) EndpointRankingPolicy.rankServers(
+            visibleNodes, scope.copy(serverSelectionMode = ServerSelectionMode.AUTO),
+        ) else preferredNodes
         if (nodes.isEmpty()) throw BackendException("No available servers", 503)
         var lastFailure: Exception = BackendException("No available servers", 503)
         for (node in nodes) {
@@ -92,7 +102,12 @@ class VpnSessionCoordinator(
                     countryCode = node.countryCode, locationCode = node.locationCode, nodeId = node.id,
                 ))
                 if (!VpnProfileValidator.isUsable(result.settings) && node != nodes.last()) continue
-                return@withContext result.copy(settings = result.settings.copy(userProfile = result.settings.userProfile.copy(actualCountryCode = node.countryCode)))
+                return@withContext result.copy(settings = result.settings.copy(userProfile = result.settings.userProfile.copy(
+                    serverSelectionMode = if (fellBackToAuto) ServerSelectionMode.AUTO else result.settings.userProfile.serverSelectionMode,
+                    selectedNodeId = if (fellBackToAuto) "" else result.settings.userProfile.selectedNodeId,
+                    selectedCountryCode = if (fellBackToAuto) "" else result.settings.userProfile.selectedCountryCode,
+                    actualCountryCode = node.countryCode,
+                )))
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: BackendException) {
@@ -253,11 +268,11 @@ class VpnSessionCoordinator(
                 deviceKey = currentDevice.deviceKey,
                 deviceNonce = challenge.nonce,
                 deviceSignature = signature,
-                countryCode = sessionSelection.countryCode.takeIf { !settings.advancedSettings.multiHop.enabled },
-                locationCode = sessionSelection.locationCode.takeIf { !settings.advancedSettings.multiHop.enabled },
-                excludeLocationCode = sessionSelection.excludeLocationCode.takeIf { !settings.advancedSettings.multiHop.enabled },
+                countryCode = sessionSelection.countryCode.takeUnless { settings.advancedSettings.multiHop.enabled },
+                locationCode = sessionSelection.locationCode.takeUnless { settings.advancedSettings.multiHop.enabled },
+                excludeLocationCode = sessionSelection.excludeLocationCode.takeUnless { settings.advancedSettings.multiHop.enabled },
                 profileCode = profileCode,
-                nodeId = sessionSelection.nodeId.takeIf { !settings.advancedSettings.multiHop.enabled },
+                nodeId = sessionSelection.nodeId.takeUnless { settings.advancedSettings.multiHop.enabled },
                 multiHop = settings.advancedSettings.multiHop.takeIf { it.enabled },
         ) }
         if (!session.canConnect) {

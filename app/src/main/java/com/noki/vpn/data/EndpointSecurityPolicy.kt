@@ -3,8 +3,6 @@ package com.noki.vpn.data
 import java.util.Locale
 
 object EndpointSecurityPolicy {
-    private val XHTTP_MODES = setOf("stream-up", "packet-up")
-
     fun isAllowedCandidate(candidate: BackendEndpointCandidate): Boolean {
         if (candidate.allowInsecure) return false
         if (candidate.entryHost.isBlank()) return false
@@ -12,26 +10,12 @@ object EndpointSecurityPolicy {
         val proxyType = candidate.proxyType.lowercase(Locale.ROOT)
         val security = candidate.security.lowercase(Locale.ROOT)
         val transport = candidate.normalizedTransport()
-        val mode = candidate.normalizedTransportMode()
+        val mode = candidate.transportMode.orEmpty().lowercase(Locale.ROOT).trim()
+        if (!isSupportedTransport(proxyType, security, transport, mode)) return false
 
-        if (EndpointTransportPolicy.isHysteria(candidate)) {
-            return proxyType == "hysteria" &&
-                transport == "hysteria" &&
-                security == "tls" &&
-                candidate.serverName.isNotBlank()
-        }
-
-        if (proxyType != "vless") return false
-        return when (security) {
-            "reality" -> candidate.hasRealityMaterial() &&
-                when (transport) {
-                    "tcp" -> true
-                    "xhttp" -> mode in XHTTP_MODES && candidate.path.orEmpty().isNotBlank()
-                    else -> false
-                }
-            "tls" -> transport == "tcp" && candidate.serverName.isNotBlank()
-            else -> false
-        }
+        return candidate.serverName.isNotBlank() &&
+            (security != "reality" || candidate.hasRealityMaterial()) &&
+            (transport != "xhttp" || candidate.path.orEmpty().isNotBlank())
     }
 
     fun isAllowedProfile(profile: VlessProfile): Boolean {
@@ -41,30 +25,31 @@ object EndpointSecurityPolicy {
         val proxyType = profile.proxyType.lowercase(Locale.ROOT)
         val security = profile.security.lowercase(Locale.ROOT)
         val transport = normalizedProfileTransport(profile.transport)
-        val mode = profile.transportMode.lowercase(Locale.ROOT).trim().ifBlank {
-            if (transport == "xhttp") "stream-up" else ""
-        }
+        val mode = profile.transportMode.lowercase(Locale.ROOT).trim()
+        if (!isSupportedTransport(proxyType, security, transport, mode)) return false
 
-        if (proxyType == "hysteria") {
-            return transport == "hysteria" &&
-                security == "tls" &&
-                profile.serverName.isNotBlank()
-        }
+        return profile.serverName.isNotBlank() &&
+            (security != "reality" || (profile.publicKey.isNotBlank() && profile.shortId.isNotBlank())) &&
+            (transport != "xhttp" || profile.path.isNotBlank())
+    }
 
-        if (proxyType != "vless") return false
-        return when (security) {
-            "reality" -> profile.serverName.isNotBlank() &&
-                profile.publicKey.isNotBlank() &&
-                profile.shortId.isNotBlank() &&
-                when (transport) {
-                    "tcp" -> true
-                    "xhttp" -> mode in XHTTP_MODES && profile.path.isNotBlank()
-                    else -> false
-                }
-            "tls" -> transport == "tcp" && profile.serverName.isNotBlank()
+    fun isAllowedOption(option: VpnEndpointOption): Boolean =
+        option.host.isNotBlank() && option.port in 1..65535 && isSupportedTransport(
+            option.proxyType.lowercase(Locale.ROOT), option.security.lowercase(Locale.ROOT),
+            normalizedProfileTransport(option.transport), option.transportMode.lowercase(Locale.ROOT).trim(),
+        )
+
+    private fun isSupportedTransport(proxyType: String, security: String, transport: String, mode: String): Boolean =
+        when (proxyType) {
+            "vless" -> when (security) {
+                "reality" -> (transport == "tcp" && mode.isBlank()) ||
+                    (transport == "xhttp" && mode == "stream-up")
+                "tls" -> transport == "tcp" && mode.isBlank()
+                else -> false
+            }
+            "hysteria" -> security == "tls" && transport == "hysteria" && mode.isBlank()
             else -> false
         }
-    }
 
     private fun BackendEndpointCandidate.hasRealityMaterial(): Boolean {
         return serverName.isNotBlank() &&

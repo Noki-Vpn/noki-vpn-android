@@ -11,13 +11,13 @@ import org.junit.Test
 class AuthLayoutPolicyTest {
     @Test
     fun `keyboard shift is zero without IME`() {
-        assertEquals(0.dp, authKeyboardShift(800.dp, 0.dp, 120.dp, 700.dp))
+        assertEquals(0.dp, authKeyboardShift(800.dp, 0.dp, 700.dp))
     }
 
     @Test
-    fun `keyboard shift moves overlap but keeps content top margin`() {
-        assertEquals(205.dp, authKeyboardShift(800.dp, 300.dp, 250.dp, 700.dp))
-        assertEquals(26.dp, authKeyboardShift(800.dp, 300.dp, 50.dp, 700.dp))
+    fun `keyboard shift clears the full form even when its top scrolls offscreen`() {
+        assertEquals(205.dp, authKeyboardShift(800.dp, 300.dp, 700.dp))
+        assertEquals(0.dp, authKeyboardShift(800.dp, 300.dp, 400.dp))
     }
 
     @Test

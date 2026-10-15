@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 
 @Composable
 internal fun AuthSecondaryButton(
@@ -41,7 +41,7 @@ internal fun AuthSecondaryButton(
     borderColor: Color? = null,
     cornerRadius: Dp = 16.dp,
     textFontSize: TextUnit = authSp(14f),
-    backdrop: LayerBackdrop? = null,
+    backdrop: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean = false,
     onClick: () -> Unit,
 ) {
@@ -101,7 +101,7 @@ internal fun AuthPrimaryButton(
     textFontWeight: FontWeight = FontWeight.Medium,
     useCommonButtonTextStyle: Boolean = true,
     cornerRadius: Dp = 20.dp,
-    backdrop: LayerBackdrop? = null,
+    backdrop: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean = false,
     onClick: () -> Unit,
 ) {

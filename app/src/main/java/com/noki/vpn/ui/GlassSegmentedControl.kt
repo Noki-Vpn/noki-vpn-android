@@ -40,14 +40,14 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.backdrop.shadow.InnerShadow
-import com.kyant.backdrop.shadow.Shadow
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
+import com.styropyr0.prismal.drawPrismalGlass
+import com.styropyr0.prismal.effects.prismalBlur
+import com.styropyr0.prismal.effects.prismalLens
+import com.styropyr0.prismal.specular.PrismalSpecular
+import com.styropyr0.prismal.depth.PrismalDepthInset
+import com.styropyr0.prismal.depth.PrismalDepthShadow
 import kotlin.math.roundToInt
 
 private val GlassSegmentStroke = Color(0xFF29404E)
@@ -81,7 +81,7 @@ internal fun GlassSegmentedControl(
     val clampedSelectedIndex = selectedIndex.coerceIn(labels.indices)
     val currentOnSelectedIndexChanged by rememberUpdatedState(onSelectedIndexChanged)
     val interactionSource = remember { MutableInteractionSource() }
-    val textBackdrop = if (liveGlassEnabled) rememberLayerBackdrop() else null
+    val textBackdrop = if (liveGlassEnabled) rememberPrismalGlassLayer() else null
     val animationScope = rememberCoroutineScope()
     val capsuleShape = RoundedCornerShape(percent = 50)
 
@@ -245,7 +245,7 @@ internal fun GlassSegmentedControl(
                     .fillMaxSize()
                     .clip(capsuleShape)
                     .alpha(0f)
-                    .layerBackdrop(textBackdrop),
+                    .prismalGlassLayer(textBackdrop),
             ) {
                 LabelsContent(clickable = false)
             }
@@ -279,28 +279,28 @@ internal fun GlassSegmentedControl(
                         .fillMaxSize()
                         .then(
                             if (liveGlassEnabled && textBackdrop != null) {
-                                Modifier.drawBackdrop(
+                                Modifier.drawPrismalGlass(
                                     backdrop = textBackdrop,
                                     shape = { capsuleShape },
                                     effects = {
                                         val progress = dampedDragAnimation.pressProgress
-                                        blur(activeBlur.toPx() * progress)
-                                        lens(
+                                        prismalBlur(activeBlur.toPx() * progress)
+                                        prismalLens(
                                             refractionHeight = lensRefractionHeight.toPx() * progress,
                                             refractionAmount = lensRefractionAmount.toPx() * progress,
                                             depthEffect = depthEffectEnabled,
-                                            chromaticAberration = chromaticAberration,
+                                            chromaticAberration = if (chromaticAberration) 1f else 0f,
                                         )
                                     },
-                                    highlight = {
-                                        Highlight.Default.copy(alpha = dampedDragAnimation.pressProgress * 0.55f)
+                                    specular = {
+                                        PrismalSpecular.Default.copy(alpha = dampedDragAnimation.pressProgress * 0.55f)
                                     },
-                                    shadow = {
-                                        Shadow(alpha = dampedDragAnimation.pressProgress * 0.45f)
+                                    depthShadow = {
+                                        PrismalDepthShadow(alpha = dampedDragAnimation.pressProgress * 0.45f)
                                     },
-                                    innerShadow = {
+                                    depthInset = {
                                         val progress = dampedDragAnimation.pressProgress
-                                        InnerShadow(
+                                        PrismalDepthInset(
                                             radius = 6.dp * progress,
                                             alpha = progress * 0.75f,
                                         )

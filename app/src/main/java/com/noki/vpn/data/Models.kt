@@ -45,10 +45,18 @@ enum class GlassMode(
     FULL(liveGlassEnabled = true, simpleTransitions = false),
 }
 
+enum class InstallOnboardingStep {
+    CONSENT,
+    ROUTING,
+    APPEARANCE,
+    COMPLETE,
+}
+
 enum class VpnProtocol {
     AUTO,
     TLS,
-    REALITY;
+    REALITY,
+    WIREGUARD;
 
     companion object {
         fun fromBackendCode(code: String?): VpnProtocol = when {
@@ -78,17 +86,26 @@ data class MultiHopSettings(
     val enabled: Boolean = false,
     val entry: HopSelection? = null,
     val exit: HopSelection? = null,
-)
+) {
+    fun explicitNodeIds(): Pair<String, String>? {
+        if (!enabled) return null
+        fun node(selection: HopSelection?): String {
+            val selected = requireNotNull(selection) { "multihop_selector_missing" }
+            require(selected.kind == ServerSelectionMode.SERVER) { "multihop_selector_invalid" }
+            return canonicalRuUuid(requireNotNull(selected.nodeId) { "multihop_selector_missing" })
+        }
+        val entryId = node(entry)
+        val exitId = node(exit)
+        require(entryId != exitId) { "ru_route_identity_invalid" }
+        return entryId to exitId
+    }
+}
 
-@Immutable
-data class MultiHopRuntime(
-    val selection: MultiHopSettings,
-    val entryNodeId: String,
-    val exitNodeId: String,
-    val relay: VlessProfile,
-    val policyHash: String,
-    val policyExpiresAtEpochMillis: Long,
-)
+sealed interface RuRelaySelection {
+    data object Off : RuRelaySelection
+    data object Auto : RuRelaySelection
+    data class Node(val nodeId: String) : RuRelaySelection
+}
 
 enum class VpnConnectionState {
     DISCONNECTED,
@@ -143,17 +160,6 @@ data class AppInfo(
     val isSystemApp: Boolean = false,
 )
 
-data class YoutubeCascadeProfile(
-    val host: String,
-    val port: Int = 443,
-    val uuid: String,
-    val serverName: String,
-    val publicKey: String,
-    val shortId: String,
-    val fingerprint: String = "chrome",
-    val flow: String = "",
-)
-
 data class VlessProfile(
     val remark: String = "Noki VPN",
     val endpointCode: String = "",
@@ -176,8 +182,7 @@ data class VlessProfile(
     val publicKey: String = "",
     val shortId: String = "",
     val spiderX: String = "/",
-    val youtubeCascade: YoutubeCascadeProfile? = null,
-    val multiHop: MultiHopRuntime? = null,
+    val multiHop: BackendMultiHopSession? = null,
 )
 
 data class VpnEndpointOption(
@@ -232,6 +237,7 @@ data class UserProfile(
     val trafficLimitGb: Double? = null,
     val subscriptionExpiresAt: String? = null,
     val subscriptionStatus: String = "active",
+    val credentialsSetupRequired: Boolean = false,
 )
 
 data class VpnIncidentReport(
@@ -261,18 +267,28 @@ data class SecuritySettings(
 
 data class AdvancedSettings(
     val protocol: VpnProtocol = VpnProtocol.AUTO,
+    val ruRelayEnabled: Boolean = false,
     val endpointSelectionMode: EndpointSelectionMode = EndpointSelectionMode.AUTO,
     val manualEndpointCode: String = "",
     val manualEndpointGroupKey: String = "",
     val connectionLogsEnabled: Boolean = true,
     val errorLogsEnabled: Boolean = true,
     val anonymousLogsEnabled: Boolean = false,
-    val youtubeDirectDpiEnabled: Boolean = false,
     val killSwitchEnabled: Boolean = false,
     val alwaysOnDomains: List<String> = emptyList(),
     val bypassDomains: List<String> = emptyList(),
     val multiHop: MultiHopSettings = MultiHopSettings(),
-)
+) {
+    val ruRelaySelection: RuRelaySelection
+        get() = if (ruRelayEnabled) RuRelaySelection.Auto else RuRelaySelection.Off
+
+    val effectiveProtocol: VpnProtocol
+        get() {
+            if (ruRelayEnabled) return VpnProtocol.WIREGUARD
+            require(protocol != VpnProtocol.WIREGUARD) { "wireguard_requires_ru_relay" }
+            return if (multiHop.enabled) VpnProtocol.AUTO else protocol
+        }
+}
 
 data class StoredSettings(
     val profile: VlessProfile,
@@ -292,6 +308,7 @@ data class StoredSettings(
     val backendDeviceKey: String = "",
     val backendDeviceId: String = "",
     val backendDeviceAccessRole: String = "owner",
+    val ruRelaySelectionRevision: Long = 0L,
 )
 
 @Immutable

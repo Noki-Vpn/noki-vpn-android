@@ -41,6 +41,7 @@ data class BackendUser(
     val hasRealEmail: Boolean = true,
     val hasPassword: Boolean = true,
     val telegramLinked: Boolean = false,
+    val credentialsSetupRequired: Boolean = false,
 )
 
 data class BackendAccountPasswordChange(
@@ -71,6 +72,7 @@ data class BackendAuthTokens(
     val tokenType: String = "bearer",
     val expiresInSeconds: Long? = null,
     val refreshExpiresAt: String? = null,
+    val credentialsSetupRequired: Boolean = false,
 )
 
 data class BackendDevice(
@@ -253,18 +255,91 @@ data class BackendVpnSession(
     val planCode: String?,
     val endpointCandidates: List<BackendEndpointCandidate>,
     val connectIp: String? = null,
-    val youtubeCascade: YoutubeCascadeProfile? = null,
-    val routeMode: String = "direct",
     val multiHop: BackendMultiHopSession? = null,
 )
 
 data class BackendMultiHopSession(
-    val entry: BackendEndpointCandidate,
     val selection: MultiHopSettings,
+    val entryNodeId: String,
     val exitNodeId: String,
+    val entryIp: String,
     val policyHash: String,
-    val policyExpiresAtEpochMillis: Long,
+    val version: Int = 2,
 )
+
+data class RuWireGuardSessionExpectation(
+    val requestId: String,
+    val publicKeyId: String,
+    val exitNodeId: String,
+    val relaySelection: RuRelaySelection,
+    val entryNodeId: String? = null,
+    val routeVersion: Int = 1,
+)
+
+data class RuWireGuardSessionRequest(
+    val deviceId: String,
+    val deviceKey: String?,
+    val deviceNonce: String,
+    val deviceSignature: String,
+    val requestId: String,
+    val publicKeyId: String,
+    val exitNodeId: String,
+    val relaySelection: RuRelaySelection,
+    val relayRttSamples: List<RuRelayRttSample> = emptyList(),
+    val entryNodeId: String? = null,
+    val routeVersion: Int = 1,
+)
+
+data class RuRelayRttSample(val nodeId: String, val rttMs: Int)
+
+data class BackendRuWireGuardKey(
+    val id: String,
+    val publicKey: String,
+)
+
+data class BackendRuWireGuardIdentity(
+    val requestId: String,
+    val sessionId: String,
+    val generation: Int,
+    val publicKeyId: String,
+    val relaySelection: RuRelaySelection,
+    val relayNodeId: String,
+    val exitNodeId: String,
+    val routeVersion: Int,
+    val routeId: String,
+    val routeGeneration: Int,
+    val entryNodeId: String?,
+    val leaseExpiresAtEpochMillis: Long?,
+    val revokeToken: String? = null,
+) {
+    fun hasSameAuthorization(other: BackendRuWireGuardIdentity): Boolean =
+        copy(leaseExpiresAtEpochMillis = null) == other.copy(leaseExpiresAtEpochMillis = null)
+}
+
+data class PendingRuWireGuardRevoke(
+    val sessionId: String,
+    val revokeToken: String,
+    val provisional: Boolean = false,
+)
+
+data class BackendRuWireGuardConfig(
+    val endpoint: String,
+    val serverPublicKey: String,
+    val address: String,
+    val dns: List<String>,
+    val mtu: Int,
+    val allowedIps: List<String>,
+)
+
+sealed interface BackendRuWireGuardSession {
+    val identity: BackendRuWireGuardIdentity
+
+    data class Pending(override val identity: BackendRuWireGuardIdentity) : BackendRuWireGuardSession
+    data class Ready(
+        override val identity: BackendRuWireGuardIdentity,
+        val wireguard: BackendRuWireGuardConfig,
+    ) : BackendRuWireGuardSession
+}
 
 data class BackendTemporaryVpnChallenge(
     val nonce: String,

@@ -1,11 +1,66 @@
 package com.noki.vpn
 
 import com.noki.vpn.data.AppLanguage
+import com.noki.vpn.data.BackendException
+import com.noki.vpn.data.UserProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RegistrationStateReducerTest {
+    @Test
+    fun completedCredentialsConflictRequestsRefreshWhileUsernameConflictKeepsItsValidationMessage() {
+        assertEquals(
+            "Registration is already complete. Refreshing your account",
+            AppErrorMapper.readableRegistrationError(AppLanguage.EN, BackendException("Credentials setup is not required", 409)),
+        )
+        assertEquals(
+            "This username is taken, try another",
+            AppErrorMapper.readableRegistrationError(AppLanguage.EN, BackendException("Username already exists", 409)),
+        )
+    }
+
+    @Test
+    fun pendingCredentialsUseExistingPasswordSubmissionWithoutEmailOrCode() {
+        val pending = AppUiState(
+            isAuthenticated = true,
+            userProfile = UserProfile(credentialsSetupRequired = true),
+            authStep = AuthStep.REGISTRATION_PASSWORD,
+            registrationForm = validForm().copy(email = "", verificationCode = ""),
+        )
+
+        val transition = AuthStepReducer.nextRegistrationStep(pending, AppLanguage.EN) {
+            error("Credentials setup must not validate an email")
+        } as AuthStepReducer.RegistrationStepTransition.Submit
+
+        assertEquals(pending.registrationForm, transition.form)
+        assertTrue(transition.state.registrationForm.isLoading)
+        val ordinary = pending.copy(userProfile = pending.userProfile.copy(credentialsSetupRequired = false))
+        val rejected = RegistrationStateReducer.submit(ordinary, AppLanguage.EN) { false }
+            as RegistrationStateReducer.SubmitTransition.UpdateState
+        assertEquals("Enter your email", rejected.state.registrationForm.error)
+    }
+
+    @Test
+    fun pendingCredentialsKeepUsernameLengthAndPasswordConfirmationValidation() {
+        val pending = AppUiState(
+            isAuthenticated = true,
+            userProfile = UserProfile(credentialsSetupRequired = true),
+            registrationForm = validForm().copy(email = "", verificationCode = ""),
+        )
+        val cases = listOf(
+            pending.registrationForm.copy(username = "ab") to "Username must be at least 3 characters",
+            pending.registrationForm.copy(password = "short") to "Password must be at least 8 characters",
+            pending.registrationForm.copy(passwordRepeat = "different") to "Passwords do not match",
+        )
+
+        for ((form, message) in cases) {
+            val update = RegistrationStateReducer.submit(pending.copy(registrationForm = form), AppLanguage.EN) { false }
+                as RegistrationStateReducer.SubmitTransition.UpdateState
+            assertEquals(message, update.state.registrationForm.error)
+        }
+    }
+
     @Test
     fun usernameInputRemovesCyrillicAndKeepsSupportedAscii() {
         assertEquals("john_1", RegistrationStateReducer.sanitizeUsernameInput("john_И1"))

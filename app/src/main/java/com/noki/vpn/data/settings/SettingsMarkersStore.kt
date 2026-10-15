@@ -10,6 +10,21 @@ internal class SettingsMarkersStore(
     private val appVersionCode: () -> Long,
     private val now: () -> Instant = Instant::now,
 ) {
+    fun loadInstallOnboardingStep(): InstallOnboardingStep = runCatching {
+        when (val stored = preferences.getString(KEY_INSTALL_ONBOARDING_STEP, null)) {
+            "COMPLETE" -> InstallOnboardingStep.APPEARANCE
+            COMPLETE_HOME_APPEARANCE -> InstallOnboardingStep.COMPLETE
+            else -> InstallOnboardingStep.valueOf(stored.orEmpty())
+        }
+    }.getOrDefault(InstallOnboardingStep.CONSENT)
+
+    fun saveInstallOnboardingStep(step: InstallOnboardingStep) {
+        val stored = if (step == InstallOnboardingStep.COMPLETE) COMPLETE_HOME_APPEARANCE else step.name
+        check(preferences.edit().putString(KEY_INSTALL_ONBOARDING_STEP, stored).commit()) {
+            "install_onboarding_persist_failed"
+        }
+    }
+
     fun clearVpnRuntimeState() {
         preferences.edit {
             remove(KEY_VPN_RUNTIME_STATE)
@@ -86,6 +101,8 @@ internal class SettingsMarkersStore(
     }
 
     private companion object {
+        const val KEY_INSTALL_ONBOARDING_STEP = "install_onboarding_step"
+        const val COMPLETE_HOME_APPEARANCE = "COMPLETE_HOME_APPEARANCE"
         val SEEN_APP_NOTIFICATION_IDS_LOCK = Any()
         const val KEY_VPN_RUNTIME_STATE = "vpn_runtime_state"
         const val KEY_VPN_RUNTIME_CONNECTED_AT = "vpn_runtime_connected_at"

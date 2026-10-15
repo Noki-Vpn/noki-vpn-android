@@ -42,23 +42,20 @@ import com.noki.vpn.R
 import com.noki.vpn.data.EndpointSelectionMode
 import com.noki.vpn.data.VpnConnectionState
 import com.noki.vpn.data.ServerSelectionMode
+import com.noki.vpn.data.usesRuForeignNodeCatalog
 import com.noki.vpn.isCurrentServerSelection
 import com.noki.vpn.data.appRoutingModeLabel
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberBackdrop
-import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import java.util.Locale
-import kotlinx.coroutines.delay
 @Composable
 fun HomeScreen(
     state: AppUiState,
     viewModel: MainViewModel,
     onConnectClicked: () -> Unit,
     onDisconnectClicked: () -> Unit,
-    sharedBackdrop: LayerBackdrop,
+    sharedBackdrop: PrismalGlassLayer,
     liveGlassEnabled: Boolean = true,
     showBackground: Boolean = true,
     showBottomNavigation: Boolean = true,
@@ -83,13 +80,22 @@ fun HomeScreen(
                 state.userProfile.actualCountryCode
             } else state.userProfile.selectedCountryCode
             val selectedLocation = homeSelectedLocation(state.locations, state.userProfile)
+            val ruRelayEnabled = state.advancedSettings.ruRelayEnabled
+            val usesRuCatalog = usesRuForeignNodeCatalog(ruRelayEnabled, state.ruForeignNodes)
+            val selectedForeignNode = state.ruForeignNodes.firstOrNull { it.id == state.userProfile.selectedNodeId }
+            val ruCountryCode = if (state.userProfile.serverSelectionMode == ServerSelectionMode.AUTO) {
+                state.userProfile.actualCountryCode
+            } else selectedForeignNode?.countryCode ?: state.userProfile.selectedCountryCode
+            val ruCountry = ruCountryCode.takeIf { it.isNotBlank() }
+                ?.let { Locale("", it).getDisplayCountry(Locale(language.tag)) }
             val multiHop = state.advancedSettings.multiHop
             fun hopLabel(selection: com.noki.vpn.data.HopSelection?): String = when (selection?.kind) {
                 ServerSelectionMode.COUNTRY -> state.locations.firstOrNull {
                     it.countryCode.equals(selection.countryCode, true)
                 }?.country ?: selection.countryCode.orEmpty()
-                ServerSelectionMode.SERVER -> state.locations.flatMap { it.servers }
-                    .firstOrNull { it.id == selection.nodeId }?.name
+                ServerSelectionMode.SERVER -> (if (usesRuCatalog) state.ruForeignNodes
+                    .firstOrNull { it.id == selection.nodeId }?.name else state.locations.flatMap { it.servers }
+                    .firstOrNull { it.id == selection.nodeId }?.name)
                     ?: tr(language, "Сервер недоступен", "Server unavailable")
                 else -> tr(language, "Не выбран", "Not selected")
             }
@@ -118,42 +124,12 @@ fun HomeScreen(
             )
             var isServerMenuExpanded by rememberSaveable { mutableStateOf(false) }
             LaunchedEffect(multiHop.enabled) { if (multiHop.enabled) isServerMenuExpanded = false }
-            var keepServerSheetBackdrop by remember { mutableStateOf(false) }
-            LaunchedEffect(isServerMenuExpanded) {
-                if (isServerMenuExpanded) {
-                    keepServerSheetBackdrop = true
-                } else {
-                    delay(HOME_SERVER_DROPDOWN_BACKDROP_KEEP_ALIVE_MS)
-                    keepServerSheetBackdrop = false
-                }
-            }
-            val serverSheetBackdropActive = isServerMenuExpanded || keepServerSheetBackdrop
-            val homeContentBackdrop = if (effectiveLiveGlassEnabled && serverSheetBackdropActive) {
-                rememberLayerBackdrop()
-            } else {
-                null
-            }
-            val serverSheetBackdrop = if (
-                effectiveLiveGlassEnabled &&
-                serverSheetBackdropActive &&
-                backdrop != null &&
-                homeContentBackdrop != null
-            ) {
-                rememberCombinedBackdrop(
-                    backdrop,
-                    rememberBackdrop(homeContentBackdrop) { drawBackdrop ->
-                        drawBackdrop()
-                    },
-                )
-            } else {
-                backdrop
-            }
             val serverConfirmationBackdrop = if (
                 effectiveLiveGlassEnabled &&
                 isServerMenuExpanded &&
                 state.dialog is AppDialog.ChangeServer
             ) {
-                rememberLayerBackdrop()
+                rememberPrismalGlassLayer()
             } else {
                 null
             }
@@ -190,14 +166,7 @@ fun HomeScreen(
                     .height(screenMaxHeight.coerceAtLeast(minimumContentHeight))
                     .then(
                         if (showBackground && backdrop != null) {
-                            Modifier.layerBackdrop(backdrop)
-                        } else {
-                            Modifier
-                        },
-                    )
-                    .then(
-                        if (homeContentBackdrop != null) {
-                            Modifier.layerBackdrop(homeContentBackdrop)
+                            Modifier.prismalGlassLayer(backdrop)
                         } else {
                             Modifier
                         },
@@ -319,13 +288,14 @@ fun HomeScreen(
                     liveGlassEnabled = effectiveLiveGlassEnabled,
                     country = if (multiHop.enabled) "MultiHop" else if (state.userProfile.serverSelectionMode == ServerSelectionMode.AUTO) {
                         tr(language, "Автовыбор", "Automatic")
-                    } else selectedLocation?.country
+                    } else (if (usesRuCatalog) ruCountry else selectedLocation?.country)
                         ?: tr(language, "Нет сервера", "No server"),
                     subtitle = if (multiHop.enabled) multiHopLabel else if (state.userProfile.serverSelectionMode == ServerSelectionMode.AUTO) {
-                        selectedLocation?.country
+                        if (usesRuCatalog) ruCountry else selectedLocation?.country
                     } else if (state.userProfile.serverSelectionMode == ServerSelectionMode.SERVER) {
-                        selectedServer?.name
+                        if (usesRuCatalog) selectedForeignNode?.name else selectedServer?.name
                     } else null,
+                    countryCode = if (usesRuCatalog) ruCountryCode.takeIf { it.isNotBlank() } else null,
                 )
             }
 
@@ -365,7 +335,7 @@ fun HomeScreen(
                     .zIndex(20f)
                     .then(
                         if (serverConfirmationBackdrop != null) {
-                            Modifier.layerBackdrop(serverConfirmationBackdrop)
+                            Modifier.prismalGlassLayer(serverConfirmationBackdrop)
                         } else {
                             Modifier
                         },
@@ -377,10 +347,8 @@ fun HomeScreen(
                     scale = scale,
                     language = language,
                     locations = state.locations,
-                    backdrop = serverSheetBackdrop,
-                    serverRowsBackdrop = backdrop,
-                    liveGlassEnabled = effectiveLiveGlassEnabled,
-                    animateRows = liveWorkEnabled,
+                    foreignNodes = state.ruForeignNodes,
+                    ruRelayEnabled = ruRelayEnabled,
                     onCollapse = {
                         isServerMenuExpanded = false
                     },
@@ -400,10 +368,11 @@ fun HomeScreen(
                 val code = dialog.locationCode
                 val serverName = when (dialog.mode) {
                     ServerSelectionMode.AUTO -> tr(language, "Автовыбор", "Automatic")
-                    ServerSelectionMode.COUNTRY -> state.locations.firstOrNull { it.code.equals(code, true) }
-                        ?.country ?: code
-                    ServerSelectionMode.SERVER -> state.locations.flatMap { it.servers }
-                        .firstOrNull { it.id == code }?.name ?: tr(language, "Сервер недоступен", "Server unavailable")
+                    ServerSelectionMode.COUNTRY -> if (usesRuCatalog) Locale("", code).getDisplayCountry(Locale(language.tag))
+                        else state.locations.firstOrNull { it.code.equals(code, true) }?.country ?: code
+                    ServerSelectionMode.SERVER -> (if (usesRuCatalog) state.ruForeignNodes.firstOrNull { it.id == code }?.name
+                        else state.locations.flatMap { it.servers }.firstOrNull { it.id == code }?.name)
+                        ?: tr(language, "Сервер недоступен", "Server unavailable")
                 }
                 val message = if (state.connectionState == VpnConnectionState.DISCONNECTED) {
                     tr(

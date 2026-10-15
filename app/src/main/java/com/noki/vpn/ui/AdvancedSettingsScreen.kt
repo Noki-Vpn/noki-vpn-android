@@ -1,5 +1,6 @@
 package com.noki.vpn.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -30,8 +31,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
 import com.noki.vpn.AppUiState
 import com.noki.vpn.MainViewModel
 import com.noki.vpn.manualEndpointOptionsForCurrentCountry
@@ -53,8 +54,8 @@ private val AdvancedNoFontPaddingTextStyle = TextStyle(
 fun AdvancedSettingsScreen(
     state: AppUiState,
     viewModel: MainViewModel,
-    sharedBackdrop: LayerBackdrop,
-    cardBackdrop: LayerBackdrop? = null,
+    sharedBackdrop: PrismalGlassLayer,
+    cardBackdrop: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean = true,
     showBackground: Boolean = true,
     onAppFilterClicked: () -> Unit = {},
@@ -78,6 +79,9 @@ fun AdvancedSettingsScreen(
             val bypassCount = state.advancedSettings.bypassDomains.size
             var showProtocolSheet by rememberSaveable { mutableStateOf(false) }
             var showProtocolNotice by rememberSaveable { mutableStateOf(false) }
+            LaunchedEffect(state.advancedSettings.ruRelayEnabled, state.advancedSettings.multiHop.enabled) {
+                if (state.advancedSettings.ruRelayEnabled || state.advancedSettings.multiHop.enabled) showProtocolSheet = false
+            }
 
             LaunchedEffect(showProtocolNotice) {
                 if (showProtocolNotice) {
@@ -85,8 +89,10 @@ fun AdvancedSettingsScreen(
                     showProtocolNotice = false
                 }
             }
-            LaunchedEffect(state.isAuthenticated, state.userProfile.selectedCountryCode, state.advancedSettings.multiHop.enabled) {
-                if (state.isAuthenticated && !state.advancedSettings.multiHop.enabled) {
+            LaunchedEffect(state.isAuthenticated, state.userProfile.selectedCountryCode,
+                state.advancedSettings.multiHop.enabled, state.advancedSettings.ruRelayEnabled) {
+                if (state.isAuthenticated && !state.advancedSettings.multiHop.enabled &&
+                    !state.advancedSettings.ruRelayEnabled) {
                     viewModel.refreshEndpointOptions(context)
                 }
             }
@@ -95,7 +101,7 @@ fun AdvancedSettingsScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
+                        .then(if (backdrop != null) Modifier.prismalGlassLayer(backdrop) else Modifier),
                 ) {
                     HomeBackground(liveGlassEnabled = liveGlassEnabled)
                 }
@@ -138,24 +144,48 @@ fun AdvancedSettingsScreen(
 
                 Spacer(modifier = Modifier.height(metrics.dp(20f)))
 
-                if (!state.advancedSettings.multiHop.enabled) AdvancedToggleCard(
-                    enabled = autoEndpointSelection,
-                    title = tr(language, "Автовыбор протокола", "Auto protocol selection"),
+                AdvancedToggleCard(
+                    enabled = state.advancedSettings.ruRelayEnabled,
+                    title = tr(language, "RU-реле", "RU relay"),
                     backdrop = surfaceBackdrop,
                     liveGlassEnabled = liveGlassEnabled,
-                    modifier = Modifier
-                        .widthIn(max = metrics.dp(370f))
-                        .fillMaxWidth()
+                    modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
                         .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp)),
-                    onEnabledChanged = { enabled ->
-                        viewModel.toggleAutoEndpointSelection(enabled)
-                        if (!enabled) {
-                            viewModel.refreshEndpointOptions(context, force = true)
-                        }
-                    },
+                    onEnabledChanged = viewModel::setRuRelayEnabled,
                 )
+                if (state.advancedSettings.multiHop.enabled) {
+                    AdvancedText(
+                        text = if (state.advancedSettings.ruRelayEnabled) tr(language,
+                            "MultiHop работает через RU-реле.", "MultiHop uses RU relay.") else tr(language,
+                            "MultiHop работает через выбранный вход и выход.",
+                            "MultiHop uses the selected entry and exit."),
+                        fontSize = 12f, lineHeight = 16f, color = AdvancedTextSecondary,
+                        modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
+                            .padding(horizontal = metrics.dp(18f), vertical = metrics.dp(8f)),
+                    )
+                }
+                if (!state.advancedSettings.multiHop.enabled && !state.advancedSettings.ruRelayEnabled) {
+                    Spacer(modifier = Modifier.height(metrics.dp(25f)))
+                    AdvancedToggleCard(
+                        enabled = autoEndpointSelection,
+                        title = tr(language, "Автовыбор протокола", "Auto protocol selection"),
+                        backdrop = surfaceBackdrop,
+                        liveGlassEnabled = liveGlassEnabled,
+                        modifier = Modifier
+                            .widthIn(max = metrics.dp(370f))
+                            .fillMaxWidth()
+                            .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp)),
+                        onEnabledChanged = { enabled ->
+                            viewModel.toggleAutoEndpointSelection(enabled)
+                            if (!enabled) {
+                                viewModel.refreshEndpointOptions(context, force = true)
+                            }
+                        },
+                    )
+                }
 
-                if (!autoEndpointSelection && !state.advancedSettings.multiHop.enabled) {
+                if (!autoEndpointSelection && !state.advancedSettings.multiHop.enabled &&
+                    !state.advancedSettings.ruRelayEnabled) {
                     Spacer(modifier = Modifier.height(metrics.dp(25f)))
 
                     AdvancedManualProtocolCard(
@@ -177,14 +207,21 @@ fun AdvancedSettingsScreen(
                 }
 
                 Spacer(modifier = Modifier.height(metrics.dp(25f)))
-                AdvancedSmallButton(
-                    text = if (state.advancedSettings.multiHop.enabled) "MultiHop ✓" else "MultiHop",
-                    modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth().height(metrics.dp(76f)),
+                AdvancedPanelSurface(
                     backdrop = surfaceBackdrop,
                     liveGlassEnabled = liveGlassEnabled,
-                    glassEnabled = true,
-                    onClick = onMultiHopClicked,
-                )
+                    modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
+                        .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp))
+                        .clickable(onClick = onMultiHopClicked),
+                ) {
+                    AdvancedText(
+                        text = "MultiHop",
+                        fontSize = 16f,
+                        lineHeight = 20f,
+                        color = AdvancedTextPrimary,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = metrics.dp(20f)),
+                    )
+                }
                 Spacer(modifier = Modifier.height(metrics.dp(25f)))
                 AdvancedToggleCard(
                     enabled = state.advancedSettings.killSwitchEnabled,
@@ -213,20 +250,6 @@ fun AdvancedSettingsScreen(
                 )
 
                 Spacer(modifier = Modifier.height(metrics.dp(25f)))
-
-                AdvancedYoutubeNoAdsRow(
-                    language = language,
-                    enabled = state.advancedSettings.youtubeDirectDpiEnabled,
-                    onEnabledChanged = viewModel::setYoutubeDirectDpiEnabled,
-                    backdrop = surfaceBackdrop,
-                    liveGlassEnabled = liveGlassEnabled,
-                    modifier = Modifier
-                        .widthIn(max = metrics.dp(370f))
-                        .fillMaxWidth()
-                        .height(metrics.dp(80f)),
-                )
-
-                Spacer(modifier = Modifier.height(metrics.dp(24f)))
 
                 AdvancedText(
                     text = tr(language, "Умные правила для сайтов", "Smart site rules"),
@@ -304,7 +327,7 @@ fun AdvancedSettingsScreen(
                     )
                 }
 
-                if (showProtocolSheet) {
+                if (showProtocolSheet && !state.advancedSettings.ruRelayEnabled) {
                     val manualOptions = manualEndpointOptionsForCurrentCountry(state)
                     AdvancedProtocolSheet(
                         selectedProtocol = state.advancedSettings.protocol,

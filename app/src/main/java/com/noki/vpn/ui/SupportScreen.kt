@@ -45,8 +45,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
 import com.noki.vpn.AppUiState
 import com.noki.vpn.R
 
@@ -62,7 +62,7 @@ private val SupportNoFontPaddingTextStyle = TextStyle(
 @Composable
 fun SupportScreen(
     state: AppUiState,
-    sharedBackdrop: LayerBackdrop,
+    sharedBackdrop: PrismalGlassLayer,
     liveGlassEnabled: Boolean = true,
     showBackground: Boolean = true,
 ) {
@@ -82,7 +82,7 @@ fun SupportScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .then(
-                            if (liveGlassEnabled) Modifier.layerBackdrop(backdrop) else Modifier,
+                            if (liveGlassEnabled) Modifier.prismalGlassLayer(backdrop) else Modifier,
                         ),
                 ) {
                     HomeBackground(liveGlassEnabled = liveGlassEnabled)

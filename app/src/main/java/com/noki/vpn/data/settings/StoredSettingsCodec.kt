@@ -40,11 +40,10 @@ internal class StoredSettingsCodec(
         .put("publicKey", settings.profile.publicKey)
         .put("shortId", settings.profile.shortId)
         .put("spiderX", settings.profile.spiderX)
-        .put(
-            "youtubeCascade",
-            settings.profile.youtubeCascade?.let(::encodeYoutubeCascade) ?: JSONObject.NULL,
-        )
-        .put("multiHopRuntime", settings.profile.multiHop?.let(::encodeMultiHopRuntime) ?: JSONObject.NULL)
+        .put("multiHopRuntime", settings.profile.multiHop?.let { route -> JSONObject()
+            .put("version", route.version).put("selection", encodeMultiHopSettings(route.selection))
+            .put("entryNodeId", route.entryNodeId).put("exitNodeId", route.exitNodeId)
+            .put("entryIp", route.entryIp).put("policyHash", route.policyHash) })
         .put("filterMode", settings.filterMode.name)
         .put("selectedPackages", JSONArray(settings.selectedPackages.sorted()))
         .put("backendUserId", settings.userProfile.backendUserId)
@@ -54,6 +53,7 @@ internal class StoredSettingsCodec(
         .put("hasRealEmail", settings.userProfile.hasRealEmail)
         .put("hasPassword", settings.userProfile.hasPassword)
         .put("telegramLinked", settings.userProfile.telegramLinked)
+        .put("credentialsSetupRequired", settings.userProfile.credentialsSetupRequired)
         .put("selectedPlanCode", settings.userProfile.selectedPlanCode.code)
         .put("selectedPlanCodeRaw", settings.userProfile.selectedPlanCodeRaw)
         .put("selectedPlanName", settings.userProfile.selectedPlanName ?: "")
@@ -76,6 +76,8 @@ internal class StoredSettingsCodec(
         .put("loginAlertsEnabled", settings.securitySettings.loginAlertsEnabled)
         .put("protectNewDevices", settings.securitySettings.protectNewDevices)
         .put("protocol", settings.advancedSettings.protocol.name)
+        .put("ruRelayEnabled", settings.advancedSettings.ruRelayEnabled)
+        .put("ruRelaySelectionRevision", settings.ruRelaySelectionRevision)
         .put("endpointSelectionMode", settings.advancedSettings.endpointSelectionMode.name)
         .put("manualEndpointCode", settings.advancedSettings.manualEndpointCode)
         .put("manualEndpointGroupKey", settings.advancedSettings.manualEndpointGroupKey)
@@ -83,7 +85,6 @@ internal class StoredSettingsCodec(
         .put("errorLogsEnabled", settings.advancedSettings.errorLogsEnabled)
         .put("anonymousLogsEnabled", settings.advancedSettings.anonymousLogsEnabled)
         .put("anonymousLogConsentVersion", 1)
-        .put("youtubeDirectDpiEnabled", settings.advancedSettings.youtubeDirectDpiEnabled)
         .put("multiHopSettings", encodeMultiHopSettings(settings.advancedSettings.multiHop))
         .put("killSwitchEnabled", settings.advancedSettings.killSwitchEnabled)
         .put("alwaysOnDomains", JSONArray(settings.advancedSettings.alwaysOnDomains))
@@ -123,8 +124,12 @@ internal class StoredSettingsCodec(
             publicKey = json.optString("publicKey"),
             shortId = json.optString("shortId"),
             spiderX = json.optString("spiderX", "/"),
-            youtubeCascade = decodeYoutubeCascade(json.optJSONObject("youtubeCascade")),
-            multiHop = decodeMultiHopRuntime(json.optJSONObject("multiHopRuntime")),
+            multiHop = json.optJSONObject("multiHopRuntime")?.let { route -> BackendMultiHopSession(
+                selection = decodeMultiHopSettings(route.getJSONObject("selection")),
+                entryNodeId = route.getString("entryNodeId"), exitNodeId = route.getString("exitNodeId"),
+                entryIp = route.optString("entryIp"), policyHash = route.getString("policyHash"),
+                version = route.getInt("version"),
+            ) },
         ),
         filterMode = runCatching {
             AppFilterMode.valueOf(json.optString("filterMode", AppFilterMode.ALL_APPS.name))
@@ -138,6 +143,7 @@ internal class StoredSettingsCodec(
             hasRealEmail = json.optBoolean("hasRealEmail", true),
             hasPassword = json.optBoolean("hasPassword", true),
             telegramLinked = json.optBoolean("telegramLinked", false),
+            credentialsSetupRequired = json.optBoolean("credentialsSetupRequired", false),
             selectedPlanCode = PlanCode.fromCode(json.optString("selectedPlanCode", PlanCode.FREE.code)),
             selectedPlanCodeRaw = json.optString(
                 "selectedPlanCodeRaw",
@@ -184,7 +190,8 @@ internal class StoredSettingsCodec(
         advancedSettings = AdvancedSettings(
             protocol = runCatching {
                 VpnProtocol.valueOf(json.optString("protocol", VpnProtocol.AUTO.name))
-            }.getOrElse { VpnProtocol.AUTO },
+            }.getOrElse { VpnProtocol.AUTO }.takeUnless { it == VpnProtocol.WIREGUARD } ?: VpnProtocol.AUTO,
+            ruRelayEnabled = json.optBoolean("ruRelayEnabled", defaults().advancedSettings.ruRelayEnabled),
             endpointSelectionMode = runCatching {
                 EndpointSelectionMode.valueOf(
                     json.optString("endpointSelectionMode", EndpointSelectionMode.AUTO.name),
@@ -197,7 +204,6 @@ internal class StoredSettingsCodec(
             anonymousLogsEnabled =
                 json.optInt("anonymousLogConsentVersion", 0) >= 1 &&
                     json.optBoolean("anonymousLogsEnabled", false),
-            youtubeDirectDpiEnabled = json.optBoolean("youtubeDirectDpiEnabled", false),
             multiHop = decodeMultiHopSettings(json.optJSONObject("multiHopSettings")),
             killSwitchEnabled = json.optBoolean("killSwitchEnabled", false),
             alwaysOnDomains = DefaultStoredSettingsFactory.normalizeAlwaysOnDomains(
@@ -217,39 +223,8 @@ internal class StoredSettingsCodec(
         backendDeviceKey = json.optString("backendDeviceKey"),
         backendDeviceId = json.optString("backendDeviceId"),
         backendDeviceAccessRole = json.optString("backendDeviceAccessRole", "owner").ifBlank { "owner" },
+        ruRelaySelectionRevision = json.optLong("ruRelaySelectionRevision", 0L).coerceAtLeast(0L),
     )
-
-    private fun encodeYoutubeCascade(profile: YoutubeCascadeProfile): JSONObject = JSONObject()
-        .put("host", profile.host)
-        .put("port", profile.port)
-        .put("uuid", profile.uuid)
-        .put("serverName", profile.serverName)
-        .put("publicKey", profile.publicKey)
-        .put("shortId", profile.shortId)
-        .put("fingerprint", profile.fingerprint)
-        .put("flow", profile.flow)
-
-    private fun decodeYoutubeCascade(json: JSONObject?): YoutubeCascadeProfile? {
-        if (json == null) return null
-        val profile = YoutubeCascadeProfile(
-            host = json.optString("host"),
-            port = json.optInt("port", 443),
-            uuid = json.optString("uuid"),
-            serverName = json.optString("serverName"),
-            publicKey = json.optString("publicKey"),
-            shortId = json.optString("shortId"),
-            fingerprint = json.optString("fingerprint", "chrome"),
-            flow = json.optString("flow"),
-        )
-        return profile.takeIf {
-            it.port in 1..65535 &&
-                it.host.isNotBlank() &&
-                it.uuid.isNotBlank() &&
-                it.serverName.isNotBlank() &&
-                it.publicKey.isNotBlank() &&
-                it.shortId.isNotBlank()
-        }
-    }
 
     private fun encodeMultiHopSettings(settings: MultiHopSettings): JSONObject = JSONObject()
         .put("enabled", settings.enabled)
@@ -267,50 +242,12 @@ internal class StoredSettingsCodec(
             if (value == null) return null
             val kind = runCatching { ServerSelectionMode.valueOf(value.getString("kind")) }.getOrNull()
                 ?: return null
-            if (kind == ServerSelectionMode.AUTO) return null
+            if (kind != ServerSelectionMode.SERVER) return null
             return HopSelection(kind, value.optString("countryCode").takeIf(String::isNotBlank),
                 value.optString("nodeId").takeIf(String::isNotBlank))
         }
         return MultiHopSettings(json.optBoolean("enabled", false),
             hop(json.optJSONObject("entry")), hop(json.optJSONObject("exit")))
-    }
-
-    private fun encodeMultiHopRuntime(runtime: MultiHopRuntime): JSONObject = JSONObject()
-        .put("selection", encodeMultiHopSettings(runtime.selection))
-        .put("entryNodeId", runtime.entryNodeId)
-        .put("exitNodeId", runtime.exitNodeId)
-        .put("policyHash", runtime.policyHash)
-        .put("policyExpiresAtEpochMillis", runtime.policyExpiresAtEpochMillis)
-        .put("relay", JSONObject()
-            .put("remark", runtime.relay.remark)
-            .put("endpointCode", runtime.relay.endpointCode)
-            .put("host", runtime.relay.host)
-            .put("port", runtime.relay.port)
-            .put("uuid", runtime.relay.uuid)
-            .put("serverName", runtime.relay.serverName)
-            .put("publicKey", runtime.relay.publicKey)
-            .put("shortId", runtime.relay.shortId)
-            .put("fingerprint", runtime.relay.fingerprint))
-
-    private fun decodeMultiHopRuntime(json: JSONObject?): MultiHopRuntime? {
-        if (json == null) return null
-        val relay = json.optJSONObject("relay") ?: return null
-        val selection = decodeMultiHopSettings(json.optJSONObject("selection"))
-        return MultiHopRuntime(
-            selection = selection,
-            entryNodeId = json.optString("entryNodeId"),
-            exitNodeId = json.optString("exitNodeId"),
-            policyHash = json.optString("policyHash"),
-            policyExpiresAtEpochMillis = json.optLong("policyExpiresAtEpochMillis"),
-            relay = VlessProfile(
-                remark = relay.optString("remark", "Noki VPN"),
-                endpointCode = relay.optString("endpointCode"),
-                host = relay.optString("host"), port = relay.optString("port", "11443"),
-                uuid = relay.optString("uuid"), flow = "", security = "reality",
-                serverName = relay.optString("serverName"), publicKey = relay.optString("publicKey"),
-                shortId = relay.optString("shortId"), fingerprint = relay.optString("fingerprint", "chrome"),
-            ),
-        )
     }
 
     private fun encodeEndpointOptions(options: List<VpnEndpointOption>) = JSONArray().apply {

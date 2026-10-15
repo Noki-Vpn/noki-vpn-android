@@ -37,20 +37,15 @@ object EndpointSelector {
         networkKind: EndpointRankingPolicy.NetworkKind? = null,
         onDiagnostic: (String) -> Unit = {},
     ): EndpointSelectionResult {
-        if (settings.multiHop.enabled) {
-            require(session.routeMode == "multihop" && session.multiHop?.selection == settings.multiHop) {
-                "multihop_session_mismatch"
-            }
-        } else {
-            require(session.routeMode != "multihop") { "multihop_session_unexpected" }
-        }
+        require(!settings.ruRelayEnabled) { "ru_route_requires_ru_coordinator" }
+        require(session.multiHop?.selection == settings.multiHop.takeIf { it.enabled }) { "multihop_session_mismatch" }
         val selection = selectCandidate(
             context = context,
             session = session,
             settings = settings,
             endpointHealth = endpointHealth,
             rotationIndex = rotationIndex,
-            startupTcpPrecheck = startupTcpPrecheck.takeIf { !settings.multiHop.enabled },
+            startupTcpPrecheck = startupTcpPrecheck,
             networkKind = networkKind,
             onDiagnostic = onDiagnostic,
         )
@@ -59,8 +54,7 @@ object EndpointSelector {
         val profile = when {
             candidate != null -> profileFromCandidate(session, candidate)
             selection != null -> VlessProfile()
-            else -> if (settings.multiHop.enabled) throw IllegalArgumentException("multihop_candidate_missing")
-                else profileFromLegacySession(session)
+            else -> profileFromLegacySession(session)
         }
         val ratingCodes = session.endpointCandidates
             .filter { !it.canaryOnly }
@@ -98,12 +92,15 @@ object EndpointSelector {
             .filter { it.entryHost.isNotBlank() }
         val secure = withHost
             .filter(EndpointSecurityPolicy::isAllowedCandidate)
-        val matchingProtocol = secure.filter { matchesProtocol(it, settings.protocol) }
+        val matchingProtocol = secure.filter { matchesProtocol(it, settings.effectiveProtocol) }
         val candidates = matchingProtocol.filter { !it.canaryOnly }
         onDiagnostic("stage=candidates; received=${session.endpointCandidates.size}; with_host=${withHost.size}; security_allowed=${secure.size}; protocol_allowed=${matchingProtocol.size}; eligible=${candidates.size}; protocol=${settings.protocol}; mode=${settings.endpointSelectionMode}")
-        if (candidates.isEmpty()) return null
+        if (candidates.isEmpty()) {
+            require(!settings.multiHop.enabled) { "multihop_transport_unavailable" }
+            return null
+        }
         val network = networkKind ?: currentNetworkKind(context)
-        if (settings.endpointSelectionMode == EndpointSelectionMode.MANUAL) {
+        if (settings.endpointSelectionMode == EndpointSelectionMode.MANUAL && !settings.multiHop.enabled) {
             val manualCandidates = EndpointGroupPolicy.manualCandidates(candidates, settings)
             onDiagnostic("stage=manual_group; candidates=${manualCandidates.size}")
             if (startupTcpPrecheck != null) {
@@ -163,6 +160,7 @@ object EndpointSelector {
             VpnProtocol.AUTO -> true
             VpnProtocol.TLS -> candidate.security.equals("tls", ignoreCase = true)
             VpnProtocol.REALITY -> candidate.security.equals("reality", ignoreCase = true)
+            VpnProtocol.WIREGUARD -> false
         }
 
     fun currentNetworkKind(context: Context): EndpointRankingPolicy.NetworkKind {
@@ -178,7 +176,11 @@ object EndpointSelector {
         session: BackendVpnSession,
         candidate: BackendEndpointCandidate,
     ): VlessProfile {
-        val profile = VlessProfile(
+        session.multiHop?.let { route ->
+            require(candidate.nodeId == route.exitNodeId && candidate.entryHost == route.entryIp &&
+                candidate.connectIp == route.entryIp && candidate.entryPort in 20000..29999) { "multihop_exit_mismatch" }
+        }
+        return VlessProfile(
             remark = "Noki ${candidate.locationName.ifBlank { session.locationName }}",
             endpointCode = candidate.code,
             proxyType = candidate.proxyType.ifBlank { session.proxyType },
@@ -200,23 +202,8 @@ object EndpointSelector {
             publicKey = candidate.publicKey.orEmpty(),
             shortId = candidate.shortId.orEmpty(),
             spiderX = "/",
-            youtubeCascade = session.youtubeCascade,
+            multiHop = session.multiHop,
         )
-        val multiHop = session.multiHop ?: return profile
-        require(session.routeMode == "multihop" && candidate.nodeId == multiHop.exitNodeId) {
-            "multihop_exit_mismatch"
-        }
-        val relay = profileFromCandidate(
-            session.copy(routeMode = "direct", multiHop = null, youtubeCascade = null), multiHop.entry,
-        ).copy(flow = "", multiHop = null, youtubeCascade = null)
-        return profile.copy(multiHop = MultiHopRuntime(
-            selection = multiHop.selection,
-            entryNodeId = multiHop.entry.nodeId ?: throw IllegalArgumentException("multihop_entry_missing"),
-            exitNodeId = multiHop.exitNodeId,
-            relay = relay,
-            policyHash = multiHop.policyHash,
-            policyExpiresAtEpochMillis = multiHop.policyExpiresAtEpochMillis,
-        ))
     }
 
     private fun profileFromLegacySession(session: BackendVpnSession): VlessProfile =
@@ -242,7 +229,6 @@ object EndpointSelector {
             publicKey = session.publicKey.orEmpty(),
             shortId = session.shortId.orEmpty(),
             spiderX = "/",
-            youtubeCascade = session.youtubeCascade,
         )
 
     fun optionsFromSession(session: BackendVpnSession): List<VpnEndpointOption> {

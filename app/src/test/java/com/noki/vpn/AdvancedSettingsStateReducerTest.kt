@@ -7,6 +7,10 @@ import com.noki.vpn.data.EndpointSelectionMode
 import com.noki.vpn.data.VlessProfile
 import com.noki.vpn.data.VpnEndpointOption
 import com.noki.vpn.data.VpnProtocol
+import com.noki.vpn.data.MultiHopSettings
+import com.noki.vpn.data.HopSelection
+import com.noki.vpn.data.ServerSelectionMode
+import com.noki.vpn.data.UserProfile
 import com.noki.vpn.ui.siteRuleValidationError
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -14,6 +18,79 @@ import org.junit.Assert.assertSame
 import org.junit.Test
 
 class AdvancedSettingsStateReducerTest {
+    @Test
+    fun ruRelayToggleKeepsExplicitMultiHopAndInvalidatesBothPreviousRuntimes() {
+        val manual = MultiHopSettings(enabled = true,
+            entry = HopSelection(ServerSelectionMode.SERVER, nodeId = "foreign-entry"),
+            exit = HopSelection(ServerSelectionMode.SERVER, nodeId = "foreign-exit"))
+        val current = AppUiState(
+            profile = VlessProfile(endpointCode = "old-nat", uuid = "old-runtime-user"),
+            advancedSettings = AdvancedSettings(
+                protocol = VpnProtocol.REALITY,
+                multiHop = manual,
+            ),
+        )
+
+        assertEquals(VpnProtocol.AUTO, current.advancedSettings.effectiveProtocol)
+        val enabled = AdvancedSettingsStateReducer.setRuRelayEnabled(current, true)
+        assertEquals(VpnProtocol.WIREGUARD, enabled.advancedSettings.effectiveProtocol)
+        assertEquals(VpnProtocol.REALITY, enabled.advancedSettings.protocol)
+        assertEquals(true, enabled.advancedSettings.multiHop.enabled)
+        assertEquals(manual.entry, enabled.advancedSettings.multiHop.entry)
+        assertEquals("", enabled.profile.uuid)
+        assertEquals("", enabled.profile.endpointCode)
+
+        val disabled = AdvancedSettingsStateReducer.setRuRelayEnabled(enabled, false)
+        assertEquals(VpnProtocol.AUTO, disabled.advancedSettings.effectiveProtocol)
+        assertEquals(true, disabled.advancedSettings.multiHop.enabled)
+        assertEquals(manual.entry, disabled.advancedSettings.multiHop.entry)
+        assertEquals("", disabled.profile.uuid)
+    }
+
+    @Test
+    fun explicitMultiHopPreservesRuChoiceAndClearsThePreviousRuntimeWithoutChangingDirectPreferences() {
+        val current = AppUiState(
+            profile = VlessProfile(endpointCode = "direct-tcp", uuid = "direct-user"),
+            advancedSettings = AdvancedSettings(
+                protocol = VpnProtocol.TLS,
+                endpointSelectionMode = EndpointSelectionMode.MANUAL,
+                manualEndpointCode = "direct-tcp",
+                manualEndpointGroupKey = "saved-group",
+                alwaysOnDomains = listOf("domain:secure.example"),
+            ),
+        )
+        val selected = MultiHopSettings(enabled = true,
+            entry = HopSelection(ServerSelectionMode.SERVER, nodeId = "foreign-entry"),
+            exit = HopSelection(ServerSelectionMode.SERVER, nodeId = "foreign-exit"))
+
+        val next = AdvancedSettingsStateReducer.setMultiHop(current, selected)
+
+        assertEquals(false, next.advancedSettings.ruRelayEnabled)
+        assertEquals(selected, next.advancedSettings.multiHop)
+        assertEquals(VpnProtocol.TLS, next.advancedSettings.protocol)
+        assertEquals("direct-tcp", next.advancedSettings.manualEndpointCode)
+        assertEquals("saved-group", next.advancedSettings.manualEndpointGroupKey)
+        assertEquals(current.advancedSettings.alwaysOnDomains, next.advancedSettings.alwaysOnDomains)
+        assertEquals("", next.profile.uuid)
+        assertEquals(true, AdvancedSettingsStateReducer.setMultiHop(current.copy(
+            advancedSettings = current.advancedSettings.copy(ruRelayEnabled = true)), selected).advancedSettings.ruRelayEnabled)
+    }
+
+    @Test
+    fun ruRelayAlwaysUsesAutomaticSelectionAndKeepsNormalPreference() {
+        val initial = AppUiState(
+            advancedSettings = AdvancedSettings(protocol = VpnProtocol.REALITY),
+            userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.SERVER,
+                selectedNodeId = "exit-a"),
+        )
+        val ru = AdvancedSettingsStateReducer.setRuRelayEnabled(initial, true)
+        assertEquals(com.noki.vpn.data.RuRelaySelection.Auto, ru.advancedSettings.ruRelaySelection)
+        assertEquals(VpnProtocol.WIREGUARD, ru.advancedSettings.effectiveProtocol)
+        assertEquals(initial.userProfile, ru.userProfile)
+        assertEquals(VpnProtocol.REALITY, ru.advancedSettings.protocol)
+        assertEquals(false, AdvancedSettingsStateReducer.setRuRelayEnabled(ru, false).advancedSettings.ruRelayEnabled)
+    }
+
     @Test
     fun packageSelectionTogglesMembership() {
         val current = AppUiState(selectedPackages = setOf("com.a"))
@@ -128,30 +205,6 @@ class AdvancedSettingsStateReducerTest {
     }
 
     @Test
-    fun youtubeDirectDpiToggleOnlyChangesItsAdvancedField() {
-        val current = AppUiState(
-            advancedSettings = AdvancedSettings(
-                connectionLogsEnabled = false,
-                alwaysOnDomains = listOf("domain:secure.example"),
-            ),
-        )
-
-        val next = AdvancedSettingsStateReducer.setYoutubeDirectDpiEnabled(
-            current = current,
-            enabled = true,
-        )
-
-        assertEquals(
-            current.copy(
-                advancedSettings = current.advancedSettings.copy(
-                    youtubeDirectDpiEnabled = true,
-                ),
-            ),
-            next,
-        )
-    }
-
-    @Test
     fun autoEndpointSelectionSwitchesBetweenAutoAndManualState() {
         val current = AppUiState(
             profile = VlessProfile(endpointCode = "tcp-a", uuid = "runtime-user"),
@@ -174,6 +227,17 @@ class AdvancedSettingsStateReducerTest {
         assertEquals(VpnProtocol.AUTO, auto.advancedSettings.protocol)
         assertEquals("", auto.advancedSettings.manualEndpointCode)
         assertEquals("", auto.advancedSettings.manualEndpointGroupKey)
+    }
+
+    @Test
+    fun switchingOffAutoDoesNotSelectARetiredCachedEndpoint() {
+        val supported = endpointOption("vision", "reality", "tcp", null)
+        val retired = supported.copy(code = "packet", transport = "xhttp", transportMode = "packet-up")
+        val current = AppUiState(profile = VlessProfile(endpointCode = retired.code),
+            endpointOptions = listOf(retired, supported))
+        val manual = AdvancedSettingsStateReducer.setAutoEndpointSelection(current, false)
+        assertEquals(supported.code, manual.advancedSettings.manualEndpointCode)
+        assertEquals(VpnProtocol.REALITY, manual.advancedSettings.protocol)
     }
 
     @Test

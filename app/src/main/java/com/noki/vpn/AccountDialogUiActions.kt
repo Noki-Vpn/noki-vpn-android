@@ -1,6 +1,8 @@
 package com.noki.vpn
 
 import com.noki.vpn.data.ServerLocation
+import com.noki.vpn.data.RuForeignNode
+import com.noki.vpn.data.usesRuForeignNodeCatalog
 import com.noki.vpn.data.ServerSelectionMode
 import kotlinx.coroutines.launch
 
@@ -11,7 +13,7 @@ internal fun AppUiRuntime.requestLogout() {
 internal fun AppUiRuntime.requestServerChange(locationCode: String, mode: ServerSelectionMode = ServerSelectionMode.COUNTRY) {
     val dialog = AppDialog.ChangeServer(locationCode.trim(), mode)
     if (isCurrentServerSelection(uiState.userProfile, dialog.locationCode, mode)) return
-    if (confirmedServerCode(dialog, uiState.locations) == null) return
+    if (confirmedServerCode(dialog, uiState.locations, uiState.ruForeignNodes, uiState.advancedSettings.ruRelayEnabled) == null) return
     uiState = uiState.copy(dialog = dialog, inlineMessage = null)
 }
 
@@ -22,7 +24,14 @@ internal fun AppUiRuntime.requestAppFilterReset() {
 internal fun confirmedServerCode(
     dialog: AppDialog.ChangeServer,
     locations: List<ServerLocation>,
+    foreignNodes: List<RuForeignNode> = emptyList(),
+    ruRelayEnabled: Boolean = false,
 ): String? = dialog.locationCode.trim().takeIf { code ->
+    if (usesRuForeignNodeCatalog(ruRelayEnabled, foreignNodes)) return@takeIf when (dialog.mode) {
+        ServerSelectionMode.AUTO -> foreignNodes.isNotEmpty()
+        ServerSelectionMode.COUNTRY -> foreignNodes.any { it.countryCode.equals(code, true) }
+        ServerSelectionMode.SERVER -> foreignNodes.any { it.id == code }
+    }
     when (dialog.mode) {
         ServerSelectionMode.AUTO -> locations.any { it.isOnline }
         ServerSelectionMode.COUNTRY -> code.isNotBlank() && locations.any { it.code.equals(code, true) && it.isOnline }
@@ -81,7 +90,7 @@ internal fun AppUiRuntime.confirmDialog() {
             clearPackageSelection()
         }
         is AppDialog.ChangeServer -> {
-            val selectedCode = confirmedServerCode(dialog, uiState.locations)
+            val selectedCode = confirmedServerCode(dialog, uiState.locations, uiState.ruForeignNodes, uiState.advancedSettings.ruRelayEnabled)
             uiState = uiState.copy(dialog = null, inlineMessage = null)
             selectedCode?.let { selectServer(it, dialog.mode) }
         }

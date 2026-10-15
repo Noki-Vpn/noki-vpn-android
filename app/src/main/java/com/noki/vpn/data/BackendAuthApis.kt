@@ -75,6 +75,14 @@ interface AccountApi {
 }
 
 interface AccountSecurityApi {
+    suspend fun setupAccountCredentials(
+        token: String,
+        username: String,
+        password: String,
+        currentDeviceId: String?,
+        currentDeviceKey: String?,
+    ): BackendUser
+
     suspend fun sendAccountEmailCode(
         token: String,
         email: String,

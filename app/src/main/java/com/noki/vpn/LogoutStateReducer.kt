@@ -25,6 +25,7 @@ object LogoutStateReducer {
                 selectedNodeId = current.userProfile.selectedNodeId,
             ),
             devices = emptyList(),
+            ruForeignNodes = emptyList(),
             endpointOptionsCountryCode = null,
             appNotificationHistory = emptyList(),
             hasUnreadAppNotifications = false,

@@ -116,6 +116,9 @@ object AppErrorMapper {
         return when (error) {
             is BackendException -> when (error.statusCode) {
                 409 -> when {
+                    error.message == "Credentials setup is not required" ->
+                        tr(language, "Регистрация уже завершена. Обновляем данные аккаунта", "Registration is already complete. Refreshing your account")
+
                     error.message.contains("email", ignoreCase = true) ->
                         tr(language, "Такой e-mail уже зарегистрирован", "This email is already registered")
 
@@ -303,6 +306,9 @@ object AppErrorMapper {
     ): String {
         return when (error) {
             is BackendException -> when {
+                error.statusCode == 426 && error.message == "client_update_required" ->
+                    readableVpnError(language, "client_update_required")
+
                 error.statusCode == 422 &&
                     error.message.trim() == "Устройство INCY с таким названием уже существует" ->
                     tr(language, "Устройство INCY с таким названием уже существует", "An INCY device with this name already exists")
@@ -343,6 +349,11 @@ object AppErrorMapper {
             return tr(language, "Не выбраны приложения", "No apps selected")
         }
         return when (reason) {
+            "client_update_required" -> tr(
+                language,
+                "Обновите Noki для подключения. Обновление доступно в «Безопасности».",
+                "Update Noki to connect. The update is available in Security.",
+            )
             "underlay_unavailable" -> tr(language, "Нет доступной сети. VPN восстановится автоматически.", "No network available. VPN will reconnect automatically.")
             "permission_denied" -> tr(language, "Разрешение VPN не выдано", "VPN permission was denied")
             "runtime_unavailable" -> tr(language, "VPN-движок недоступен", "VPN runtime is unavailable")
@@ -352,6 +363,10 @@ object AppErrorMapper {
                 language,
                 "VPN-движок запущен, но трафик через него подтвердить не удалось",
                 "VPN runtime started, but traffic through it could not be confirmed",
+            )
+            "ru_wireguard_exit_probe_failed" -> tr(
+                language, "RU-реле подключено, но выходная нода недоступна",
+                "RU relay connected, but the exit node is unreachable",
             )
             "rules_error" -> tr(language, "Не удалось применить правила приложений", "Failed to apply app rules")
             "temporary_vpn_limit" -> tr(
@@ -372,6 +387,7 @@ object AppErrorMapper {
             return tr(language, "Не выбраны приложения", "No apps selected")
         }
         return when (reason) {
+            "client_update_required" -> tr(language, "Обновите Noki для подключения", "Update Noki to connect")
             "underlay_unavailable" -> tr(language, "Ожидание сети", "Waiting for network")
             "permission_denied" -> tr(language, "Разрешение не выдано", "Permission denied")
             "temporary_vpn_limit" -> tr(
@@ -386,6 +402,9 @@ object AppErrorMapper {
                 language,
                 "Ошибка проверки VPN-трафика",
                 "VPN traffic check failed",
+            )
+            "ru_wireguard_exit_probe_failed" -> tr(
+                language, "Нет связи с выходом", "Exit unreachable",
             )
             "rules_error" -> tr(language, "Ошибка правил", "Rules error")
             else -> reason

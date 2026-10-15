@@ -14,7 +14,25 @@ import org.robolectric.annotation.Config
 @Config(sdk = [28])
 class VpnSessionCoordinatorTest {
     @Test
-    fun `multiHop forwards pair without catalog probes or direct retry`() = runBlocking {
+    fun `hidden saved server falls back to visible auto node`() = runBlocking {
+        val api = FakeVpnSessionApi()
+        val coordinator = VpnSessionCoordinator(
+            context = RuntimeEnvironment.getApplication(), repository = FakeVpnSessionStore(), backendApi = api,
+            deviceNameProvider = { "Phone" }, challengeSigner = { "signature" }, startupTcpPrecheck = { true },
+        )
+        val settings = DefaultStoredSettingsFactory.create().copy(
+            backendDeviceId = "device-id", backendDeviceKey = "device-key",
+            advancedSettings = AdvancedSettings(ruRelayEnabled = false),
+            userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.SERVER, selectedNodeId = "hidden-node"),
+        )
+        val result = coordinator.prepare("token", settings)
+        assertTrue(api.nodeId in setOf("node-de-2", "node-lv2"))
+        assertEquals(ServerSelectionMode.AUTO, result.settings.userProfile.serverSelectionMode)
+        assertEquals("", result.settings.userProfile.selectedNodeId)
+    }
+
+    @Test
+    fun `ordinary coordinator refuses invalid pair and RU before any backend preparation`() = runBlocking {
         val selection = MultiHopSettings(true,
             HopSelection(ServerSelectionMode.COUNTRY, countryCode = "RU"),
             HopSelection(ServerSelectionMode.SERVER, nodeId = "exit-node"))
@@ -29,12 +47,70 @@ class VpnSessionCoordinatorTest {
             backendDeviceId = "device-id", backendDeviceKey = "device-key",
             advancedSettings = AdvancedSettings(multiHop = selection),
         )
-        assertTrue(runCatching { coordinator.prepare("token", settings) }.isFailure)
+        assertTrue(runCatching { coordinator.prepare("token", settings) }.exceptionOrNull() is IllegalArgumentException)
+        assertTrue(runCatching { coordinator.prepare("token", settings.copy(advancedSettings =
+            AdvancedSettings(ruRelayEnabled = true))) }.exceptionOrNull() is IllegalArgumentException)
+        assertEquals(0, api.catalogRequests)
+        assertEquals(0, api.accessRequests)
+        assertEquals(0, prechecks)
+        assertNull(api.multiHopRequest)
+        assertNull(api.countryCode)
+        assertEquals(0, api.requests.size)
+        Unit
+    }
+
+    @Test
+    fun `no RU MultiHop forwards pair once without catalog precheck or direct retry`() = runBlocking {
+        val selection = MultiHopSettings(true,
+            HopSelection(ServerSelectionMode.SERVER, nodeId = "00000000-0000-0000-0000-000000000001"),
+            HopSelection(ServerSelectionMode.SERVER, nodeId = "00000000-0000-0000-0000-000000000002"))
+        val api = FakeVpnSessionApi(sessionError = BackendException("route pending", 503))
+        var prechecks = 0
+        val coordinator = VpnSessionCoordinator(context = RuntimeEnvironment.getApplication(),
+            repository = FakeVpnSessionStore(), backendApi = api,
+            challengeSigner = { "signature" }, startupTcpPrecheck = { prechecks++; true })
+        val settings = DefaultStoredSettingsFactory.create().copy(backendDeviceId = "device-id", backendDeviceKey = "device-key",
+            advancedSettings = AdvancedSettings(ruRelayEnabled = false, multiHop = selection, protocol = VpnProtocol.TLS))
+        assertTrue(runCatching { coordinator.prepare("token", settings) }.exceptionOrNull() is BackendException)
         assertEquals(0, api.catalogRequests)
         assertEquals(0, prechecks)
         assertEquals(selection, api.multiHopRequest)
         assertNull(api.countryCode)
+        assertNull(api.locationCode)
+        assertNull(api.nodeId)
         assertEquals(1, api.requests.size)
+        Unit
+    }
+
+    @Test
+    fun `no RU pair ignores hidden direct protocol and restores it after disabling MultiHop`() = runBlocking {
+        val path = generateSequence(java.io.File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
+            .map { java.io.File(it, "contracts/multihop_session_v2.json") }.first { it.isFile }
+        val session = BackendVpnSessionJsonParser.parse(org.json.JSONObject(path.readText()))
+        for ((protocol, candidate) in listOf(
+            VpnProtocol.TLS to session.endpointCandidates.first { it.security == "reality" },
+            VpnProtocol.REALITY to session.endpointCandidates.first { it.proxyType == "hysteria" },
+        )) {
+            val api = FakeVpnSessionApi(pairSession = session.copy(endpointCandidates = listOf(candidate)))
+            val coordinator = VpnSessionCoordinator(context = RuntimeEnvironment.getApplication(), repository = FakeVpnSessionStore(),
+                backendApi = api, challengeSigner = { "signature" })
+            val settings = DefaultStoredSettingsFactory.create().copy(backendDeviceId = "device-id", backendDeviceKey = "device-key",
+                advancedSettings = AdvancedSettings(ruRelayEnabled = false, multiHop = session.multiHop!!.selection,
+                    protocol = protocol, endpointSelectionMode = EndpointSelectionMode.MANUAL, manualEndpointCode = "old-direct"))
+            val result = coordinator.prepare("token", settings)
+            assertEquals(candidate.code, result.settings.profile.endpointCode)
+            assertTrue(VpnProfileValidator.isUsable(result.settings.profile, result.settings.advancedSettings))
+            assertEquals(session.multiHop, result.settings.profile.multiHop)
+            assertEquals(session.multiHop.entryIp, result.settings.profile.host)
+            assertEquals(settings.advancedSettings, result.settings.advancedSettings)
+            assertEquals(VpnProtocol.AUTO, result.settings.advancedSettings.effectiveProtocol)
+            assertEquals(protocol, result.settings.advancedSettings.copy(multiHop = MultiHopSettings()).effectiveProtocol)
+            assertEquals(VpnProtocol.WIREGUARD, result.settings.advancedSettings.copy(ruRelayEnabled = true).effectiveProtocol)
+            assertEquals(0, api.catalogRequests)
+            val unsupported = settings.copy(advancedSettings = settings.advancedSettings.copy(protocol = VpnProtocol.WIREGUARD))
+            assertTrue(runCatching { coordinator.prepare("token", unsupported) }.isFailure)
+        }
+        Unit
     }
 
     @Test
@@ -107,6 +183,7 @@ class VpnSessionCoordinatorTest {
         val settings = DefaultStoredSettingsFactory.create().copy(
             backendDeviceId = "device-id",
             backendDeviceKey = "sensitive-device-key",
+            advancedSettings = AdvancedSettings(ruRelayEnabled = false),
         )
         val error = runCatching { coordinator.prepare("sensitive-token", settings) }.exceptionOrNull()
         assertTrue(error is BackendException)
@@ -141,6 +218,7 @@ class VpnSessionCoordinatorTest {
             lastSeenAt = null,
         )
         val settings = DefaultStoredSettingsFactory.create().copy(
+            advancedSettings = AdvancedSettings(ruRelayEnabled = false),
             userProfile = UserProfile(
                 selectedCountryCode = "DE",
                 selectedServerCode = "lv-1",
@@ -184,6 +262,7 @@ class VpnSessionCoordinatorTest {
             lastSeenAt = null,
         )
         val settings = DefaultStoredSettingsFactory.create().copy(
+            advancedSettings = AdvancedSettings(ruRelayEnabled = false),
             userProfile = UserProfile(
                 selectedCountryCode = "LV",
                 selectedServerCode = "LV",
@@ -223,6 +302,7 @@ class VpnSessionCoordinatorTest {
             lastSeenAt = null,
         )
         val settings = DefaultStoredSettingsFactory.create().copy(
+            advancedSettings = AdvancedSettings(ruRelayEnabled = false),
             userProfile = UserProfile(
                 selectedCountryCode = "LV",
                 selectedServerCode = "lv2",
@@ -259,8 +339,14 @@ class VpnSessionCoordinatorTest {
         private val rejectCountryRequest: Boolean = false,
         private val sessionError: BackendException? = null,
         private val candidates: List<BackendEndpointCandidate> = emptyList(),
+        private val pairSession: BackendVpnSession? = null,
     ) : VpnSessionApi {
+        override suspend fun createRuWireGuardSession(
+            token: String,
+            request: RuWireGuardSessionRequest,
+        ): BackendRuWireGuardSession = error("RU WireGuard has its own coordinator")
         var catalogRequests = 0
+        var accessRequests = 0
         override suspend fun serverLocations(token: String, deviceId: String?, deviceKey: String?): List<BackendLocation> =
             listOf("DE" to "de-2", "LV" to "lv2").map { (country, location) ->
                 catalogRequests++
@@ -279,7 +365,10 @@ class VpnSessionCoordinatorTest {
             token: String,
             deviceId: String?,
             deviceKey: String?,
-        ) = BackendVpnAccess(canConnect = true, reason = null, planCode = null)
+        ): BackendVpnAccess {
+            accessRequests++
+            return BackendVpnAccess(canConnect = true, reason = null, planCode = null)
+        }
 
         override suspend fun registerDevice(
             token: String,
@@ -316,6 +405,7 @@ class VpnSessionCoordinatorTest {
             multiHopRequest = multiHop
             requests += countryCode to locationCode
             sessionError?.let { throw it }
+            pairSession?.let { return it }
             if (rejectCountryRequest && countryCode != null && locationCode == null) {
                 throw BackendException("Location not found", 503)
             }

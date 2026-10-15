@@ -3,12 +3,15 @@ package com.noki.vpn
 import com.noki.vpn.data.withClientLatencies
 
 import com.noki.vpn.data.BackendBootstrapLoader
+import com.noki.vpn.data.BackendException
 import com.noki.vpn.data.BackendDevice
 import com.noki.vpn.data.BackendLocation
 import com.noki.vpn.data.BackendPlan
 import com.noki.vpn.data.BootstrapStateMapper
 import com.noki.vpn.data.ServerLocation
 import com.noki.vpn.data.clientLatencyTargetKey
+import com.noki.vpn.data.RuRelayCatalog
+import kotlinx.coroutines.CancellationException
 
 internal data class BackendSyncRequest(
     val token: String,
@@ -32,6 +35,7 @@ internal class BackendSyncCoordinator(
     private val bootstrapLoader: BackendBootstrapLoader,
     private val androidUpdateLoader: AndroidUpdateStateLoader,
     private val profileAvatarLoader: ProfileAvatarLoader,
+    private val ruCatalogLoader: suspend (String, String, String?) -> RuRelayCatalog,
 ) {
     suspend fun syncState(request: BackendSyncRequest): BackendSyncResult {
         val bootstrap = bootstrapLoader.bootstrap(
@@ -47,6 +51,16 @@ internal class BackendSyncCoordinator(
             }
         }
         if (currentDevice?.isActive != true) throw CurrentDeviceAccessRevokedException()
+        val ruForeignNodes = try {
+            ruCatalogLoader(request.token, currentDevice.id,
+                request.currentDeviceKey.ifBlank { currentDevice.deviceKey }).foreignNodes
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (error is BackendException && (error.statusCode == 401 || error.statusCode == 403)) throw error
+            // Optional route discovery must not discard the authenticated base inventory.
+            emptyList()
+        }
         val language = request.baseState.personalizationSettings.language
         val mapped = BootstrapStateMapper.mapBootstrap(
             bootstrap = bootstrap,
@@ -80,6 +94,7 @@ internal class BackendSyncCoordinator(
             profile = mapped.profile,
             currentDeviceAccessRole = mapped.currentDeviceAccessRole,
             androidUpdate = androidUpdate,
+            ruForeignNodes = ruForeignNodes,
         )
 
         return BackendSyncResult(
@@ -99,6 +114,8 @@ internal class BackendSyncCoordinator(
                 locations = state.locations.map { location ->
                     location.withClientLatencies(clientLatencyByTarget)
                 },
+                ruForeignNodes = state.ruForeignNodes.map { node -> node.copy(
+                    latencyMs = clientLatencyByTarget[clientLatencyTargetKey(node)]) },
             )
         }
 

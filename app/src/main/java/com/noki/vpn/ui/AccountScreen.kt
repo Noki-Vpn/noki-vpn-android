@@ -77,9 +77,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import com.noki.vpn.AppDialog
 import com.noki.vpn.AppUiState
 import com.noki.vpn.R
@@ -163,7 +163,7 @@ internal data class AccountRowSpec(
 private fun AccountPaymentHistory(
     state: AppUiState,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
@@ -222,7 +222,7 @@ private const val ACCOUNT_DELETE_HOLD_MILLIS = 4_000
 @Composable
 fun AccountScreen(
     state: AppUiState,
-    sharedBackdrop: LayerBackdrop?,
+    sharedBackdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean = true,
     onPersonalizationClicked: () -> Unit,
     onPlansClicked: () -> Unit,
@@ -554,7 +554,7 @@ private fun AccountPlanCard(
     currentPlanLabel: String,
     validUntilLabel: String,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
 ) {
@@ -670,13 +670,13 @@ private fun AccountTrafficCard(
     presentation: AccountPresentation,
     showExplanation: Boolean,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(accountDp(15f, scale))
-    val trafficContentBackdrop = rememberLayerBackdrop()
+    val trafficContentBackdrop = rememberPrismalGlassLayer()
     Box(
         modifier = modifier
             .clickable(
@@ -691,7 +691,7 @@ private fun AccountTrafficCard(
                 .fillMaxSize()
                 .then(
                     if (liveGlassEnabled) {
-                        Modifier.layerBackdrop(trafficContentBackdrop)
+                        Modifier.prismalGlassLayer(trafficContentBackdrop)
                     } else {
                         Modifier
                     },
@@ -799,7 +799,7 @@ private fun AccountActionsPanel(
     rows: List<AccountRowSpec>,
     onAccessDenied: () -> Unit,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
 ) {
@@ -934,7 +934,7 @@ private fun AccountNotificationHistory(
     notifications: List<BackendAppNotification>,
     language: com.noki.vpn.data.AppLanguage,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onNotificationDeleted: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -1204,7 +1204,7 @@ private fun AccountPromoDialog(
     language: com.noki.vpn.data.AppLanguage,
     value: String,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onValueChanged: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -1235,7 +1235,7 @@ private fun accountSp(value: Float, scale: Float): TextUnit = (value * scale).sp
 
 private fun Modifier.accountGlassSurface(
     shape: Shape,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     scale: Float,
 ): Modifier = nokiGlassSurface(

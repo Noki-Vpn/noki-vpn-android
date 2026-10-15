@@ -39,12 +39,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.DeviceSession
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.colorControls
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.highlight.Highlight
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.drawPrismalGlass
+import com.styropyr0.prismal.effects.prismalBlur
+import com.styropyr0.prismal.effects.colorControls
+import com.styropyr0.prismal.effects.prismalLens
+import com.styropyr0.prismal.specular.PrismalSpecular
 
 @Composable
 internal fun OtherDevicesSection(
@@ -54,7 +54,7 @@ internal fun OtherDevicesSection(
     language: AppLanguage,
     scale: Float,
     onInviteClick: () -> Unit,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onDeviceClick: (String) -> Unit,
 ) {
@@ -113,7 +113,7 @@ internal fun OtherDevicesSection(
 @Composable
 internal fun DeviceRow(
     device: DeviceSession,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     scale: Float,
     onClick: () -> Unit,
@@ -191,7 +191,7 @@ internal fun DeleteDeviceDialog(
     device: DeviceSession?,
     language: AppLanguage,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onDismiss: () -> Unit,
     onFullAccessChanged: (String, Boolean) -> Unit,
@@ -230,7 +230,7 @@ internal fun DeleteDeviceDialog(
                 .clip(shape)
                 .then(
                     if (liveGlassEnabled && backdrop != null) {
-                        Modifier.drawBackdrop(
+                        Modifier.drawPrismalGlass(
                             backdrop = backdrop,
                             shape = { shape },
                             effects = {
@@ -239,14 +239,14 @@ internal fun DeleteDeviceDialog(
                                     contrast = 1f,
                                     brightness = -0.1f,
                                 )
-                                blur(devicesDp(40f, scale).toPx())
-                                lens(
+                                prismalBlur(devicesDp(40f, scale).toPx())
+                                prismalLens(
                                     devicesDp(8f, scale).toPx(),
                                     devicesDp(10f, scale).toPx(),
                                 )
                             },
-                            highlight = {
-                                Highlight.Default.copy(alpha = 0.22f)
+                            specular = {
+                                PrismalSpecular.Default.copy(alpha = 0.22f)
                             },
                             onDrawSurface = {
                                 drawRect(DevicesBgSoft.copy(alpha = 0.42f))
@@ -460,7 +460,7 @@ internal fun DeleteDeviceButton(
 internal fun EmptyDevicesCard(
     language: AppLanguage,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
 ) {
     val shape = RoundedCornerShape(devicesDp(24f, scale))

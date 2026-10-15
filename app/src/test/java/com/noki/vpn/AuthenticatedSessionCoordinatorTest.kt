@@ -17,6 +17,64 @@ import org.junit.Test
 
 class AuthenticatedSessionCoordinatorTest {
     @Test
+    fun `pending credentials survive device binding bootstrap failure and durable token commit`() = runBlocking {
+        val store = InMemoryAtomicStoredSettingsStore(DefaultStoredSettingsFactory.create())
+        val authSession = AuthSessionCoordinator(store, AuthTokenRefresher(store, NoRefreshApi))
+        var published: AppUiState? = null
+        val coordinator = AuthenticatedSessionCoordinator(
+            authSessionCoordinator = authSession,
+            registerCurrentDevice = { device() },
+            bindTokensToRegisteredDevice = { tokens, _ -> tokens.copy(credentialsSetupRequired = false) },
+            stageTemporaryVpnForRevoke = {
+                assertTrue(store.load().userProfile.credentialsSetupRequired)
+            },
+            stopTemporaryVpn = {},
+            syncBootstrap = { _, prepared ->
+                assertEquals(AuthStep.REGISTRATION_PROFILE, prepared.authStep)
+                assertEquals(AppDestination.REGISTRATION, prepared.currentDestination)
+                throw IOException("bootstrap unavailable")
+            },
+            publishAuthenticatedState = { published = it },
+        )
+
+        val result = coordinator.complete(
+            tokens().copy(credentialsSetupRequired = true),
+            AppUiState(isAuthenticated = true, screenStack = listOf(AppDestination.HOME)),
+        )
+
+        assertTrue(result.tokens.credentialsSetupRequired)
+        assertTrue(result.state.userProfile.credentialsSetupRequired)
+        assertTrue(store.load().userProfile.credentialsSetupRequired)
+        assertEquals(listOf(AppDestination.REGISTRATION), result.state.screenStack)
+        assertEquals(AuthStep.REGISTRATION_PROFILE, result.state.authStep)
+        assertEquals(result.state, published)
+    }
+
+    @Test
+    fun `authoritative completed bootstrap removes pending setup and clears its form`() = runBlocking {
+        val store = InMemoryAtomicStoredSettingsStore(DefaultStoredSettingsFactory.create())
+        val authSession = AuthSessionCoordinator(store, AuthTokenRefresher(store, NoRefreshApi))
+        val coordinator = AuthenticatedSessionCoordinator(
+            authSessionCoordinator = authSession,
+            registerCurrentDevice = { device() },
+            bindTokensToRegisteredDevice = { tokens, _ -> tokens },
+            stageTemporaryVpnForRevoke = {},
+            stopTemporaryVpn = {},
+            syncBootstrap = { _, state -> state.copy(userProfile = state.userProfile.copy(credentialsSetupRequired = false, hasPassword = true)) },
+            publishAuthenticatedState = {},
+        )
+
+        val result = coordinator.complete(
+            tokens().copy(credentialsSetupRequired = true),
+            AppUiState(isAuthenticated = true),
+        )
+
+        assertFalse(result.state.userProfile.credentialsSetupRequired)
+        assertEquals(listOf(AppDestination.HOME), result.state.screenStack)
+        assertEquals(RegistrationFormState(), result.state.registrationForm)
+    }
+
+    @Test
     fun `success persists tokens before durable temporary revoke bootstrap and publish`() = runBlocking {
         val events = mutableListOf<String>()
         val store = InMemoryAtomicStoredSettingsStore(DefaultStoredSettingsFactory.create())

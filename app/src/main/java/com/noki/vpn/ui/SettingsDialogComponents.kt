@@ -50,25 +50,25 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.noki.vpn.data.AppLanguage
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.colorControls
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.highlight.Highlight
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.drawPrismalGlass
+import com.styropyr0.prismal.effects.prismalBlur
+import com.styropyr0.prismal.effects.colorControls
+import com.styropyr0.prismal.effects.prismalLens
+import com.styropyr0.prismal.specular.PrismalSpecular
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 internal fun Modifier.settingsDialogGlassSurface(
     shape: Shape,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     showBorder: Boolean = true,
 ): Modifier = clip(shape)
     .then(
         if (liveGlassEnabled && backdrop != null) {
-            Modifier.drawBackdrop(
+            Modifier.drawPrismalGlass(
                 backdrop = backdrop,
                 shape = { shape },
                 effects = {
@@ -77,14 +77,14 @@ internal fun Modifier.settingsDialogGlassSurface(
                         contrast = 1f,
                         brightness = -0.1f,
                     )
-                    blur(settingsDp(40f, scale).toPx())
-                    lens(
+                    prismalBlur(settingsDp(40f, scale).toPx())
+                    prismalLens(
                         settingsDp(8f, scale).toPx(),
                         settingsDp(10f, scale).toPx(),
                     )
                 },
-                highlight = {
-                    Highlight.Default.copy(alpha = 0.22f)
+                specular = {
+                    PrismalSpecular.Default.copy(alpha = 0.22f)
                 },
                 onDrawSurface = {
                     drawRect(SettingsBgLighter.copy(alpha = 0.42f))
@@ -116,7 +116,7 @@ internal fun Modifier.settingsDialogGlassSurface(
 internal fun SettingsLogoutConfirmDialog(
     language: AppLanguage,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
@@ -148,7 +148,7 @@ internal fun SettingsConfirmDialog(
     confirmIsDanger: Boolean,
     confirmHoldDurationMillis: Int = 0,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
@@ -247,7 +247,7 @@ internal fun SettingsCompactInputDialog(
     dismissText: String,
     confirmText: String,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,

@@ -16,19 +16,24 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.graphics.Color
@@ -40,6 +45,8 @@ import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,6 +67,7 @@ internal fun AuthInputField(
     isPassword: Boolean = false,
     enabled: Boolean = true,
     textFontSize: TextUnit = authSp(14f),
+    autofillContentType: ContentType? = null,
 ) {
     val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
     val interactionSource = remember { MutableInteractionSource() }
@@ -80,6 +88,7 @@ internal fun AuthInputField(
             enabled = enabled,
             modifier = Modifier
                 .fillMaxSize()
+                .then(if (autofillContentType != null) Modifier.semantics { contentType = autofillContentType } else Modifier)
                 .padding(start = metrics.dp(19f), end = if (isPassword) metrics.dp(61f) else metrics.dp(19f)),
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
@@ -270,6 +279,19 @@ internal class AuthButtonClickGate {
 }
 
 @Composable
+internal fun Modifier.authFormScroll(maxHeight: Dp, contentBottom: Dp): Modifier {
+    val scrollState = rememberScrollState()
+    val density = LocalDensity.current
+    val imeBottom = authImeBottom()
+    LaunchedEffect(maxHeight, contentBottom, imeBottom, scrollState.maxValue) {
+        scrollState.scrollTo(with(density) {
+            authKeyboardShift(maxHeight, imeBottom, contentBottom).roundToPx()
+        })
+    }
+    return imePadding().verticalScroll(scrollState)
+}
+
+@Composable
 internal fun authImeBottom(): Dp {
     val density = LocalDensity.current
     return with(density) { WindowInsets.ime.getBottom(this).toDp() }
@@ -278,12 +300,9 @@ internal fun authImeBottom(): Dp {
 internal fun authKeyboardShift(
     maxHeight: Dp,
     imeBottom: Dp,
-    contentTop: Dp,
     contentBottom: Dp,
 ): Dp {
     if (imeBottom <= 0.dp) return 0.dp
     val targetBottom = maxHeight - imeBottom - 5.dp
-    val desiredShift = if (contentBottom > targetBottom) contentBottom - targetBottom else 0.dp
-    val maxShift = if (contentTop > 24.dp) contentTop - 24.dp else 0.dp
-    return if (desiredShift > maxShift) maxShift else desiredShift
+    return (contentBottom - targetBottom).coerceAtLeast(0.dp)
 }

@@ -28,7 +28,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 
 @Composable
 internal fun AuthVerificationCodeField(
@@ -42,7 +42,7 @@ internal fun AuthVerificationCodeField(
     inputEnabled: Boolean = true,
     buttonEnabled: Boolean = true,
     buttonLoading: Boolean = false,
-    backdrop: LayerBackdrop? = null,
+    backdrop: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean = false,
     keyboardType: KeyboardType = KeyboardType.Number,
     buttonEndInset: Float = 6f,

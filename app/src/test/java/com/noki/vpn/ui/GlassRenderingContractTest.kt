@@ -13,13 +13,12 @@ class GlassRenderingContractTest {
         source.substringAfter("fun $name(").substringBefore("\n@Composable", source)
 
     @Test
-    fun interactiveGlassScaleUsesKyantLayerBlock() {
+    fun interactiveGlassScaleUsesPrismalLayerBlock() {
         val expectedLayerBlockOwners = mapOf(
             "AuthButtons" to listOf("AuthSecondaryButton", "AuthPrimaryButton"),
             "AuthWelcomeScreen" to listOf("WelcomeGlassButton"),
             "AuthVerificationCodeField" to listOf("AuthVerificationCodeField"),
             "HomeBackground" to listOf("HomeSettingsGlassSurface"),
-            "HomeServerMenu" to listOf("HomeServerMenuItem"),
             "DevicesListComponents" to listOf("DeviceRow"),
             "SecurityGlassComponents" to listOf("SecurityPanelSurface"),
             "AdvancedSettingsComponents" to listOf("AdvancedSmallButton"),
@@ -42,15 +41,15 @@ class GlassRenderingContractTest {
         val activeButton = function(navigation, "ButtonLayer")
 
         assertTrue(navigation.contains("val navigationSurfaceBackdrop ="))
-        assertTrue(navigation.contains("exportedBackdrop = navigationSurfaceBackdrop"))
+        assertTrue(navigation.contains("nestedGlassSource = navigationSurfaceBackdrop"))
         assertTrue(
             navigation.contains(
-                "rememberCombinedBackdrop(navigationSurfaceBackdrop, iconsBackdrop)",
+                "rememberPrismalMergedSource(navigationSurfaceBackdrop, iconsBackdrop)",
             ),
         )
-        assertFalse(navigation.contains("rememberCombinedBackdrop(backdrop, iconsBackdrop)"))
-        assertTrue(activeButton.contains("shadow = null"))
-        assertTrue(activeButton.contains("innerShadow = null"))
+        assertFalse(navigation.contains("rememberPrismalMergedSource(backdrop, iconsBackdrop)"))
+        assertTrue(activeButton.contains("depthShadow = null"))
+        assertTrue(activeButton.contains("depthInset = null"))
     }
 
     @Test
@@ -61,8 +60,8 @@ class GlassRenderingContractTest {
             "AdvancedSettingsProtocolComponents",
         ).forEach { file ->
             val source = source(file)
-            assertTrue("$file must export its panel backdrop", source.contains("exportedBackdrop = panelBackdrop"))
-            assertFalse("$file must not capture its own backdrop", source.contains(".layerBackdrop(panelBackdrop)"))
+            assertTrue("$file must export its panel backdrop", source.contains("nestedGlassSource = panelBackdrop"))
+            assertFalse("$file must not capture its own backdrop", source.contains(".prismalGlassLayer(panelBackdrop)"))
         }
     }
 
@@ -93,8 +92,7 @@ class GlassRenderingContractTest {
     fun countryDisclosureDoesNotAnimateGlassBoundsOrCaptureItself() {
         val sheet = function(source("HomeServerSheet"), "HomeServerDropdownOverlay")
         assertFalse(sheet.contains("animateContentSize"))
-        assertFalse(sheet.contains("layerBackdrop("))
-        assertTrue(sheet.contains("backdrop = serverRowsBackdrop"))
+        assertFalse(sheet.contains("prismalGlassLayer("))
     }
 
 }

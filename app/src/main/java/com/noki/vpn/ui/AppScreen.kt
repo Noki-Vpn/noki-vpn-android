@@ -34,17 +34,19 @@ import com.noki.vpn.AppDestination
 import com.noki.vpn.AppUiState
 import com.noki.vpn.AuthStep
 import com.noki.vpn.MainViewModel
+import com.noki.vpn.showsInstallAppearanceDialog
 import com.noki.vpn.data.VpnConnectionState
+import com.noki.vpn.data.InstallOnboardingStep
 import com.noki.vpn.vpn.VpnRuntimeMode
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 
 private data class SettingsDestinationArgs(
     val state: AppUiState,
     val viewModel: MainViewModel,
-    val sharedBackdrop: LayerBackdrop,
-    val menuRowsBackdrop: LayerBackdrop,
+    val sharedBackdrop: PrismalGlassLayer,
+    val menuRowsBackdrop: PrismalGlassLayer,
     val liveGlassEnabled: Boolean,
     val onLogoutClicked: () -> Unit,
     val onLogoutConfirmed: () -> Unit,
@@ -60,7 +62,7 @@ private data class SettingsDestinationArgs(
 private data class HomeDestinationArgs(
     val state: AppUiState,
     val viewModel: MainViewModel,
-    val sharedBackdrop: LayerBackdrop,
+    val sharedBackdrop: PrismalGlassLayer,
     val liveGlassEnabled: Boolean,
     val onConnectClicked: () -> Unit,
     val onDisconnectClicked: () -> Unit,
@@ -69,7 +71,8 @@ private data class HomeDestinationArgs(
 internal fun shouldShowConnectedAurora(
     liveGlassEnabled: Boolean,
     connected: Boolean,
-): Boolean = liveGlassEnabled && connected
+    appearanceChooserVisible: Boolean = false,
+): Boolean = liveGlassEnabled && (connected || appearanceChooserVisible)
 
 internal fun refreshVisibleScreenData(
     destination: AppDestination,
@@ -95,22 +98,25 @@ fun AppScreen(
     onPickAvatarClicked: () -> Unit,
 ) {
     var plansCheckoutVisible by remember { mutableStateOf(false) }
-    val sharedBackdrop = rememberLayerBackdrop {
+    val sharedBackdrop = rememberPrismalGlassLayer {
         drawRect(Color(0xFF07111A))
         drawContent()
     }
-    val sharedBackgroundBackdrop = rememberLayerBackdrop {
+    val sharedBackgroundBackdrop = rememberPrismalGlassLayer {
         drawRect(Color(0xFF07111A))
         drawContent()
     }
     val glassMode = state.personalizationSettings.glassMode
     val liveGlassEnabled = glassMode.liveGlassEnabled
     val simpleTransitions = glassMode.simpleTransitions
-    val showSharedNavigation = PrimaryNavigationPolicy.showsSharedNavigation(
+    val initialOnboardingComplete = state.installOnboardingStep == InstallOnboardingStep.COMPLETE ||
+        state.installOnboardingStep == InstallOnboardingStep.APPEARANCE
+    val appearanceChooserVisible = showsInstallAppearanceDialog(state)
+    val showSharedNavigation = initialOnboardingComplete && PrimaryNavigationPolicy.showsSharedNavigation(
         isAuthenticated = state.isAuthenticated,
         destination = state.currentDestination,
     )
-    val showSharedBottomNavigation = PrimaryNavigationPolicy.showsBottomNavigation(
+    val showSharedBottomNavigation = initialOnboardingComplete && PrimaryNavigationPolicy.showsBottomNavigation(
         isAuthenticated = state.isAuthenticated,
         destination = state.currentDestination,
         dialogVisible = state.dialog != null,
@@ -133,6 +139,7 @@ fun AppScreen(
             state.dialog != null ||
             hasGeneratedDeviceInvite ||
             hasAppBackStack ||
+            appearanceChooserVisible ||
             hasAuthBackStack,
     ) {
         if (state.pendingAvatarCropUri != null) {
@@ -240,7 +247,7 @@ fun AppScreen(
                 .fillMaxSize()
                 .then(
                     if (showSharedNavigation && liveGlassEnabled) {
-                        Modifier.layerBackdrop(sharedBackdrop)
+                        Modifier.prismalGlassLayer(sharedBackdrop)
                     } else {
                         Modifier
                     },
@@ -252,7 +259,7 @@ fun AppScreen(
                             .fillMaxSize()
                             .then(
                                 if (liveGlassEnabled) {
-                                    Modifier.layerBackdrop(sharedBackgroundBackdrop)
+                                    Modifier.prismalGlassLayer(sharedBackgroundBackdrop)
                                 } else {
                                     Modifier
                                 },
@@ -263,11 +270,12 @@ fun AppScreen(
                         liveGlassEnabled = liveGlassEnabled,
                         showCenterShade = false,
                     )
-                    AuroraOverlay(
+                    if (liveGlassEnabled) AuroraOverlay(
                         scale = scale,
                         visible = shouldShowConnectedAurora(
                             liveGlassEnabled = liveGlassEnabled,
                             connected = state.connectionState == VpnConnectionState.CONNECTED,
+                            appearanceChooserVisible = appearanceChooserVisible,
                         ),
                         showTopLayer = state.currentDestination != AppDestination.SETTINGS,
                     )
@@ -277,6 +285,10 @@ fun AppScreen(
             val destinationContent: @Composable (AppDestination) -> Unit = { destination ->
                     when (destination) {
                         AppDestination.SPLASH -> SplashScreen()
+                        AppDestination.ONBOARDING -> InstallOnboardingScreen(
+                            state = state,
+                            viewModel = viewModel,
+                        )
                         AppDestination.LOGIN -> LoginScreen(
                             state = state,
                             viewModel = viewModel,
@@ -345,13 +357,20 @@ fun AppScreen(
                                 openSharedDestination(AppDestination.MULTIHOP)
                             },
                         )
-                        AppDestination.MULTIHOP -> MultiHopScreen(state, viewModel)
-                        AppDestination.APP_FILTER -> AppFilterScreen(
+                        AppDestination.MULTIHOP -> MultiHopScreen(
                             state = state,
                             viewModel = viewModel,
                             sharedBackdrop = sharedBackgroundBackdrop,
                             liveGlassEnabled = liveGlassEnabled,
                             showBackground = false,
+                        )
+                        AppDestination.APP_FILTER -> AppFilterScreen(
+                            state = state,
+                            viewModel = viewModel,
+                            sharedBackdrop = sharedBackgroundBackdrop,
+                            liveGlassEnabled = liveGlassEnabled,
+                            showBackground = !showSharedNavigation,
+                            onDone = if (initialOnboardingComplete) null else viewModel::goBack,
                         )
                         AppDestination.SITE_RULES_ALWAYS_ON -> SiteRulesScreen(
                             state = state,

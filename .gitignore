@@ -31,6 +31,8 @@ Thumbs.db
 *.db
 *.sqlite*
 *.zip
+!app/libs/libbox.SOURCE.zip
+!third_party/geosite/SOURCE.zip
 *.tar
 *.gz
 *.bak

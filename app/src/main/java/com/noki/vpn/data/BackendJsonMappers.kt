@@ -5,6 +5,8 @@ import org.json.JSONObject
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.Locale
+import java.util.UUID
+import okio.ByteString.Companion.decodeBase64
 
 internal fun JSONObject.toBackendPayment(): BackendPayment = BackendPayment(
     publicId = getString("public_id"),
@@ -42,6 +44,7 @@ internal fun JSONObject.toBackendAuthTokens(): BackendAuthTokens =
         tokenType = optString("token_type", "bearer").ifBlank { "bearer" },
         expiresInSeconds = optBackendLong("expires_in") ?: optBackendLong("access_expires_in"),
         refreshExpiresAt = optBackendString("refresh_expires_at"),
+        credentialsSetupRequired = optBoolean("credentials_setup_required", false),
     )
 
 internal fun JSONObject.toBackendDevice(): BackendDevice =
@@ -155,6 +158,177 @@ internal fun JSONObject.toBackendAppNotification(): BackendAppNotification =
 
 internal fun JSONObject.toBackendVpnSession(): BackendVpnSession =
     BackendVpnSessionJsonParser.parse(this)
+
+internal fun RuRelaySelection.toBackendJson(): JSONObject = when (this) {
+    RuRelaySelection.Auto -> JSONObject().put("kind", "auto")
+    is RuRelaySelection.Node -> JSONObject().put("kind", "node").put("node_id", canonicalRuUuid(nodeId))
+    RuRelaySelection.Off -> throw IllegalArgumentException("ru_relay_disabled")
+}
+
+internal fun RuWireGuardSessionRequest.toBackendJson(): JSONObject {
+    require(routeVersion == 1) { "ru_route_version_invalid" }
+    val exitId = canonicalRuUuid(exitNodeId)
+    val entryId = entryNodeId?.let(::canonicalRuUuid)
+    require(entryId != exitId) { "ru_route_identity_invalid" }
+    require(deviceNonce.isNotBlank() && deviceSignature.isNotBlank()) { "ru_wireguard_device_proof_missing" }
+    require(relayRttSamples.size <= 32 && relayRttSamples.all { it.rttMs in 1..3000 }) {
+        "ru_relay_rtt_invalid"
+    }
+    require(relayRttSamples.map { canonicalRuUuid(it.nodeId) }.toSet().size == relayRttSamples.size &&
+        (relayRttSamples.isEmpty() || relaySelection == RuRelaySelection.Auto)) {
+        "ru_relay_rtt_duplicate"
+    }
+    return JSONObject()
+        .put("device_id", canonicalRuUuid(deviceId))
+        .put("device_key", deviceKey)
+        .put("device_nonce", deviceNonce)
+        .put("device_signature", deviceSignature)
+        .put("profile_code", "auto")
+        .put("route_mode", "ru_wg_nebula")
+        .put("route_version", routeVersion)
+        .put("capabilities", JSONArray().put("wireguard_native_v1").put("wireguard_persistent_v2")
+            .put("wireguard_routes_v1"))
+        .put("request_id", canonicalRuUuid(requestId))
+        .put("public_key_id", canonicalRuUuid(publicKeyId))
+        .put("exit_node_id", exitId)
+        .put("entry_node_id", entryId ?: JSONObject.NULL)
+        .put("relay_selection", relaySelection.toBackendJson())
+        .put("relay_rtt_samples", JSONArray().apply {
+            relayRttSamples.forEach { sample ->
+                put(JSONObject().put("node_id", canonicalRuUuid(sample.nodeId))
+                    .put("rtt_ms", sample.rttMs))
+            }
+        })
+}
+
+internal fun canonicalRuUuid(raw: String): String = runCatching { UUID.fromString(raw).toString() }
+    .getOrElse { throw IllegalArgumentException("ru_wireguard_uuid_invalid", it) }
+    .also { require(it == raw.lowercase(Locale.ROOT)) { "ru_wireguard_uuid_invalid" } }
+
+internal object RuWireGuardSessionJsonParser {
+    fun parse(
+        json: JSONObject,
+        expected: RuWireGuardSessionExpectation,
+        now: Instant = Instant.now(),
+    ): BackendRuWireGuardSession {
+        require(json.getString("engine") == "wireguard" && json.opt("contract_version") == 2 &&
+            json.getString("route_mode") == "ru_wg_nebula") { "ru_wireguard_engine_invalid" }
+        require(expected.routeVersion == 1 && json.opt("route_version") == expected.routeVersion) {
+            "ru_route_version_invalid"
+        }
+        val routeId = canonicalRuUuid(json.optString("route_id"))
+        val routeGeneration = (json.opt("route_generation") as? Int)?.takeIf { it >= 1 }
+            ?: throw IllegalArgumentException("ru_route_generation_invalid")
+        require(json.has("entry_node_id")) { "ru_route_entry_missing" }
+        val entryId = if (json.isNull("entry_node_id")) null else canonicalRuUuid(json.getString("entry_node_id"))
+        val selection = parseSelection(json.getJSONObject("relay_selection"))
+        val relayId = canonicalRuUuid(json.getString("relay_node_id"))
+        val exitId = canonicalRuUuid(json.getString("exit_node_id"))
+        val keyId = canonicalRuUuid(json.getString("public_key_id"))
+        val requestId = canonicalRuUuid(json.getString("request_id"))
+        val sessionId = canonicalRuUuid(json.getString("session_id"))
+        require(listOfNotNull(relayId, entryId, exitId).distinct().size == if (entryId == null) 2 else 3) {
+            "ru_route_identity_invalid"
+        }
+        val expectedSelection = when (val requested = expected.relaySelection) {
+            RuRelaySelection.Auto -> RuRelaySelection.Auto
+            is RuRelaySelection.Node -> RuRelaySelection.Node(canonicalRuUuid(requested.nodeId))
+            RuRelaySelection.Off -> throw IllegalArgumentException("ru_relay_disabled")
+        }
+        require(requestId == canonicalRuUuid(expected.requestId) &&
+            keyId == canonicalRuUuid(expected.publicKeyId) && exitId == canonicalRuUuid(expected.exitNodeId) &&
+            entryId == expected.entryNodeId?.let(::canonicalRuUuid) &&
+            selection == expectedSelection &&
+            (selection !is RuRelaySelection.Node || relayId == selection.nodeId)) {
+            "ru_wireguard_response_mismatch"
+        }
+        val status = json.getString("status")
+        val deadline = when (status) {
+            "pending" -> {
+                require(json.has("lease_expires_at")) { "ru_wireguard_reservation_invalid" }
+                if (json.isNull("lease_expires_at")) null else runCatching { Instant.parse(json.getString("lease_expires_at")) }
+                    .getOrElse { throw IllegalArgumentException("ru_wireguard_reservation_invalid", it) }
+                    .also { require(it.isAfter(now)) { "ru_wireguard_reservation_expired" } }.toEpochMilli()
+            }
+            "ready" -> {
+                require(json.has("lease_expires_at") && json.isNull("lease_expires_at")) {
+                    "ru_wireguard_persistent_required"
+                }
+                null
+            }
+            else -> throw IllegalArgumentException("ru_wireguard_status_invalid")
+        }
+        val generation = (json.opt("generation") as? Int)?.takeIf { it >= 1 }
+            ?: throw IllegalArgumentException("ru_wireguard_generation_invalid")
+        val revokeToken = json.optString("revoke_token").also { token ->
+            require(token.length in 32..128 && token.all {
+                (it.isLetterOrDigit() && it.code < 128) || it == '-' || it == '_'
+            }) { "ru_wireguard_revoke_token_invalid" }
+        }
+        val identity = BackendRuWireGuardIdentity(
+            requestId = requestId, sessionId = sessionId, generation = generation, publicKeyId = keyId,
+            relaySelection = selection, relayNodeId = relayId, exitNodeId = exitId,
+            routeVersion = expected.routeVersion, routeId = routeId, routeGeneration = routeGeneration,
+            entryNodeId = entryId, leaseExpiresAtEpochMillis = deadline, revokeToken = revokeToken,
+        )
+        return when (status) {
+            "pending" -> {
+                require(!json.has("wireguard") || json.isNull("wireguard")) { "ru_wireguard_pending_config_invalid" }
+                BackendRuWireGuardSession.Pending(identity)
+            }
+            "ready" -> BackendRuWireGuardSession.Ready(
+                identity, parseConfig(json.optJSONObject("wireguard")
+                    ?: throw IllegalArgumentException("ru_wireguard_config_missing")),
+            )
+            else -> throw IllegalArgumentException("ru_wireguard_status_invalid")
+        }
+    }
+
+    private fun parseSelection(json: JSONObject): RuRelaySelection = when (json.getString("kind")) {
+        "auto" -> {
+            require(json.length() == 1) { "ru_relay_selection_invalid" }
+            RuRelaySelection.Auto
+        }
+        "node" -> {
+            require(json.length() == 2) { "ru_relay_selection_invalid" }
+            RuRelaySelection.Node(canonicalRuUuid(json.getString("node_id")))
+        }
+        else -> throw IllegalArgumentException("ru_relay_selection_invalid")
+    }
+
+    private fun parseConfig(json: JSONObject): BackendRuWireGuardConfig {
+        val endpoint = json.getString("endpoint")
+        val host = endpoint.substringBeforeLast(':', "")
+        val port = endpoint.substringAfterLast(':', "").toIntOrNull()
+        require(isIpv4(host) && port != null && port in 1..65535) { "ru_wireguard_endpoint_invalid" }
+        val address = json.getString("address")
+        require(address.endsWith("/32") && isIpv4(address.removeSuffix("/32"))) {
+            "ru_wireguard_address_invalid"
+        }
+        val key = json.getString("server_public_key")
+        val decoded = key.decodeBase64()?.toByteArray()
+        require(decoded != null && decoded.size == 32 && decoded.any { it != 0.toByte() }) {
+            "ru_wireguard_key_invalid"
+        }
+        val dnsArray = json.getJSONArray("dns")
+        val dns = (0 until dnsArray.length()).map { dnsArray.getString(it) }
+        require(dns.size in 1..4 && dns.all(::isIpv4)) { "ru_wireguard_dns_invalid" }
+        val allowedArray = json.getJSONArray("allowed_ips")
+        val allowed = (0 until allowedArray.length()).map { allowedArray.getString(it) }
+        require(allowed == listOf("0.0.0.0/0")) { "ru_wireguard_allowed_ips_invalid" }
+        val mtu = json.getInt("mtu")
+        require(mtu in 1280..1500) { "ru_wireguard_mtu_invalid" }
+        return BackendRuWireGuardConfig(endpoint, key, address, dns, mtu, allowed)
+    }
+
+    private fun isIpv4(raw: String): Boolean {
+        val octets = raw.split('.')
+        return octets.size == 4 && octets.all { token ->
+            token.isNotEmpty() && token.length <= 3 && token.all(Char::isDigit) &&
+                (token.toIntOrNull() ?: -1) in 0..255 && (token == "0" || !token.startsWith('0'))
+        }
+    }
+}
 
 internal fun JSONArray?.toDeviceList(): List<BackendDevice> {
     if (this == null) return emptyList()
@@ -322,6 +496,7 @@ internal object BackendUserResponseParser {
             ),
             hasPassword = json.optBoolean("has_password", true),
             telegramLinked = json.optBoolean("telegram_linked", false),
+            credentialsSetupRequired = json.optBoolean("credentials_setup_required", false),
         )
     }
 }
@@ -368,9 +543,16 @@ internal object BackendTemporaryVpnResponseParser {
 internal object BackendVpnSessionJsonParser {
     fun parse(json: JSONObject): BackendVpnSession {
         val routeMode = json.optString("route_mode", "direct")
-        require(routeMode == "direct" || routeMode == "multihop") { "multihop_route_mode_invalid" }
+        require(routeMode in setOf("direct", "multihop")) { "multihop_route_mode_invalid" }
+        require(routeMode != "direct" || !json.has("multihop") || json.isNull("multihop")) { "multihop_route_mode_invalid" }
         val candidates = parseEndpointCandidates(json.optJSONArray("endpoint_candidates"))
         val multiHop = if (routeMode == "multihop") parseMultiHop(json.getJSONObject("multihop"), candidates) else null
+        multiHop?.let { route ->
+            require(json.getString("entry_host") == route.entryIp && json.getString("connect_ip") == route.entryIp &&
+                candidates.any { it.code == json.getString("endpoint_code") && it.entryPort == json.getInt("entry_port") }) {
+                "multihop_entry_invalid"
+            }
+        }
         return BackendVpnSession(
         canConnect = json.optBoolean("can_connect", false),
         profileCode = json.optString("profile_code", "tls"),
@@ -399,78 +581,35 @@ internal object BackendVpnSessionJsonParser {
         planCode = json.optBackendString("plan_code"),
         endpointCandidates = candidates,
         connectIp = json.optBackendString("connect_ip"),
-        youtubeCascade = parseYoutubeCascade(json.optJSONObject("youtube_cascade")),
-        routeMode = routeMode,
         multiHop = multiHop,
     )
     }
 
     private fun parseMultiHop(json: JSONObject, candidates: List<BackendEndpointCandidate>): BackendMultiHopSession {
-        fun hop(json: JSONObject): HopSelection = when (json.getString("kind")) {
-            "country" -> HopSelection(ServerSelectionMode.COUNTRY, countryCode = json.getString("country_code"))
-            "node" -> HopSelection(ServerSelectionMode.SERVER, nodeId = json.getString("node_id"))
-            else -> throw IllegalArgumentException("multihop_selector_invalid")
-        }
         val selection = json.getJSONObject("selection")
-        val entry = parseEndpointCandidate(json.getJSONObject("entry"))
-        val exitNodeId = json.getString("exit_node_id")
-        val policyHash = json.getString("policy_hash")
-        val expiry = runCatching { java.time.Instant.parse(json.getString("policy_expires_at")).toEpochMilli() }
-            .recoverCatching { java.time.OffsetDateTime.parse(json.getString("policy_expires_at")).toInstant().toEpochMilli() }
-            .getOrElse { throw IllegalArgumentException("multihop_policy_expiry_invalid", it) }
-        require(entry.nodeId != null && entry.nodeId != exitNodeId && exitNodeId.isNotBlank()) {
-            "multihop_nodes_invalid"
+        require(json.getInt("version") == 2 && selection.getInt("version") == 2 &&
+            selection.getJSONArray("excluded_pairs").length() == 0) { "multihop_version_invalid" }
+        fun hop(value: JSONObject): HopSelection {
+            require(value.getString("kind") == "node" && value.length() == 2) { "multihop_selector_invalid" }
+            return HopSelection(ServerSelectionMode.SERVER, nodeId = canonicalRuUuid(value.getString("node_id")))
         }
-        require(entry.entryPort in 1..65535 && isPublicIpv4(entry.connectIp)) { "multihop_entry_invalid" }
-        require(entry.proxyType == "vless" && entry.security == "reality" && entry.transport == "tcp") {
-            "multihop_transport_unsupported"
-        }
+        val settings = MultiHopSettings(true, hop(selection.getJSONObject("entry")), hop(selection.getJSONObject("exit")))
+        val entryId = canonicalRuUuid(json.getString("entry_node_id"))
+        val exitId = canonicalRuUuid(json.getString("exit_node_id"))
+        require(settings.explicitNodeIds() == (entryId to exitId)) { "multihop_nodes_invalid" }
+        val entryIp = json.getString("entry_ip")
+        val octets = entryIp.split('.')
+        require(octets.size == 4 && octets.all { token ->
+            token.isNotEmpty() && token.all { it in '0'..'9' } && token.toIntOrNull() in 0..255 &&
+                (token == "0" || !token.startsWith('0'))
+        }) { "multihop_entry_invalid" }
         require(candidates.isNotEmpty() && candidates.all {
-            it.nodeId == exitNodeId && it.entryPort in 1..65535 && isPublicIpv4(it.connectIp)
-                && it.proxyType == "vless" && it.security == "reality" && it.transport == "tcp"
+            it.nodeId == exitId && it.entryHost == entryIp && it.connectIp == entryIp &&
+                it.entryPort in 20000..29999 && EndpointSecurityPolicy.isAllowedCandidate(it)
         }) { "multihop_exit_invalid" }
-        require(policyHash.matches(Regex("[0-9a-f]{64}")) && expiry > System.currentTimeMillis()) {
-            "multihop_policy_invalid"
-        }
-        return BackendMultiHopSession(
-            entry = entry,
-            selection = MultiHopSettings(enabled = true,
-                entry = hop(selection.getJSONObject("entry")), exit = hop(selection.getJSONObject("exit"))),
-            exitNodeId = exitNodeId, policyHash = policyHash, policyExpiresAtEpochMillis = expiry,
-        )
-    }
-
-    private fun isPublicIpv4(value: String?): Boolean {
-        val tokens = value?.split('.') ?: return false
-        if (tokens.size != 4) return false
-        val parts = tokens.map { it.toIntOrNull() ?: return false }
-        if (parts.any { it !in 0..255 }) return false
-        val (a, b) = parts
-        return a in 1..223 && a !in setOf(10, 127) && !(a == 169 && b == 254)
-            && !(a == 172 && b in 16..31) && !(a == 192 && b == 168)
-            && !(a == 100 && b in 64..127) && !(a == 198 && b in 18..19)
-    }
-
-    private fun parseYoutubeCascade(json: JSONObject?): YoutubeCascadeProfile? {
-        if (json == null) return null
-        val profile = YoutubeCascadeProfile(
-            host = json.optString("host"),
-            port = json.optInt("port", 443),
-            uuid = json.optString("uuid"),
-            serverName = json.optString("server_name"),
-            publicKey = json.optString("public_key"),
-            shortId = json.optString("short_id"),
-            fingerprint = json.optString("fingerprint", "chrome"),
-            flow = json.optString("flow"),
-        )
-        return profile.takeIf {
-            it.port in 1..65535 &&
-                it.host.isNotBlank() &&
-                it.uuid.isNotBlank() &&
-                it.serverName.isNotBlank() &&
-                it.publicKey.isNotBlank() &&
-                it.shortId.isNotBlank()
-        }
+        val policyHash = json.getString("policy_hash")
+        require(policyHash.matches(Regex("[0-9a-f]{64}"))) { "multihop_policy_invalid" }
+        return BackendMultiHopSession(settings, entryId, exitId, entryIp, policyHash)
     }
 
     private fun parseEndpointCandidates(array: JSONArray?): List<BackendEndpointCandidate> {

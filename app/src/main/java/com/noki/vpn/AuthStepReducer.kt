@@ -3,6 +3,29 @@ package com.noki.vpn
 import com.noki.vpn.data.AppLanguage
 
 object AuthStepReducer {
+    fun requireCredentialsSetup(state: AppUiState, previous: AppUiState = state): AppUiState {
+        if (!state.isAuthenticated) return state
+        if (!state.userProfile.credentialsSetupRequired) {
+            return if (previous.userProfile.credentialsSetupRequired) {
+                state.copy(
+                    screenStack = listOf(AppDestination.HOME),
+                    authStep = AuthStep.WELCOME,
+                    registrationForm = RegistrationFormState(),
+                    inlineMessage = null,
+                )
+            } else state
+        }
+        val setupStep = state.authStep == AuthStep.REGISTRATION_PROFILE ||
+            state.authStep == AuthStep.REGISTRATION_PASSWORD
+        if (setupStep && state.screenStack == listOf(AppDestination.REGISTRATION)) return state
+        return state.copy(
+            screenStack = listOf(AppDestination.REGISTRATION),
+            authStep = if (setupStep) state.authStep else AuthStep.REGISTRATION_PROFILE,
+            registrationForm = if (setupStep) state.registrationForm else RegistrationFormState(username = state.userProfile.username),
+            inlineMessage = null,
+        )
+    }
+
     fun validateLogin(form: LoginFormState, language: AppLanguage): String? = when {
         form.email.isBlank() -> tr(language, "Введите e-mail или username", "Enter your email or username")
         form.password.isBlank() -> tr(language, "Введите пароль", "Enter your password")

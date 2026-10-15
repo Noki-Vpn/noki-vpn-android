@@ -16,6 +16,9 @@ internal class TelegramAuthPurposeState(
     val currentAttemptId: Long?
         get() = purpose?.let { savedStateHandle.get<Long>(KEY_ATTEMPT_ID) ?: 0L }
 
+    // Purpose survives process death, but the gateway's PKCE session does not.
+    val interruptedPurpose: TelegramAuthPurpose? = purpose?.also { invalidate() }
+
     fun begin(purpose: TelegramAuthPurpose): Long {
         val nextAttemptId = nextAttemptId()
         savedStateHandle[KEY_ATTEMPT_ID] = nextAttemptId

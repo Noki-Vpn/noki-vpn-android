@@ -43,6 +43,8 @@ class MainViewModel(
 
     fun goBack() = runtime.goBack()
 
+    fun advanceInstallOnboarding() = runtime.advanceInstallOnboarding()
+
     fun openScreen(destination: AppDestination) = runtime.openScreen(destination)
 
     fun openTopLevelScreen(destination: AppDestination) = runtime.openTopLevelScreen(destination)
@@ -249,10 +251,9 @@ class MainViewModel(
 
     fun applyAppRoutingSettings() = runtime.applyAppRoutingSettings()
 
-    fun setYoutubeDirectDpiEnabled(enabled: Boolean) =
-        runtime.setYoutubeDirectDpiEnabled(enabled)
-
     fun setMultiHop(settings: MultiHopSettings) = runtime.setMultiHop(settings)
+
+    fun setRuRelayEnabled(enabled: Boolean) = runtime.setRuRelayEnabled(enabled)
 
     fun toggleBiometric(enabled: Boolean) = runtime.toggleBiometric(enabled)
 

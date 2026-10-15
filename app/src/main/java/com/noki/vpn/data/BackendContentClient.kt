@@ -11,6 +11,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
@@ -85,6 +86,40 @@ internal class BackendContentClient(
         versionCode: Long,
         abis: List<String>,
     ): Boolean = androidUpdate(token, versionCode, abis).updateAvailable
+
+    suspend fun geositeMetadata(): Pair<String, Int> = withContext(Dispatchers.IO) {
+        val response = execute(Request.Builder().url(jsonApi.apiUrl("/app/geosite")).get().build())
+        val digest = response.getString("sha256").lowercase(Locale.ROOT)
+        val size = response.getInt("size_bytes")
+        require(digest.matches(Regex("[0-9a-f]{64}")) && size in 1024..GEOSITE_MAX_BYTES) {
+            "geosite_metadata_invalid"
+        }
+        digest to size
+    }
+
+    suspend fun downloadGeosite(expectedSize: Int): ByteArray = withContext(Dispatchers.IO) {
+        require(expectedSize in 1024..GEOSITE_MAX_BYTES)
+        val request = Request.Builder().url(jsonApi.apiUrl("/app/geosite/file")).get().build()
+        val downloaded = ByteArrayOutputStream(expectedSize)
+        val coroutine = currentCoroutineContext()
+        jsonApi.stream(request) { body ->
+            require(body.contentLength() < 0 || body.contentLength() == expectedSize.toLong()) {
+                "geosite_size_mismatch"
+            }
+            body.byteStream().use { input ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val read = input.read(buffer, 0, minOf(buffer.size, expectedSize - downloaded.size() + 1))
+                    coroutine.ensureActive()
+                    if (read < 0) break
+                    require(downloaded.size() + read <= expectedSize) { "geosite_size_mismatch" }
+                    downloaded.write(buffer, 0, read)
+                }
+            }
+        }
+        require(downloaded.size() == expectedSize) { "geosite_size_mismatch" }
+        downloaded.toByteArray()
+    }
 
     suspend fun uploadAvatar(
         token: String,
@@ -314,6 +349,7 @@ internal class BackendContentClient(
         private const val AVATAR_UPLOAD_MAX_BYTES = 1L * 1024L * 1024L
         private const val AVATAR_DOWNLOAD_MAX_BYTES = 5L * 1024L * 1024L
         private const val APK_DOWNLOAD_MAX_BYTES = 256L * 1024L * 1024L
+        private const val GEOSITE_MAX_BYTES = 32 * 1024 * 1024
     }
 }
 

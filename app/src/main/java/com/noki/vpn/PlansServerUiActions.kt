@@ -5,6 +5,7 @@ import com.noki.vpn.data.BillingCycle
 import com.noki.vpn.data.VpnConnectionState
 import com.noki.vpn.data.ServerSelectionMode
 import com.noki.vpn.data.UserProfile
+import com.noki.vpn.data.usesRuForeignNodeCatalog
 
 internal fun isCurrentServerSelection(profile: UserProfile, code: String, mode: ServerSelectionMode): Boolean =
     profile.serverSelectionMode == mode && when (mode) {
@@ -30,10 +31,14 @@ internal fun AppUiRuntime.setBillingCycle(cycle: BillingCycle) {
 internal fun AppUiRuntime.selectServer(code: String, mode: ServerSelectionMode = ServerSelectionMode.COUNTRY) {
     val selectedCode = code.trim()
     if (isCurrentServerSelection(uiState.userProfile, selectedCode, mode)) return
-    if (confirmedServerCode(AppDialog.ChangeServer(selectedCode, mode), uiState.locations) == null) return
-    val node = if (mode == ServerSelectionMode.SERVER) {
-        uiState.locations.flatMap { it.servers }.firstOrNull { it.id == selectedCode } ?: return
-    } else null
+    val ruRelayEnabled = uiState.advancedSettings.ruRelayEnabled
+    if (confirmedServerCode(AppDialog.ChangeServer(selectedCode, mode), uiState.locations,
+        uiState.ruForeignNodes, ruRelayEnabled) == null) return
+    val selectedCountry = if (mode != ServerSelectionMode.SERVER) selectedCode else if (
+        usesRuForeignNodeCatalog(ruRelayEnabled, uiState.ruForeignNodes)
+    ) {
+        uiState.ruForeignNodes.firstOrNull { it.id == selectedCode }?.countryCode ?: return
+    } else uiState.locations.flatMap { it.servers }.firstOrNull { it.id == selectedCode }?.countryCode ?: return
 
     val preChangeConnectionState = uiState.connectionState
     val staleEndpointOptionsRefresh = endpointOptionsRefreshJob
@@ -41,9 +46,9 @@ internal fun AppUiRuntime.selectServer(code: String, mode: ServerSelectionMode =
     endpointOptionsRefreshCountryCode = null
     staleEndpointOptionsRefresh?.cancel()
     val persisted = settingsMutationCoordinator.persistServerSelection(
-        countryCode = node?.countryCode ?: selectedCode,
+        countryCode = selectedCountry,
         mode = mode,
-        nodeId = node?.id.orEmpty(),
+        nodeId = if (mode == ServerSelectionMode.SERVER) selectedCode else "",
     )
     val next = uiState.copy(
         userProfile = persisted.userProfile,

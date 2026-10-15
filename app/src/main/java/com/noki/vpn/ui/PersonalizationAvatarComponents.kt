@@ -30,9 +30,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import com.noki.vpn.R
 import com.noki.vpn.data.AppLanguage
 
@@ -41,7 +41,7 @@ internal fun PersonalizationAvatarBlock(
     avatarUri: String?,
     isUploadingAvatar: Boolean,
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     avatarMenuExpanded: Boolean,
     avatarEditingEnabled: Boolean,
@@ -53,7 +53,7 @@ internal fun PersonalizationAvatarBlock(
     modifier: Modifier,
 ) {
     val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
-    val avatarBackdrop = rememberLayerBackdrop()
+    val avatarBackdrop = rememberPrismalGlassLayer()
 
     Box(
         modifier = modifier,
@@ -68,7 +68,7 @@ internal fun PersonalizationAvatarBlock(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(if (liveGlassEnabled) Modifier.layerBackdrop(avatarBackdrop) else Modifier),
+                    .then(if (liveGlassEnabled) Modifier.prismalGlassLayer(avatarBackdrop) else Modifier),
                 contentAlignment = Alignment.TopCenter,
             ) {
                 PersonalizationAvatarStack(
@@ -122,7 +122,7 @@ internal fun PersonalizationAvatarStack(
     avatarUri: String?,
     isUploadingAvatar: Boolean,
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     avatarEditingEnabled: Boolean,
     onClick: () -> Unit,
@@ -174,7 +174,7 @@ internal fun PersonalizationAvatarStack(
 @Composable
 internal fun PersonalizationAvatarMenu(
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     enabled: Boolean,
     onPickAvatarClicked: () -> Unit,

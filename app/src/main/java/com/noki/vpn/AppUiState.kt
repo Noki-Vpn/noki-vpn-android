@@ -9,6 +9,7 @@ import com.noki.vpn.data.AdvancedSettings
 import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.AppFilterMode
 import com.noki.vpn.data.AppInfo
+import com.noki.vpn.data.InstallOnboardingStep
 import com.noki.vpn.data.BillingCycle
 import com.noki.vpn.data.DailyStats
 import com.noki.vpn.data.DeviceSession
@@ -17,6 +18,7 @@ import com.noki.vpn.data.PlanCode
 import com.noki.vpn.data.PlanSummary
 import com.noki.vpn.data.SecuritySettings
 import com.noki.vpn.data.ServerLocation
+import com.noki.vpn.data.RuForeignNode
 import com.noki.vpn.data.ServerSelectionMode
 import com.noki.vpn.data.UsageBar
 import com.noki.vpn.data.UserProfile
@@ -32,6 +34,7 @@ import kotlin.math.ceil
 
 enum class AppDestination {
     SPLASH,
+    ONBOARDING,
     LOGIN,
     REGISTRATION,
     PASSWORD_RECOVERY,
@@ -397,6 +400,7 @@ object SettingsPreparedStatePolicy {
 }
 
 data class AppUiState(
+    val installOnboardingStep: InstallOnboardingStep = InstallOnboardingStep.CONSENT,
     val paymentCheckout: PaymentCheckoutState = PaymentCheckoutState(),
     val isReady: Boolean = false,
     val screenStack: List<AppDestination> = listOf(AppDestination.SPLASH),
@@ -432,6 +436,7 @@ data class AppUiState(
     val appNotificationHistory: List<BackendAppNotification> = emptyList(),
     val hasUnreadAppNotifications: Boolean = false,
     val locations: List<ServerLocation> = emptyList(),
+    val ruForeignNodes: List<RuForeignNode> = emptyList(),
     val usageBars: List<UsageBar> = emptyList(),
     val dailyStats: List<DailyStats> = emptyList(),
     val isRefreshingData: Boolean = false,

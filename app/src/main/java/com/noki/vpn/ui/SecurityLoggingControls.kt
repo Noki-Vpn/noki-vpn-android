@@ -29,8 +29,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import androidx.compose.runtime.getValue
 
 @Composable
@@ -39,7 +39,7 @@ internal fun SecurityLoggingRow(
     anonymousLogsEnabled: Boolean,
     isUploadingLogs: Boolean,
     logUploadMessage: String?,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     language: com.noki.vpn.data.AppLanguage,
     onLoggingEnabledChange: (Boolean) -> Unit,
@@ -53,14 +53,14 @@ internal fun SecurityLoggingRow(
         animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
         label = "SecurityLoggingPanelHeight",
     )
-    val panelBackdrop = rememberLayerBackdrop()
+    val panelBackdrop = rememberPrismalGlassLayer()
     SecurityPanelSurface(
         backdrop = backdrop,
         liveGlassEnabled = liveGlassEnabled,
         modifier = Modifier
             .fillMaxWidth()
             .height(panelHeight),
-        exportedBackdrop = panelBackdrop,
+        nestedGlassSource = panelBackdrop,
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
@@ -151,7 +151,7 @@ internal fun SecurityLogOption(
     subtitle: String,
     checked: Boolean,
     enabled: Boolean,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
@@ -205,7 +205,7 @@ internal fun SecurityLogOption(
 internal fun SecurityLogSendButton(
     text: String,
     enabled: Boolean,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onClick: () -> Unit,
 ) {

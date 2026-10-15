@@ -46,14 +46,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 import com.noki.vpn.R
 
 @Composable
 internal fun SecurityAndroidVersionBlock(
     updateState: com.noki.vpn.AndroidUpdateUiState,
     language: com.noki.vpn.data.AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
     onClick: () -> Unit,
@@ -207,7 +207,7 @@ internal enum class SecurityActionIcon {
 internal fun SecurityTelegramLinkedRow(
     text: String,
     deleteDescription: String,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
     onDeleteClick: () -> Unit,
@@ -272,7 +272,7 @@ internal fun SecurityTelegramLinkedRow(
 internal fun SecurityGlassActionButton(
     text: String,
     enabled: Boolean,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
     showProgress: Boolean = false,

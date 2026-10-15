@@ -39,7 +39,7 @@ import com.noki.vpn.data.ServerLocation
 import com.noki.vpn.data.ServerSelectionMode
 import com.noki.vpn.data.UserProfile
 import com.noki.vpn.R
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 import kotlin.math.max
 
 internal fun homeSelectedLocation(
@@ -168,11 +168,12 @@ internal fun HomeLocationCard(
     locations: List<ServerLocation>,
     selectedServerCode: String,
     expanded: Boolean,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onToggle: () -> Unit,
     country: String,
     subtitle: String? = null,
+    countryCode: String? = null,
 ) {
     val headerHeight = designDp(NokiUiKitPolicy.homeLocationHeightDp, scale)
     val selectedLocation = locations.firstOrNull { it.code.equals(selectedServerCode, true) }
@@ -196,9 +197,10 @@ internal fun HomeLocationCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(designDp(20f, scale)),
         ) {
-            if (selectedLocation != null) {
+            val flagCode = countryCode ?: selectedLocation?.countryCode
+            if (flagCode != null) {
                 CountryFlagMarker(
-                    location = selectedLocation,
+                    countryCode = flagCode,
                     scale = scale,
                     sizeDp = NokiUiKitPolicy.homeLocationFlagSizeDp,
                 )

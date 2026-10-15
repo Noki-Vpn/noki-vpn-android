@@ -88,7 +88,8 @@ class BackendTelegramAuthContractTest {
                   "is_admin":false,
                   "has_real_email":false,
                   "has_password":false,
-                  "telegram_linked":true
+                  "telegram_linked":true,
+                  "credentials_setup_required":true
                 }
                 """.trimIndent(),
             ),
@@ -97,5 +98,16 @@ class BackendTelegramAuthContractTest {
         assertFalse(user.hasRealEmail)
         assertFalse(user.hasPassword)
         assertTrue(user.telegramLinked)
+        assertTrue(user.credentialsSetupRequired)
+    }
+
+    @Test
+    fun `token and user payloads require setup only with explicit server marker`() {
+        val payload = JSONObject().put("access_token", "access").put("expires_in", 3600)
+        assertFalse(payload.toBackendAuthTokens().credentialsSetupRequired)
+        assertTrue(payload.put("credentials_setup_required", true).toBackendAuthTokens().credentialsSetupRequired)
+        val user = JSONObject().put("id", "user-1").put("username", "telegram_user")
+            .put("email", "tg_12345678901234@a.noki").put("is_active", true).put("is_admin", false)
+        assertFalse(BackendUserResponseParser.parse(user).credentialsSetupRequired)
     }
 }

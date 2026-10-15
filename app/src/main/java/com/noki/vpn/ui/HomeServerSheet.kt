@@ -3,8 +3,6 @@ package com.noki.vpn.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.animateFloat
@@ -14,13 +12,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -28,7 +21,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.material3.HorizontalDivider
@@ -42,21 +35,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.ServerLocation
+import com.noki.vpn.data.RuForeignNode
 import com.noki.vpn.data.ServerSelectionMode
 import com.noki.vpn.data.UserProfile
-import com.kyant.backdrop.Backdrop
-import com.kyant.backdrop.backdrops.LayerBackdrop
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 @Composable
@@ -66,122 +57,159 @@ internal fun HomeServerDropdownOverlay(
     scale: Float,
     language: AppLanguage,
     locations: List<ServerLocation>,
-    backdrop: Backdrop?,
-    serverRowsBackdrop: LayerBackdrop?,
-    liveGlassEnabled: Boolean,
-    animateRows: Boolean,
     onCollapse: () -> Unit,
     onLocationSelected: (String, ServerSelectionMode) -> Unit,
     userProfile: UserProfile,
+    foreignNodes: List<RuForeignNode> = emptyList(),
+    ruRelayEnabled: Boolean = false,
 ) {
-    val menuLocations = remember(locations) { serverMenuLocations(locations) }
+    val menuLocations = remember(locations, foreignNodes, ruRelayEnabled, language) {
+        serverMenuLocations(locations, foreignNodes, ruRelayEnabled, language)
+    }
     var expandedCountry by remember { mutableStateOf<String?>(null) }
-    NokiGlassSheetOverlay(
+    NokiServerSheetOverlay(
         modifier = modifier,
         visible = visible,
         scale = scale,
-        backdrop = backdrop,
-        liveGlassEnabled = liveGlassEnabled,
         onCollapse = onCollapse,
     ) { contentModifier ->
-        LazyColumn(
+        HomeServerCountryList(
             modifier = contentModifier
                 .fillMaxWidth()
                 .padding(horizontal = designDp(NokiUiKitPolicy.homeServerItemHorizontalPaddingDp, scale))
                 .padding(top = designDp(HOME_SERVER_DROPDOWN_FIRST_ITEM_TOP_DP, scale)),
-            verticalArrangement = Arrangement.spacedBy(designDp(NokiUiKitPolicy.homeServerItemGapDp, scale)),
-            contentPadding = PaddingValues(bottom = designDp(0f, scale)),
-        ) {
-            item(key = "auto") {
-                Box(
-                    Modifier.fillMaxWidth().homeServerItemGlassSurface(
-                        shape = RoundedCornerShape(designDp(24f, scale)),
-                        backdrop = serverRowsBackdrop,
-                        liveGlassEnabled = liveGlassEnabled,
-                        scale = scale,
-                        selected = userProfile.serverSelectionMode == ServerSelectionMode.AUTO,
-                    ),
-                ) {
+            scale = scale, language = language, entries = menuLocations,
+            selectionMode = userProfile.serverSelectionMode,
+            selectedCountryCode = userProfile.selectedCountryCode,
+            selectedNodeId = userProfile.selectedNodeId,
+            expandedCountry = expandedCountry,
+            onExpandedCountryChange = { expandedCountry = it },
+            onNodeSelected = { onLocationSelected(it, ServerSelectionMode.SERVER) },
+            onCountrySelected = { onLocationSelected(it, ServerSelectionMode.COUNTRY) },
+            onAutomaticSelected = { onLocationSelected("", ServerSelectionMode.AUTO) },
+        )
+    }
+}
+
+@Composable
+internal fun HomeServerCountryList(
+    modifier: Modifier,
+    scale: Float,
+    language: AppLanguage,
+    entries: List<HomeServerMenuEntry>,
+    selectionMode: ServerSelectionMode?,
+    selectedCountryCode: String?,
+    selectedNodeId: String?,
+    expandedCountry: String?,
+    onExpandedCountryChange: (String?) -> Unit,
+    onNodeSelected: (String) -> Unit,
+    onCountrySelected: ((String) -> Unit)? = null,
+    onAutomaticSelected: (() -> Unit)? = null,
+) {
+    val gap = designDp(NokiUiKitPolicy.homeServerItemGapDp, scale)
+    val radius = designDp(24f, scale)
+    LazyColumn(modifier = modifier) {
+        if (onAutomaticSelected != null) item(key = "auto") {
+            Box(
+                Modifier.fillMaxWidth().padding(bottom = gap).homeServerItemSurface(
+                    shape = RoundedCornerShape(radius),
+                    selected = selectionMode == ServerSelectionMode.AUTO,
+                ),
+            ) {
+                HomeServerMenuItem(
+                    location = null,
+                    language = language,
+                    scale = scale,
+                    title = tr(language, "Автовыбор", "Automatic"),
+                    selected = selectionMode == ServerSelectionMode.AUTO,
+                    onClick = onAutomaticSelected,
+                )
+            }
+        }
+        item(key = "countries-header") {
+            Text(
+                text = tr(language, "Страны", "Countries"),
+                color = HomeTextSecondary,
+                fontFamily = ManropeFontFamily,
+                fontSize = designSp(12f, scale),
+                modifier = Modifier.padding(horizontal = designDp(4f, scale)).padding(bottom = gap),
+            )
+        }
+        entries.forEachIndexed { entryIndex, entry ->
+            val groupGap = if (entryIndex == entries.lastIndex) 0.dp else gap
+            val countrySelected = selectionMode == ServerSelectionMode.COUNTRY &&
+                (entry.key.equals(selectedCountryCode, true) ||
+                    entry.countryCode.equals(selectedCountryCode, true))
+            val totalNodes = entry.servers.size + entry.foreignNodes.size
+            val hasServers = totalNodes > 0
+            val expanded = expandedCountry == entry.key && hasServers
+            val toggleCountry = { onExpandedCountryChange(if (expanded) null else entry.key) }
+            item(key = "country:${entry.key}", contentType = "country") {
+                val shape = if (expanded) RoundedCornerShape(topStart = radius, topEnd = radius)
+                    else RoundedCornerShape(radius)
+                Box(Modifier.fillMaxWidth().padding(bottom = if (expanded) 0.dp else groupGap)
+                    .homeServerItemSurface(shape, selected = countrySelected)) {
                     HomeServerMenuItem(
-                        location = null,
+                        location = entry.location,
+                        title = entry.country,
+                        countryCode = entry.countryCode,
                         language = language,
                         scale = scale,
-                        animateOnlineIndicator = animateRows,
-                        title = tr(language, "Автовыбор", "Automatic"),
-                        selected = userProfile.serverSelectionMode == ServerSelectionMode.AUTO,
-                        onClick = { onLocationSelected("", ServerSelectionMode.AUTO) },
+                        latencyMs = entry.latencyMs,
+                        selected = countrySelected,
+                        expanded = expanded,
+                        onExpand = if (hasServers) toggleCountry else null,
+                        onClick = if (onCountrySelected != null) {
+                            { onCountrySelected(entry.key) }
+                        } else toggleCountry,
                     )
                 }
             }
-            item(key = "countries-header") {
-                Text(
-                    text = tr(language, "Страны", "Countries"),
-                    color = HomeTextSecondary,
-                    fontFamily = ManropeFontFamily,
-                    fontSize = designSp(12f, scale),
-                    modifier = Modifier.padding(horizontal = designDp(4f, scale)),
-                )
-            }
-            items(
-                items = menuLocations,
-                key = { it.key },
-                contentType = { "home-server-row" },
-            ) { entry ->
-                val countrySelected = userProfile.serverSelectionMode == ServerSelectionMode.COUNTRY &&
-                    (entry.location.code.equals(userProfile.selectedCountryCode, true) ||
-                        entry.location.countryCode.equals(userProfile.selectedCountryCode, true))
-                val expanded = expandedCountry == entry.location.code
-                val shape = RoundedCornerShape(designDp(24f, scale))
-                Column(
-                    Modifier.fillMaxWidth()
-                        .homeServerItemGlassSurface(
-                            shape = shape,
-                            backdrop = serverRowsBackdrop,
-                            liveGlassEnabled = liveGlassEnabled,
-                            scale = scale,
+            if (expanded) {
+                item(key = "divider:${entry.key}", contentType = "divider") {
+                    Box(Modifier.fillMaxWidth().background(homeServerItemSurfaceColor(countrySelected))) {
+                        HorizontalDivider(Modifier.padding(horizontal = designDp(18f, scale)), color = HomeStroke)
+                    }
+                }
+                fun childModifier(index: Int): Modifier {
+                    val last = index == totalNodes - 1
+                    val bottomRadius = if (last) radius else 0.dp
+                    return Modifier.fillMaxWidth().padding(bottom = if (last) groupGap else 0.dp)
+                        .homeServerItemSurface(
+                            RoundedCornerShape(bottomStart = bottomRadius, bottomEnd = bottomRadius),
                             selected = countrySelected,
                         )
-                        // Resize once: animating the glass bounds reallocates blur/lens layers every frame.
-                        .clip(shape),
-                ) {
-                    HomeServerMenuItem(
-                        location = entry.location,
-                        language = language,
-                        scale = scale,
-                        animateOnlineIndicator = animateRows,
-                        selected = countrySelected,
-                        expanded = expanded,
-                        onExpand = if (entry.location.servers.isEmpty()) null else {
-                            { expandedCountry = if (expandedCountry == entry.location.code) null else entry.location.code }
-                        },
-                        onClick = { onLocationSelected(entry.location.code, ServerSelectionMode.COUNTRY) },
-                    )
-                    if (expanded) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = designDp(18f, scale)),
-                            color = HomeTextSecondary.copy(alpha = 0.12f),
-                        )
-                        Column(Modifier.padding(designDp(8f, scale))) {
-                            entry.location.servers.forEach { server ->
-                                val serverSelected = userProfile.serverSelectionMode == ServerSelectionMode.SERVER &&
-                                    userProfile.selectedNodeId == server.id
-                                Box(
-                                    Modifier.clip(RoundedCornerShape(designDp(16f, scale)))
-                                        .background(if (serverSelected) HomeAccentPrimary.copy(alpha = 0.12f) else Color.Transparent),
-                                ) {
-                                    HomeServerMenuItem(
-                                        location = entry.location,
-                                        language = language,
-                                        scale = scale,
-                                        animateOnlineIndicator = animateRows,
-                                        title = server.name,
-                                        latencyMs = server.latencyMs,
-                                        online = server.isOnline,
-                                        selected = serverSelected,
-                                        onClick = { onLocationSelected(server.id, ServerSelectionMode.SERVER) },
-                                    )
-                                }
-                            }
+                        .padding(horizontal = designDp(8f, scale))
+                        .padding(top = if (index == 0) designDp(8f, scale) else 0.dp,
+                            bottom = if (last) designDp(8f, scale) else 0.dp)
+                }
+                itemsIndexed(entry.servers, key = { _, server -> "server:${entry.key}:${server.id}" },
+                    contentType = { _, _ -> "server" }) { index, server ->
+                    val serverSelected = selectionMode == ServerSelectionMode.SERVER && selectedNodeId == server.id
+                    Box(childModifier(index)) {
+                        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(designDp(16f, scale)))
+                            .then(if (serverSelected) Modifier.background(homeServerItemSurfaceColor(true)) else Modifier)) {
+                            HomeServerMenuItem(
+                                location = entry.location, title = server.name, countryCode = server.countryCode,
+                                language = language, scale = scale, latencyMs = server.latencyMs,
+                                online = server.isOnline, selected = serverSelected, serverRow = true,
+                                onClick = { onNodeSelected(server.id) },
+                            )
+                        }
+                    }
+                }
+                itemsIndexed(entry.foreignNodes, key = { _, node -> "foreign:${entry.key}:${node.id}" },
+                    contentType = { _, _ -> "server" }) { index, node ->
+                    val serverSelected = selectionMode == ServerSelectionMode.SERVER && selectedNodeId == node.id
+                    Box(childModifier(entry.servers.size + index)) {
+                        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(designDp(16f, scale)))
+                            .then(if (serverSelected) Modifier.background(homeServerItemSurfaceColor(true)) else Modifier)) {
+                            HomeServerMenuItem(
+                                location = null, title = node.name, countryCode = node.countryCode,
+                                language = language, scale = scale, latencyMs = node.latencyMs,
+                                selected = serverSelected, serverRow = true,
+                                onClick = { onNodeSelected(node.id) },
+                            )
                         }
                     }
                 }
@@ -191,12 +219,10 @@ internal fun HomeServerDropdownOverlay(
 }
 
 @Composable
-internal fun NokiGlassSheetOverlay(
+private fun NokiServerSheetOverlay(
     modifier: Modifier,
     visible: Boolean,
     scale: Float,
-    backdrop: Backdrop?,
-    liveGlassEnabled: Boolean,
     onCollapse: () -> Unit,
     content: @Composable (Modifier) -> Unit,
 ) {
@@ -265,19 +291,9 @@ internal fun NokiGlassSheetOverlay(
     fun settleSheetDrag() {
         sheetDragScope.launch {
             if (sheetDragOffset.value * dismissDirection >= sheetDismissThresholdPx) {
-                sheetDragOffset.animateTo(
-                    targetValue = dismissDirection * sheetExitDistancePx(sheetHeightPx),
-                    animationSpec = tween(
-                        durationMillis = HOME_SERVER_DROPDOWN_EXIT_DURATION_MS,
-                        easing = FastOutSlowInEasing,
-                    ),
-                )
                 onCollapse()
             } else {
-                sheetDragOffset.animateTo(
-                    targetValue = 0f,
-                    animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
-                )
+                animateSheetBack()
             }
         }
     }
@@ -285,22 +301,14 @@ internal fun NokiGlassSheetOverlay(
     AnimatedVisibility(
         visible = visible,
         modifier = modifier,
-        enter = fadeIn(
-            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
-        ) + slideInVertically(
+        enter = slideInVertically(
             initialOffsetY = { fullHeight -> -fullHeight },
             animationSpec = tween(
                 durationMillis = HOME_SERVER_DROPDOWN_EXIT_DURATION_MS,
                 easing = FastOutSlowInEasing,
             ),
         ),
-        exit = fadeOut(
-            animationSpec = tween(
-                durationMillis = HOME_SERVER_DROPDOWN_EXIT_FADE_DURATION_MS,
-                delayMillis = HOME_SERVER_DROPDOWN_EXIT_FADE_DELAY_MS,
-                easing = FastOutSlowInEasing,
-            ),
-        ) + slideOutVertically(
+        exit = slideOutVertically(
             targetOffsetY = { fullHeight -> -fullHeight },
             animationSpec = tween(
                 durationMillis = HOME_SERVER_DROPDOWN_EXIT_DURATION_MS,
@@ -334,8 +342,6 @@ internal fun NokiGlassSheetOverlay(
                 0f
             }
         }
-        val dragHandleAlpha = handleAlphaForSheetOffset(sheetDragOffset.value)
-        val handleAlpha = transitionHandleAlpha.coerceAtMost(dragHandleAlpha)
         val sheetRadius = designDp(NokiUiKitPolicy.homeServerDropdownSheetBottomRadiusDp, scale)
         val dropdownSheetShape = RoundedCornerShape(bottomStart = sheetRadius, bottomEnd = sheetRadius)
         val sheetModifier = Modifier
@@ -356,24 +362,6 @@ internal fun NokiGlassSheetOverlay(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(visible, sheetDismissThresholdPx) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        var position = down.position
-                        do {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            position = change.position
-                        } while (event.changes.any { it.pressed })
-                        val displacement = position - down.position
-                        // Observe the whole sheet, including drags consumed by its list.
-                        // The handle keeps its interactive drag/settle animation.
-                        if (sheetDragOffset.value == 0f &&
-                            -displacement.y >= sheetDismissThresholdPx &&
-                            -displacement.y > kotlin.math.abs(displacement.x)
-                        ) onCollapse()
-                    }
-                }
                 .clickable(
                     interactionSource = passthroughBlockerInteractionSource,
                     indication = null,
@@ -381,18 +369,7 @@ internal fun NokiGlassSheetOverlay(
                 ),
         ) {
             Box(
-                modifier = sheetVisualModifier.homeServerDropdownSheetShadowLayer(
-                    shape = dropdownSheetShape,
-                    scale = scale,
-                ),
-            )
-            Box(
-                modifier = sheetVisualModifier.homeServerDropdownSheetGlassSurface(
-                    shape = dropdownSheetShape,
-                    backdrop = backdrop,
-                    liveGlassEnabled = liveGlassEnabled,
-                    scale = scale,
-                ),
+                modifier = sheetVisualModifier.clip(dropdownSheetShape).background(SettingsBgSoft),
             )
             Box(
                 modifier = sheetContentClipModifier.clip(dropdownSheetShape),
@@ -444,8 +421,13 @@ internal fun NokiGlassSheetOverlay(
                         )
                         .width(designDp(NokiUiKitPolicy.homeServerDropdownHandleWidthDp, scale))
                         .height(designDp(NokiUiKitPolicy.homeServerDropdownHandleHeightDp, scale))
+                        .graphicsLayer {
+                            alpha = transitionHandleAlpha.coerceAtMost(
+                                handleAlphaForSheetOffset(sheetDragOffset.value),
+                            )
+                        }
                         .clip(RoundedCornerShape(percent = 50))
-                        .background(Color.White.copy(alpha = handleAlpha)),
+                        .background(Color.White),
                 )
             }
         }

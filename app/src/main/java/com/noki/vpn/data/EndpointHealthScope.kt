@@ -14,7 +14,8 @@ object EndpointHealthScope {
     ): Map<String, EndpointHealth> {
         val prefix = "${networkKind.storageKey()}|"
         val scoped = raw.mapNotNull { (key, value) ->
-            if (key.startsWith(prefix)) key.removePrefix(prefix) to value else null
+            if (key.startsWith(prefix)) key.removePrefix(prefix).takeIf { '|' !in it }?.let { it to value }
+                else null
         }.toMap().toMutableMap()
 
         raw.forEach { (key, value) ->

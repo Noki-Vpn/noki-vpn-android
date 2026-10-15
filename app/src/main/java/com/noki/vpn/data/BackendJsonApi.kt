@@ -1,5 +1,6 @@
 package com.noki.vpn.data
 
+import com.noki.vpn.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -78,6 +79,7 @@ internal fun Request.Builder.currentDeviceHeaders(
     currentDeviceId: String?,
     currentDeviceKey: String?,
 ): Request.Builder = apply {
+    header("X-Noki-Version-Code", BuildConfig.VERSION_CODE.toString())
     currentDeviceId?.takeIf { it.isNotBlank() }?.let { header("X-Device-Id", it) }
     currentDeviceKey?.takeIf { it.isNotBlank() }?.let { header("X-Device-Key", it) }
 }

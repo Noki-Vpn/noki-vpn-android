@@ -41,7 +41,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 import com.noki.vpn.IncyDevicesUiState
 import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.BackendIncyDevice
@@ -58,7 +58,7 @@ internal fun IncyDevicesSection(
     state: IncyDevicesUiState,
     language: AppLanguage,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onAddClick: () -> Unit,
     onDeviceClick: (String) -> Unit,
@@ -124,7 +124,7 @@ internal fun IncyDevicesSection(
 private fun IncyAddDeviceCard(
     language: AppLanguage,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onClick: () -> Unit,
 ) {
@@ -156,7 +156,7 @@ private fun IncyAddDeviceCard(
 @Composable
 private fun IncyDeviceRow(
     device: BackendIncyDevice,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     scale: Float,
     onClick: () -> Unit,
@@ -199,7 +199,7 @@ internal fun IncyDeviceDialogs(
     state: IncyDevicesUiState,
     language: AppLanguage,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onNameChanged: (String) -> Unit,
     onCreate: () -> Unit,
@@ -383,7 +383,7 @@ private fun ConnectionQrBlock(
 private fun IncyDeviceDialogSurface(
     title: String,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onDismiss: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,

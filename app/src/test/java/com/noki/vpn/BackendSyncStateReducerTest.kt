@@ -6,6 +6,7 @@ import com.noki.vpn.data.AppInfo
 import com.noki.vpn.data.DeviceSession
 import com.noki.vpn.data.GlassMode
 import com.noki.vpn.data.PersonalizationSettings
+import com.noki.vpn.data.RuForeignNode
 import com.noki.vpn.data.SecuritySettings
 import com.noki.vpn.data.UserProfile
 import com.noki.vpn.data.VlessProfile
@@ -57,6 +58,7 @@ class BackendSyncStateReducerTest {
             profile = VlessProfile(remark = "backend-profile"),
             currentDeviceAccessRole = "invited",
             androidUpdate = AndroidUpdateUiState(currentVersionName = "0.9.77"),
+            ruForeignNodes = listOf(RuForeignNode("overlay", "NL overlay", "NL")),
         )
 
         val result = BackendSyncStateReducer.apply(latest, patch)
@@ -65,6 +67,7 @@ class BackendSyncStateReducerTest {
         assertEquals(patch.userProfile, result.userProfile)
         assertEquals(patch.profile, result.profile)
         assertEquals(listOf(backendDevice), result.devices)
+        assertEquals(patch.ruForeignNodes, result.ruForeignNodes)
         assertEquals("invited", result.currentDeviceAccessRole)
         assertEquals(latest.screenStack, result.screenStack)
         assertEquals(latest.filterMode, result.filterMode)

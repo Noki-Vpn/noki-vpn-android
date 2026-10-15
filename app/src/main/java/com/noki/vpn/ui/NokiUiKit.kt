@@ -12,15 +12,15 @@ import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.colorControls
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.backdrop.shadow.InnerShadow
-import com.kyant.backdrop.shadow.Shadow
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.drawPrismalGlass
+import com.styropyr0.prismal.effects.prismalBlur
+import com.styropyr0.prismal.effects.colorControls
+import com.styropyr0.prismal.effects.prismalLens
+import com.styropyr0.prismal.effects.vibrancy
+import com.styropyr0.prismal.specular.PrismalSpecular
+import com.styropyr0.prismal.depth.PrismalDepthInset
+import com.styropyr0.prismal.depth.PrismalDepthShadow
 
 internal object NokiSettingsActionGlassStyle {
     const val elevationDp: Float = 8f
@@ -44,8 +44,8 @@ internal fun glassSurfaceColor(
 
 internal fun Modifier.nokiGlassSurface(
     shape: Shape,
-    backdrop: LayerBackdrop?,
-    exportedBackdrop: LayerBackdrop? = null,
+    backdrop: PrismalGlassLayer?,
+    nestedGlassSource: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean,
     scale: Float = 1f,
     elevationDp: Float = 10f,
@@ -97,9 +97,9 @@ internal fun Modifier.nokiGlassSurface(
         )
         .then(
             if (liveGlassEnabled && backdrop != null) {
-                Modifier.drawBackdrop(
+                Modifier.drawPrismalGlass(
                     backdrop = backdrop,
-                    exportedBackdrop = exportedBackdrop,
+                    nestedGlassSource = nestedGlassSource,
                     shape = { shape },
                     effects = {
                         colorControls(
@@ -109,33 +109,33 @@ internal fun Modifier.nokiGlassSurface(
                         )
                         if (blurAndLensEnabled) {
                             if (blurRadiusDp > 0f) {
-                                blur(settingsDp(blurRadiusDp, scale).toPx())
+                                prismalBlur(settingsDp(blurRadiusDp, scale).toPx())
                             }
                             if (lensRadiusDp > 0f || lensRefractionDp > 0f) {
-                                lens(
+                                prismalLens(
                                     settingsDp(lensRadiusDp, scale).toPx(),
                                     settingsDp(lensRefractionDp, scale).toPx(),
-                                    chromaticAberration = chromaticAberration,
+                                    chromaticAberration = if (chromaticAberration) 1f else 0f,
                                 )
                             }
                         }
                     },
-                    highlight = {
-                        val highlight = if (plainHighlight) Highlight.Plain else Highlight.Default
-                        highlight.copy(
+                    specular = {
+                        val specular = if (plainHighlight) PrismalSpecular.Plain else PrismalSpecular.Default
+                        specular.copy(
                             width = settingsDp(highlightWidthDp, scale),
                             blurRadius = settingsDp(highlightBlurDp, scale),
                             alpha = highlightAlpha,
                         )
                     },
-                    shadow = if (backdropShadowsEnabled) {
-                        { Shadow(alpha = 0.16f) }
+                    depthShadow = if (backdropShadowsEnabled) {
+                        { PrismalDepthShadow(alpha = 0.16f) }
                     } else {
                         null
                     },
-                    innerShadow = if (backdropShadowsEnabled) {
+                    depthInset = if (backdropShadowsEnabled) {
                         {
-                            InnerShadow(
+                            PrismalDepthInset(
                                 radius = settingsDp(6f, scale),
                                 alpha = innerShadowAlpha,
                             )
@@ -161,8 +161,8 @@ internal fun Modifier.nokiGlassSurface(
 
 internal fun Modifier.nokiSettingsPanelGlassSurface(
     shape: Shape,
-    backdrop: LayerBackdrop?,
-    exportedBackdrop: LayerBackdrop? = null,
+    backdrop: PrismalGlassLayer?,
+    nestedGlassSource: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean,
     scale: Float = 1f,
     elevationDp: Float = 8f,
@@ -181,7 +181,7 @@ internal fun Modifier.nokiSettingsPanelGlassSurface(
     return nokiGlassSurface(
         shape = shape,
         backdrop = backdrop,
-        exportedBackdrop = exportedBackdrop,
+        nestedGlassSource = nestedGlassSource,
         liveGlassEnabled = liveGlassEnabled,
         scale = scale,
         elevationDp = elevationDp,
@@ -203,7 +203,7 @@ internal fun Modifier.nokiSettingsPanelGlassSurface(
 
 internal fun Modifier.nokiSettingsActionGlassSurface(
     shape: Shape,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     scale: Float = 1f,
     elevationDp: Float = NokiSettingsActionGlassStyle.elevationDp,
@@ -237,16 +237,16 @@ internal fun Modifier.nokiSettingsActionGlassSurface(
 internal fun Modifier.nokiTintedActionSurface(
     shape: Shape,
     color: Color,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
 ): Modifier = then(
     if (liveGlassEnabled && backdrop != null) {
-        Modifier.drawBackdrop(
+        Modifier.drawPrismalGlass(
             backdrop = backdrop,
             shape = { shape },
             effects = { vibrancy() },
-            highlight = {
-                Highlight.Default.copy(
+            specular = {
+                PrismalSpecular.Default.copy(
                     width = 0.5.dp,
                     blurRadius = 0.25.dp,
                     alpha = 0.18f,

@@ -7,6 +7,14 @@ import org.junit.Test
 
 class DomainRulePolicyTest {
     @Test
+    fun geositeGrammarKeepsPositiveAttributeConjunctionAndRejectsNewSyntax() {
+        assertEquals("geosite:category-ru@cn@ads", DomainRulePolicy.normalize(" GEOSITE:Category-RU@CN@ads "))
+        assertNull(DomainRulePolicy.normalize("geosite:youtube@!cn"))
+        assertNull(DomainRulePolicy.normalize("geosite:youtube@cn=true"))
+        assertEquals("regexp:^Private[.]", DomainRulePolicy.normalize("regexp:^Private[.]"))
+    }
+
+    @Test
     fun urlBecomesAnchoredDomainRule() {
         assertEquals(
             "domain:example.com",

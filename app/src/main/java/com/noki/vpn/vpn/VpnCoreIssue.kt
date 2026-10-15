@@ -2,14 +2,14 @@ package com.noki.vpn.vpn
 
 import java.util.Locale
 
-enum class XrayRuntimeIssue(
+enum class VpnCoreIssue(
     val logMessage: String,
 ) {
     DNS_TIMEOUT("dns_timeout"),
     PROXY_TCP_TIMEOUT("proxy_tcp_timeout");
 
     companion object {
-        fun fromThrowable(error: Throwable): XrayRuntimeIssue? {
+        fun fromThrowable(error: Throwable): VpnCoreIssue? {
             var current: Throwable? = error
             while (current != null) {
                 fromDiagnosticText("${current::class.java.name}: ${current.message.orEmpty()}")?.let { return it }
@@ -18,7 +18,7 @@ enum class XrayRuntimeIssue(
             return null
         }
 
-        fun fromDiagnosticText(text: String?): XrayRuntimeIssue? {
+        fun fromDiagnosticText(text: String?): VpnCoreIssue? {
             val value = text?.lowercase(Locale.ROOT).orEmpty()
             if (value.isBlank() || !value.hasTimeoutMarker()) return null
             if (value.isDnsTimeout()) return DNS_TIMEOUT
@@ -33,7 +33,8 @@ enum class XrayRuntimeIssue(
                 contains("timeout")
 
         private fun String.isDnsTimeout(): Boolean =
-            contains("app/dns") ||
+            contains("dns_timeout") ||
+                contains("app/dns") ||
                 contains("dns-query") ||
                 contains("from dns")
 
@@ -45,8 +46,3 @@ enum class XrayRuntimeIssue(
                 contains("tcp")
     }
 }
-
-data class XrayDelayResult(
-    val delayMs: Long?,
-    val issue: XrayRuntimeIssue? = null,
-)

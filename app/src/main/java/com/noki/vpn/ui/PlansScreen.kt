@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -37,9 +38,9 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import com.noki.vpn.AppUiState
 import com.noki.vpn.MainViewModel
 import com.noki.vpn.PaymentCheckoutResult
@@ -54,7 +55,7 @@ private val PlansNoFontPaddingTextStyle = TextStyle(
 fun PlansScreen(
     state: AppUiState,
     viewModel: MainViewModel,
-    sharedBackdrop: LayerBackdrop? = null,
+    sharedBackdrop: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean = true,
     showBackground: Boolean = true,
     onCheckoutVisibilityChanged: (Boolean) -> Unit,
@@ -140,7 +141,7 @@ fun PlansScreen(
             ).dp
             val pagePadding = 0.dp
             val localBackdrop = if (showBackground) {
-                rememberLayerBackdrop {
+                rememberPrismalGlassLayer {
                     drawRect(SettingsBgBase)
                     drawContent()
                 }
@@ -156,7 +157,7 @@ fun PlansScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .then(if (localBackdrop != null) Modifier.layerBackdrop(localBackdrop) else Modifier),
+                            .then(if (localBackdrop != null) Modifier.prismalGlassLayer(localBackdrop) else Modifier),
                     ) {
                         HomeBackground(liveGlassEnabled = liveGlassEnabled)
                     }
@@ -186,6 +187,7 @@ fun PlansScreen(
                                 .align(Alignment.TopCenter)
                                 .width(contentWidth)
                                 .fillMaxHeight()
+                                .imePadding()
                                 .verticalScroll(rememberScrollState())
                                 .padding(top = settingsDp(20f, scale), bottom = navigationBottomInset + settingsDp(24f, scale)),
                         )

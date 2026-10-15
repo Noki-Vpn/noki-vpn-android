@@ -34,13 +34,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 
 @Composable
 internal fun AdvancedPanelSurface(
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
-    exportedBackdrop: LayerBackdrop? = null,
+    nestedGlassSource: PrismalGlassLayer? = null,
     cardBrightness: Float = -0.01f,
     modifier: Modifier,
     content: @Composable () -> Unit,
@@ -52,7 +52,7 @@ internal fun AdvancedPanelSurface(
             .nokiSettingsPanelGlassSurface(
                 shape = shape,
                 backdrop = backdrop,
-                exportedBackdrop = exportedBackdrop,
+                nestedGlassSource = nestedGlassSource,
                 liveGlassEnabled = liveGlassEnabled,
                 scale = metrics.contentScale,
                 elevationDp = 8f,
@@ -73,7 +73,7 @@ internal fun AdvancedSmallButton(
     modifier: Modifier,
     fontSize: Float = 11f,
     cornerRadius: Dp = 16.dp,
-    backdrop: LayerBackdrop? = null,
+    backdrop: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean = false,
     glassEnabled: Boolean = false,
     onClick: () -> Unit,

@@ -32,7 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.GlassMode
 
@@ -40,7 +40,7 @@ import com.noki.vpn.data.GlassMode
 internal fun PersonalizationLanguageRow(
     language: AppLanguage,
     onLanguageChanged: (AppLanguage) -> Unit,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
 ) {
@@ -97,41 +97,55 @@ internal fun PersonalizationLanguageToggle(
     selectedLanguage: AppLanguage,
     onLanguageChanged: (AppLanguage) -> Unit,
 ) {
+    PersonalizationChoiceToggle(
+        labels = listOf("RU", "EN"),
+        selectedIndex = if (selectedLanguage == AppLanguage.RU) 0 else 1,
+        onSelectedIndexChanged = { onLanguageChanged(if (it == 0) AppLanguage.RU else AppLanguage.EN) },
+    )
+}
+
+@Composable
+internal fun PersonalizationChoiceToggle(
+    labels: List<String>,
+    selectedIndex: Int,
+    onSelectedIndexChanged: (Int) -> Unit,
+    chipWidthDp: Float = 42f,
+    heightDp: Float = 34f,
+) {
     val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
     Row(
         modifier = Modifier
-            .height(metrics.dp(34f))
+            .height(metrics.dp(heightDp))
             .clip(RoundedCornerShape(metrics.dp(24f)))
             .background(PersonalizationBgSoft.copy(alpha = 0.72f))
             .border(BorderStroke(1.dp, PersonalizationStroke.copy(alpha = 0.82f)), RoundedCornerShape(metrics.dp(24f)))
             .padding(metrics.dp(3f)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PersonalizationLanguageChip(
-            text = "RU",
-            selected = selectedLanguage == AppLanguage.RU,
-            onClick = { onLanguageChanged(AppLanguage.RU) },
-        )
-        Spacer(modifier = Modifier.width(metrics.dp(4f)))
-        PersonalizationLanguageChip(
-            text = "EN",
-            selected = selectedLanguage == AppLanguage.EN,
-            onClick = { onLanguageChanged(AppLanguage.EN) },
-        )
+        labels.forEachIndexed { index, label ->
+            if (index > 0) Spacer(modifier = Modifier.width(metrics.dp(4f)))
+            PersonalizationChoiceChip(
+                text = label,
+                selected = selectedIndex == index,
+                widthDp = chipWidthDp,
+                onClick = { onSelectedIndexChanged(index) },
+            )
+        }
     }
 }
 
 @Composable
-internal fun PersonalizationLanguageChip(
+private fun PersonalizationChoiceChip(
     text: String,
     selected: Boolean,
     onClick: () -> Unit,
+    widthDp: Float,
 ) {
     val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
     val interactionSource = remember { MutableInteractionSource() }
     Box(
         modifier = Modifier
-            .width(metrics.dp(42f))
+            .width(metrics.dp(widthDp))
             .fillMaxHeight()
             .clip(RoundedCornerShape(metrics.dp(24f)))
             .background(
@@ -165,7 +179,7 @@ internal fun glassModeForFullGlassEnabled(enabled: Boolean): GlassMode =
 internal fun PersonalizationGlassModeRow(
     glassMode: GlassMode,
     onGlassModeChanged: (GlassMode) -> Unit,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
 ) {
@@ -203,7 +217,7 @@ internal fun PersonalizationGlassModeRow(
 
 @Composable
 internal fun PersonalizationPanelSurface(
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
     shape: Shape = RoundedCornerShape(NokiUiKitPolicy.panelCornerRadiusDp.dp),

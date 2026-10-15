@@ -35,15 +35,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.Backdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.highlight.Highlight
+import com.styropyr0.prismal.PrismalBackdrop
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalMergedSource
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
+import com.styropyr0.prismal.drawPrismalGlass
+import com.styropyr0.prismal.effects.prismalBlur
+import com.styropyr0.prismal.effects.prismalLens
+import com.styropyr0.prismal.effects.vibrancy
+import com.styropyr0.prismal.specular.PrismalSpecular
 import com.noki.vpn.R
 import kotlin.math.roundToInt
 
@@ -53,7 +53,7 @@ private val NavStroke = Color(0xFF29404E)
 internal fun HomeBottomNavigation(
     modifier: Modifier,
     scale: Float,
-    backdrop: Backdrop?,
+    backdrop: PrismalBackdrop?,
     liveGlassEnabled: Boolean = true,
     selectedTabIndex: Int,
     hasUnreadAppNotifications: Boolean = false,
@@ -73,8 +73,8 @@ internal fun HomeBottomNavigation(
     )
     val currentOnTabSelected by rememberUpdatedState(onTabSelected)
     val interactionSource = remember { MutableInteractionSource() }
-    val navigationSurfaceBackdrop = if (liveGlassEnabled) rememberLayerBackdrop() else null
-    val iconsBackdrop = if (liveGlassEnabled) rememberLayerBackdrop() else null
+    val navigationSurfaceBackdrop = if (liveGlassEnabled) rememberPrismalGlassLayer() else null
+    val iconsBackdrop = if (liveGlassEnabled) rememberPrismalGlassLayer() else null
     val animationScope = rememberCoroutineScope()
     BoxWithConstraints(
         modifier = modifier,
@@ -142,7 +142,7 @@ internal fun HomeBottomNavigation(
                 navigationSurfaceBackdrop != null &&
                 iconsBackdrop != null
             ) {
-                rememberCombinedBackdrop(navigationSurfaceBackdrop, iconsBackdrop)
+                rememberPrismalMergedSource(navigationSurfaceBackdrop, iconsBackdrop)
             } else {
                 null
             }
@@ -183,7 +183,7 @@ internal fun HomeBottomNavigation(
                     .fillMaxSize()
                     .clip(capsuleShape)
                     .alpha(0f)
-                    .layerBackdrop(sourceBackdrop),
+                    .prismalGlassLayer(sourceBackdrop),
             ) {
                 IconsContent()
             }
@@ -324,22 +324,22 @@ internal fun HomeBottomNavigation(
                             )
                             .then(
                                 if (liveGlassEnabled && activeButtonBackdrop != null) {
-                                    Modifier.drawBackdrop(
+                                    Modifier.drawPrismalGlass(
                                         backdrop = activeButtonBackdrop,
                                         shape = { capsuleShape },
                                         effects = {
                                             val progress = dampedDragAnimation.pressProgress
-                                            lens(
+                                            prismalLens(
                                                 refractionHeight = 10f.dp.toPx() * progress,
                                                 refractionAmount = 14f.dp.toPx() * progress,
-                                                chromaticAberration = true,
+                                                chromaticAberration = 1f,
                                             )
                                         },
-                                        highlight = {
-                                            Highlight.Default.copy(alpha = dampedDragAnimation.pressProgress)
+                                        specular = {
+                                            PrismalSpecular.Default.copy(alpha = dampedDragAnimation.pressProgress)
                                         },
-                                        shadow = null,
-                                        innerShadow = null,
+                                        depthShadow = null,
+                                        depthInset = null,
                                         layerBlock = {
                                             translationX = activeLayerTranslationX
                                             scaleX = desiredScaleX
@@ -409,15 +409,15 @@ internal fun HomeBottomNavigation(
                 .clip(capsuleShape)
                 .then(
                     if (liveGlassEnabled && backdrop != null) {
-                        Modifier.drawBackdrop(
+                        Modifier.drawPrismalGlass(
                             backdrop = backdrop,
                             shape = { capsuleShape },
                             effects = {
                                 vibrancy()
-                                blur(8f.dp.toPx())
-                                lens(24f.dp.toPx(), 24f.dp.toPx())
+                                prismalBlur(8f.dp.toPx())
+                                prismalLens(24f.dp.toPx(), 24f.dp.toPx())
                             },
-                            exportedBackdrop = navigationSurfaceBackdrop,
+                            nestedGlassSource = navigationSurfaceBackdrop,
                             onDrawSurface = { drawRect(containerColor) },
                         )
                     } else {

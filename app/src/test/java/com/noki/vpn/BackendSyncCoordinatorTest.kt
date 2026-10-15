@@ -3,10 +3,18 @@ package com.noki.vpn
 import com.noki.vpn.data.BackendBootstrapLoader
 import com.noki.vpn.data.BackendDevice
 import com.noki.vpn.data.BackendApiClient
+import com.noki.vpn.data.BackendException
+import com.noki.vpn.data.BackendLocation
+import com.noki.vpn.data.AdvancedSettings
 import com.noki.vpn.data.BackendSubscription
 import com.noki.vpn.data.BackendUser
 import com.noki.vpn.data.BootstrapPayload
 import com.noki.vpn.data.UserProfile
+import com.noki.vpn.data.RuRelayCatalog
+import com.noki.vpn.data.RuForeignNode
+import com.noki.vpn.data.ServerSelectionMode
+import com.noki.vpn.data.VpnServer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -20,6 +28,52 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import org.json.JSONException
 
 class BackendSyncCoordinatorTest {
+    @Test
+    fun unavailableRuDiscoveryKeepsBootstrapAndSavedNodeSelection() = runBlocking {
+        val node = VpnServer("lv-2", "Latvia 2", "LV", "lv2", "probe.example", 443, true)
+        val location = BackendLocation("location-lv2", "lv2", "Latvia 2", "Латвия", "Latvia",
+            "probe.example", "LV", true, null, null, null, null, null, servers = listOf(node))
+        val bootstrap = payload(listOf(device("device-1", "key-1"))).copy(locations = listOf(location))
+        val base = AppUiState(advancedSettings = AdvancedSettings(ruRelayEnabled = true),
+            userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.SERVER,
+            selectedNodeId = node.id, selectedCountryCode = "LV"))
+        for (failure in listOf(BackendException("exit_node_id is required", 422),
+            java.io.IOException("RU discovery unavailable"), IllegalArgumentException("ru_route_version_invalid"))) {
+            val coordinator = BackendSyncCoordinator(
+                bootstrapLoader = BackendBootstrapLoader { _, _, _ -> bootstrap },
+                androidUpdateLoader = AndroidUpdateStateLoader { _, state, _ -> state },
+                profileAvatarLoader = ProfileAvatarLoader { _, _, cached -> cached },
+                ruCatalogLoader = { _, _, _ -> throw failure },
+            )
+            val result = coordinator.syncState(request().copy(baseState = base))
+            assertEquals(listOf("LV"), result.patch.locations.map { it.countryCode })
+            assertEquals(listOf(node.id), result.patch.locations.flatMap { it.servers }.map { it.id })
+            assertEquals(node.id, result.patch.userProfile.selectedNodeId)
+            assertEquals(ServerSelectionMode.SERVER, result.patch.userProfile.serverSelectionMode)
+            assertTrue(result.patch.ruForeignNodes.isEmpty())
+            val restored = BackendSyncStateReducer.apply(base, result.patch)
+            assertTrue(restored.isAuthenticated)
+            assertTrue(restored.advancedSettings.ruRelayEnabled)
+            assertEquals("LV", restored.userProfile.selectedCountryCode)
+            assertEquals("LV", com.noki.vpn.ui.serverMenuLocations(restored.locations,
+                restored.ruForeignNodes, restored.advancedSettings.ruRelayEnabled).single().key)
+        }
+    }
+
+    @Test
+    fun ruDiscoveryKeepsCancellationAndAuthorizationErrors() = runBlocking {
+        for (failure in listOf(CancellationException("cancelled"), BackendException("expired", 401),
+            BackendException("denied", 403))) {
+            val coordinator = BackendSyncCoordinator(
+                bootstrapLoader = BackendBootstrapLoader { _, _, _ -> payload(listOf(device("device-1", "key-1"))) },
+                androidUpdateLoader = AndroidUpdateStateLoader { _, state, _ -> state },
+                profileAvatarLoader = ProfileAvatarLoader { _, _, cached -> cached },
+                ruCatalogLoader = { _, _, _ -> throw failure },
+            )
+            assertSame(failure, runCatching { coordinator.syncState(request()) }.exceptionOrNull())
+        }
+    }
+
     @Test
     fun malformedDeviceInventoryIsNotAnAuthoritativeEmptyList() = runBlocking {
         for (field in listOf("", ",\"devices\":null", ",\"devices\":{}", ",\"devices\":\"unavailable\"")) {
@@ -77,6 +131,7 @@ class BackendSyncCoordinatorTest {
         bootstrapLoader = loader,
         androidUpdateLoader = AndroidUpdateStateLoader { _, _, _ -> error("Update must not load for a revoked device") },
         profileAvatarLoader = ProfileAvatarLoader { _, _, _ -> error("Avatar must not load for a revoked device") },
+        ruCatalogLoader = { _, _, _ -> error("RU catalog must not load for a revoked device") },
     )
 
     private fun device(id: String, key: String, active: Boolean = true) = BackendDevice(
@@ -123,6 +178,12 @@ class BackendSyncCoordinatorTest {
             bootstrapLoader = BackendBootstrapLoader { _, _, _ -> bootstrap },
             androidUpdateLoader = AndroidUpdateStateLoader { _, _, _ -> update },
             profileAvatarLoader = ProfileAvatarLoader { _, _, _ -> "file:///cached-avatar.jpg" },
+            ruCatalogLoader = { token, id, key ->
+                assertEquals("access-token", token)
+                assertEquals("device-1", id)
+                assertEquals("device-key-1", key)
+                RuRelayCatalog(null, emptyList(), foreignNodes = listOf(RuForeignNode("overlay", "NL overlay", "NL")))
+            },
         )
         val requestState = AppUiState(
             userProfile = UserProfile(username = "request-user", avatarUri = "file:///old-avatar.jpg"),
@@ -145,6 +206,7 @@ class BackendSyncCoordinatorTest {
         assertEquals(update, result.patch.androidUpdate)
         assertEquals(bootstrap.devices, result.backendDevices)
         assertTrue(result.backendLocations.isEmpty())
+        assertEquals(listOf(RuForeignNode("overlay", "NL overlay", "NL")), result.patch.ruForeignNodes)
         assertTrue(result.backendPlans.isEmpty())
 
         val legacyResult = coordinator.syncState(

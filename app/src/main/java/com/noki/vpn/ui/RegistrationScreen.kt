@@ -1,8 +1,5 @@
 package com.noki.vpn.ui
 
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -19,8 +16,8 @@ import com.noki.vpn.AuthStep
 import com.noki.vpn.AppUiState
 import com.noki.vpn.MainViewModel
 import com.noki.vpn.R
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 @Composable
 fun RegistrationScreen(
     state: AppUiState,
@@ -58,19 +55,18 @@ fun RegistrationScreen(
         val registrationPrimaryTop = registrationFieldTop + registrationFieldBlockHeight + authMetrics.dp(30f) + registrationErrorReserveHeight
         val registrationBackTop = registrationPrimaryTop + authMetrics.dp(70f)
 
-        val authBackdrop = rememberLayerBackdrop()
+        val authBackdrop = rememberPrismalGlassLayer()
 
         AuthBackground(
             backgroundRes = R.drawable.registration_background,
             modifier = Modifier.then(
-                if (liveGlassEnabled) Modifier.layerBackdrop(authBackdrop) else Modifier,
+                if (liveGlassEnabled) Modifier.prismalGlassLayer(authBackdrop) else Modifier,
             ),
         )
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
+                .authFormScroll(maxHeight, registrationBackTop + authMetrics.dp(42f))
                 .height(maxHeight.coerceAtLeast((registrationBackTop + authMetrics.dp(42f)) + authMetrics.dp(24f))),
         ) scrollForm@ {
             AuthLogo(top = registrationLogoTop)
@@ -207,7 +203,9 @@ fun RegistrationScreen(
             AuthPrimaryButton(
                 text = when (state.authStep) {
                     AuthStep.REGISTRATION_EMAIL -> tr(language, "Получить код", "Get code")
-                    AuthStep.REGISTRATION_PASSWORD -> tr(language, "Создать аккаунт", "Create account")
+                    AuthStep.REGISTRATION_PASSWORD -> if (state.userProfile.credentialsSetupRequired) {
+                        tr(language, "Завершить регистрацию", "Finish registration")
+                    } else tr(language, "Создать аккаунт", "Create account")
                     else -> tr(language, "Продолжить", "Continue")
                 },
                 loading = form.isLoading || form.isCodeSending,
@@ -225,7 +223,9 @@ fun RegistrationScreen(
             )
 
             AuthSecondaryButton(
-                text = tr(language, "Назад", "Back"),
+                text = if (state.userProfile.credentialsSetupRequired && state.authStep == AuthStep.REGISTRATION_PROFILE) {
+                    tr(language, "Выйти из аккаунта", "Sign out")
+                } else tr(language, "Назад", "Back"),
                 containerColor = NokiBgLighter,
                 contentColor = NokiTextPrimary,
                 cornerRadius = authMetrics.dp(16f),

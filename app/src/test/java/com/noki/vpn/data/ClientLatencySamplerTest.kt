@@ -16,6 +16,27 @@ import kotlin.system.measureTimeMillis
 
 class ClientLatencySamplerTest {
     @Test
+    fun relayPingUsesOnlyFullRelayPathsAndNeverFallsBackToDirectOrIcmp() = runBlocking {
+        val node = RuForeignNode("node", "Overlay", "LV")
+        val key = clientLatencyTargetKey(node)
+        val probes = mutableListOf<String>()
+        val sampler = ClientLatencySampler(
+            tcpConnect = { host, port, _ ->
+                synchronized(probes) { probes += "$host:$port" }
+                when (host) { "relay1" -> 80; "relay2" -> 45; else -> null }
+            },
+            icmpPing = { _, _, _ -> error("Relay ping must not degrade to relay-only ICMP") },
+        )
+        assertEquals(mapOf(key to 45), sampler.measureRelayTargets(
+            mapOf(key to listOf("relay1" to 30001, "relay2" to 30001))))
+        assertEquals(setOf("relay1:30001", "relay2:30001"), probes.toSet())
+        probes.clear()
+        assertTrue(sampler.measureRelayTargets(emptyMap()).isEmpty())
+        assertTrue(probes.isEmpty())
+        assertTrue(sampler.measureRelayTargets(mapOf(key to listOf("unreachable" to 30001))).isEmpty())
+    }
+
+    @Test
     fun countryPingUsesMinimumNodeMedianAndNeverTcpProbesUdpOnlyServer() = runBlocking {
         val probes = mutableListOf<Int>()
         val nodes = listOf(

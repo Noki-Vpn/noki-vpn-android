@@ -46,14 +46,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.noki.vpn.SettingsPreparedState
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.colorControls
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.backdrop.shadow.InnerShadow
-import com.kyant.backdrop.shadow.Shadow
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
+import com.styropyr0.prismal.drawPrismalGlass
+import com.styropyr0.prismal.effects.colorControls
+import com.styropyr0.prismal.specular.PrismalSpecular
+import com.styropyr0.prismal.depth.PrismalDepthInset
+import com.styropyr0.prismal.depth.PrismalDepthShadow
 import kotlinx.coroutines.launch
 
 @Composable
@@ -65,7 +65,7 @@ internal fun SettingsProfileCardAdaptive(
     onPlanClicked: () -> Unit,
 ) {
     val shape = RoundedCornerShape(settingsDp(20f, scale))
-    val planBadgeBackdrop = rememberLayerBackdrop()
+    val planBadgeBackdrop = rememberPrismalGlassLayer()
     val profileGradientColor = SettingsTextMuted
 
     Box(modifier = modifier) {
@@ -74,7 +74,7 @@ internal fun SettingsProfileCardAdaptive(
                 .fillMaxSize()
                 .clip(shape)
                 .then(
-                    if (liveGlassEnabled) Modifier.layerBackdrop(planBadgeBackdrop) else Modifier,
+                    if (liveGlassEnabled) Modifier.prismalGlassLayer(planBadgeBackdrop) else Modifier,
                 )
                 .background(SettingsBgLighter),
         ) {
@@ -139,7 +139,7 @@ internal fun SettingsProfileCardAdaptive(
 internal fun SettingsPlanBadgeAdaptive(
     title: String,
     liveGlassEnabled: Boolean,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     scale: Float,
     onClick: () -> Unit,
 ) {
@@ -189,7 +189,7 @@ internal fun SettingsPlanBadgeAdaptive(
                 )
                 .then(
                     if (liveGlassEnabled && backdrop != null) {
-                        Modifier.drawBackdrop(
+                        Modifier.drawPrismalGlass(
                             backdrop = backdrop,
                             shape = { shape },
                             effects = {
@@ -199,14 +199,14 @@ internal fun SettingsPlanBadgeAdaptive(
                                     brightness = 0.1f,
                                 )
                             },
-                            highlight = {
-                                Highlight.Default.copy(alpha = 0.35f)
+                            specular = {
+                                PrismalSpecular.Default.copy(alpha = 0.35f)
                             },
-                            shadow = {
-                                Shadow(alpha = 0.25f)
+                            depthShadow = {
+                                PrismalDepthShadow(alpha = 0.25f)
                             },
-                            innerShadow = {
-                                InnerShadow(
+                            depthInset = {
+                                PrismalDepthInset(
                                     radius = settingsDp(8f, scale),
                                     alpha = 0.42f,
                                 )
@@ -405,7 +405,7 @@ internal fun SettingsMenuRowAdaptive(
     iconWidth: Float,
     iconHeight: Float,
     title: String,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     scale: Float,
     modifier: Modifier,

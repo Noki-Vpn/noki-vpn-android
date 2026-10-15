@@ -30,9 +30,9 @@ import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import com.noki.vpn.AppUiState
 import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.GlassMode
@@ -56,7 +56,7 @@ fun PersonalizationScreen(
     onPickAvatarClicked: () -> Unit,
     onDeleteAvatarClicked: () -> Unit,
     onAvatarEditDenied: () -> Unit,
-    sharedBackdrop: LayerBackdrop,
+    sharedBackdrop: PrismalGlassLayer,
     liveGlassEnabled: Boolean = true,
     showBackground: Boolean = true,
 ) {
@@ -91,7 +91,7 @@ fun PersonalizationScreen(
     ) {
         val backdrop = if (showBackground || liveGlassEnabled) sharedBackdrop else null
         val modalBackdrop = if (liveGlassEnabled && deleteAvatarConfirmVisible) {
-            rememberLayerBackdrop {
+            rememberPrismalGlassLayer {
                 drawRect(PersonalizationBgBase)
                 drawContent()
             }
@@ -107,13 +107,13 @@ fun PersonalizationScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(if (modalBackdrop != null) Modifier.layerBackdrop(modalBackdrop) else Modifier),
+                .then(if (modalBackdrop != null) Modifier.prismalGlassLayer(modalBackdrop) else Modifier),
         ) {
             if (showBackground) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
+                        .then(if (backdrop != null) Modifier.prismalGlassLayer(backdrop) else Modifier),
                 ) {
                     HomeBackground(liveGlassEnabled = liveGlassEnabled)
                 }

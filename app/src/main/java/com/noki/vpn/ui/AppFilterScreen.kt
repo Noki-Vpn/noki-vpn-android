@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -42,8 +43,8 @@ import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
 import com.noki.vpn.AppDialog
 import com.noki.vpn.AppUiState
 import com.noki.vpn.MainViewModel
@@ -65,9 +66,10 @@ private val AppFilterNoFontPaddingTextStyle = TextStyle(
 fun AppFilterScreen(
     state: AppUiState,
     viewModel: MainViewModel,
-    sharedBackdrop: LayerBackdrop,
+    sharedBackdrop: PrismalGlassLayer,
     liveGlassEnabled: Boolean = true,
     showBackground: Boolean = true,
+    onDone: (() -> Unit)? = null,
 ) {
     val language = state.personalizationSettings.language
     var query by rememberSaveable { mutableStateOf("") }
@@ -88,13 +90,15 @@ fun AppFilterScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .then(if (showBackground) Modifier.background(AppFilterBgBase) else Modifier)
-                .statusBarsPadding(),
+                .statusBarsPadding()
+                .imePadding(),
         ) {
             val metrics = nokiAdaptiveMetrics(maxWidth)
             val density = LocalDensity.current
             val contentTop = metrics.dp(58f)
             val navBarBottomInset = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
-            val bottomNavTop = maxHeight - navBarBottomInset - metrics.dp(60f) - metrics.dp(20f)
+            val bottomNavTop = maxHeight - navBarBottomInset - metrics.dp(20f) -
+                if (onDone == null) metrics.dp(60f) else 0.dp
             val contentHeight = (
                 bottomNavTop - contentTop - metrics.dp(NokiUiKitPolicy.appFilterApplyBottomClearanceDp)
                     + metrics.dp(NokiUiKitPolicy.appFilterContentBottomExtensionDp)
@@ -112,7 +116,7 @@ fun AppFilterScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
+                        .then(if (backdrop != null) Modifier.prismalGlassLayer(backdrop) else Modifier),
                 ) {
                     HomeBackground(liveGlassEnabled = liveGlassEnabled)
                 }
@@ -185,7 +189,9 @@ fun AppFilterScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             AppFilterApplyButton(
-                                text = if (applyNoticeVisible) {
+                                text = if (onDone != null) {
+                                    tr(language, "Готово", "Done")
+                                } else if (applyNoticeVisible) {
                                     tr(language, "Применено", "Applied")
                                 } else {
                                     tr(language, "Применить", "Apply")
@@ -198,7 +204,7 @@ fun AppFilterScreen(
                                     .height(metrics.dp(60f)),
                                 onClick = {
                                     viewModel.applyAppRoutingSettings()
-                                    applyNoticeVersion += 1
+                                    if (onDone != null) onDone() else applyNoticeVersion += 1
                                 },
                             )
                             AppFilterResetButton(

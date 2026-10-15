@@ -44,9 +44,9 @@ import com.noki.vpn.MainViewModel
 import com.noki.vpn.R
 import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.DeviceSession
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 
 internal val DevicesBgBase = Color(0xFF07111A)
 internal val DevicesBgLighter = Color(0xFF0D1B2A)
@@ -67,8 +67,8 @@ fun DevicesScreen(
     state: AppUiState,
     viewModel: MainViewModel,
     showBackground: Boolean = true,
-    sharedBackdrop: LayerBackdrop,
-    deviceRowsBackdrop: LayerBackdrop? = null,
+    sharedBackdrop: PrismalGlassLayer,
+    deviceRowsBackdrop: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean = true,
 ) {
     CompositionLocalProvider(LocalTextStyle provides DevicesNoFontPaddingTextStyle) {
@@ -79,7 +79,7 @@ fun DevicesScreen(
             state.incyDevices.isCreateDialogVisible ||
             state.incyDevices.isManageDialogVisible
         val modalBackdrop = if (liveGlassEnabled && hasDeviceModal) {
-            rememberLayerBackdrop {
+            rememberPrismalGlassLayer {
                 drawRect(DevicesBgBase)
                 drawContent()
             }
@@ -94,7 +94,7 @@ fun DevicesScreen(
                 .then(if (showBackground) Modifier.background(DevicesBgBase) else Modifier)
                 .then(
                     if (showBackground && backdrop != null) {
-                        Modifier.layerBackdrop(backdrop)
+                        Modifier.prismalGlassLayer(backdrop)
                     } else {
                         Modifier
                     },
@@ -124,7 +124,7 @@ fun DevicesScreen(
                     .statusBarsPadding()
                     .then(
                         if (liveGlassEnabled && modalBackdrop != null) {
-                            Modifier.layerBackdrop(modalBackdrop)
+                            Modifier.prismalGlassLayer(modalBackdrop)
                         } else {
                             Modifier
                         },
@@ -371,7 +371,7 @@ private fun DevicesHeader(
 private fun CurrentDeviceCard(
     device: DeviceSession?,
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     scale: Float,
     onRenameClick: () -> Unit,

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -49,8 +50,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import com.noki.vpn.AppUiState
 import com.noki.vpn.MainViewModel
 import com.noki.vpn.data.AppLanguage
@@ -99,7 +100,7 @@ fun SiteRulesScreen(
     state: AppUiState,
     viewModel: MainViewModel,
     mode: SiteRulesMode,
-    sharedBackdrop: LayerBackdrop? = null,
+    sharedBackdrop: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean = true,
     showBackground: Boolean = true,
 ) {
@@ -123,7 +124,8 @@ fun SiteRulesScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .then(if (showBackground) Modifier.background(SiteRulesBgBase) else Modifier)
-                .statusBarsPadding(),
+                .statusBarsPadding()
+                .imePadding(),
         ) {
             val metrics = nokiAdaptiveMetrics(maxWidth)
             val headerTop = metrics.dp(58f)
@@ -216,7 +218,7 @@ fun SiteRulesScreen(
                         modifier = Modifier.fillMaxWidth().weight(1f),
                         verticalArrangement = Arrangement.spacedBy(metrics.dp(9f)),
                     ) {
-                        if (domains.isEmpty()) {
+                        if (domains.isEmpty() && mode != SiteRulesMode.BYPASS) {
                             item(contentType = "site-rule-empty") {
                                 SiteRulesEmptyCard(
                                     language = language,
@@ -225,8 +227,27 @@ fun SiteRulesScreen(
                                 )
                             }
                         }
+                        if (mode == SiteRulesMode.BYPASS) {
+                            item(key = DomainRulePolicy.RUSSIAN_RESOURCES_RULE, contentType = "site-rule-row") {
+                                SiteRuleRow(
+                                    domain = DomainRulePolicy.RUSSIAN_RESOURCES_RULE,
+                                    language = language,
+                                    backdrop = sharedBackdrop,
+                                    liveGlassEnabled = liveGlassEnabled,
+                                    russianResourcesEnabled = DomainRulePolicy.RUSSIAN_RESOURCES_RULE in domains,
+                                    onEdit = {},
+                                    onDelete = {
+                                        if (DomainRulePolicy.RUSSIAN_RESOURCES_RULE in domains) {
+                                            viewModel.removeBypassDomain(DomainRulePolicy.RUSSIAN_RESOURCES_RULE)
+                                        } else {
+                                            viewModel.addBypassDomain(DomainRulePolicy.RUSSIAN_RESOURCES_RULE)
+                                        }
+                                    },
+                                )
+                            }
+                        }
                         items(
-                            items = domains,
+                            items = domains.filterNot { mode == SiteRulesMode.BYPASS && it == DomainRulePolicy.RUSSIAN_RESOURCES_RULE },
                             key = { it },
                             contentType = { "site-rule-row" },
                         ) { domain ->
@@ -266,7 +287,7 @@ private fun SiteRulesEditorCard(
     editing: Boolean,
     error: String?,
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onValueChange: (String) -> Unit,
     onCancel: () -> Unit,
@@ -359,12 +380,14 @@ private fun SiteRulesEditorCard(
 private fun SiteRuleRow(
     domain: String,
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
+    russianResourcesEnabled: Boolean = false,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
+    val russianResources = domain == DomainRulePolicy.RUSSIAN_RESOURCES_RULE
     SiteRulesCard(
         backdrop = backdrop,
         liveGlassEnabled = liveGlassEnabled,
@@ -379,35 +402,28 @@ private fun SiteRuleRow(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(
-                modifier = Modifier.width(metrics.dp(151f)),
-            ) {
-                SiteRulesText(
-                    text = if (domain == DomainRulePolicy.RUSSIAN_RESOURCES_RULE) {
-                        tr(language, "Российские ресурсы", "Russian resources")
-                    } else {
-                        domain
-                    },
-                    fontSize = 15f,
-                    lineHeight = 18f,
-                    color = SiteRulesTextPrimary,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+            AdvancedFittingText(
+                text = if (russianResources) tr(language, "Российские ресурсы", "Russian resources") else domain,
+                fontSize = 15f,
+                lineHeight = 18f,
+                minFontSize = 10f,
+                color = SiteRulesTextPrimary,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f).padding(end = metrics.dp(8f)),
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(metrics.dp(7f))) {
-                SiteRulesButton(
+                if (!russianResources) SiteRulesButton(
                     text = tr(language, "Изм.", "Edit"),
-                    modifier = Modifier
-                        .width(metrics.dp(46f))
-                        .height(metrics.dp(40f)),
+                    modifier = Modifier.width(metrics.dp(46f)).height(metrics.dp(40f)),
                     onClick = onEdit,
                 )
                 SiteRulesButton(
-                    text = tr(language, "Удалить", "Delete"),
-                    danger = true,
+                    text = if (russianResources) (if (russianResourcesEnabled) "on" else "off")
+                        else tr(language, "Удалить", "Delete"),
+                    danger = !russianResources || !russianResourcesEnabled,
+                    active = russianResources && russianResourcesEnabled,
                     modifier = Modifier
-                        .width(metrics.dp(65f))
+                        .width(metrics.dp(if (russianResources) 54f else 65f))
                         .height(metrics.dp(40f)),
                     onClick = onDelete,
                 )
@@ -419,7 +435,7 @@ private fun SiteRuleRow(
 @Composable
 private fun SiteRulesEmptyCard(
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
 ) {
     val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
@@ -504,16 +520,16 @@ private fun SiteRulesInput(
 
 @Composable
 private fun SiteRulesCard(
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
-    content: @Composable (LayerBackdrop) -> Unit,
+    content: @Composable (PrismalGlassLayer) -> Unit,
 ) {
-    val panelBackdrop = rememberLayerBackdrop()
+    val panelBackdrop = rememberPrismalGlassLayer()
     AdvancedPanelSurface(
         backdrop = backdrop,
         liveGlassEnabled = liveGlassEnabled,
-        exportedBackdrop = panelBackdrop,
+        nestedGlassSource = panelBackdrop,
         modifier = modifier,
     ) {
         Box(
@@ -530,6 +546,7 @@ private fun SiteRulesButton(
     text: String,
     modifier: Modifier,
     danger: Boolean = false,
+    active: Boolean = false,
     onClick: () -> Unit,
 ) {
     val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
@@ -546,10 +563,11 @@ private fun SiteRulesButton(
     val shape = RoundedCornerShape(metrics.dp(14f))
     val color = when {
         danger -> SiteRulesDanger
+        active -> SiteRulesAccent
         else -> SiteRulesBgSoft
     }
-    val backgroundAlpha = if (danger) 0.16f else 1f
-    val textColor = if (danger) SiteRulesDanger else SiteRulesTextPrimary
+    val backgroundAlpha = if (danger) 0.16f else if (active) 0.16f else 1f
+    val textColor = if (danger) SiteRulesDanger else if (active) SiteRulesAccent else SiteRulesTextPrimary
     Box(
         modifier = modifier
             .graphicsLayer {

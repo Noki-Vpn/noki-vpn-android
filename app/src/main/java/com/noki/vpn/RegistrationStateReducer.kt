@@ -183,7 +183,12 @@ object RegistrationStateReducer {
         isValidEmail: (String) -> Boolean,
     ): SubmitTransition {
         val form = current.registrationForm
-        val error = validationError(form, language, isValidEmail)
+        val error = validationError(
+            form = form,
+            language = language,
+            isValidEmail = isValidEmail,
+            credentialsSetupRequired = current.isAuthenticated && current.userProfile.credentialsSetupRequired,
+        )
         if (error != null) {
             return SubmitTransition.UpdateState(
                 current.copy(registrationForm = form.copy(error = error)),
@@ -256,14 +261,15 @@ object RegistrationStateReducer {
         form: RegistrationFormState,
         language: AppLanguage,
         isValidEmail: (String) -> Boolean,
+        credentialsSetupRequired: Boolean = false,
     ): String? {
         val usernameError = usernameValidationError(form.username, language)
         val verificationCodeError = verificationCodeValidationError(form.verificationCode, language)
         return when {
             usernameError != null -> usernameError
-            form.email.isBlank() -> tr(language, "Введите e-mail", "Enter your email")
-            !isValidEmail(form.email) -> tr(language, "Введите корректный e-mail", "Enter a valid email")
-            verificationCodeError != null -> verificationCodeError
+            !credentialsSetupRequired && form.email.isBlank() -> tr(language, "Введите e-mail", "Enter your email")
+            !credentialsSetupRequired && !isValidEmail(form.email) -> tr(language, "Введите корректный e-mail", "Enter a valid email")
+            !credentialsSetupRequired && verificationCodeError != null -> verificationCodeError
             form.password.length < 8 -> tr(language, "Пароль должен быть не короче 8 символов", "Password must be at least 8 characters")
             form.password != form.passwordRepeat -> tr(language, "Пароли не совпадают", "Passwords do not match")
             else -> null

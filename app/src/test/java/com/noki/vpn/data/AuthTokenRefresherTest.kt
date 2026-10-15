@@ -17,6 +17,86 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class AuthTokenRefresherTest {
     @Test
+    fun backgroundLeavesFreshTokensUnchanged() = runBlocking {
+        val nowMillis = 1_800_000_000_000L
+        val token = accessToken(nowMillis / 1_000L + 3_600L)
+        val store = InMemoryAtomicStoredSettingsStore(authenticatedSettings().copy(backendAccessToken = token))
+        val api = ControlledAuthRefreshApi(rotatedTokens()).also { it.releaseResponse.complete(Unit) }
+
+        assertNull(AuthTokenRefresher(store, api).refreshExpiringStoredTokens(nowMillis))
+
+        assertEquals(0, api.callCount.get())
+        assertEquals(token, store.load().backendAccessToken)
+        assertNull(store.load().backendRefreshRequestId)
+    }
+
+    @Test
+    fun backgroundRotatesAtTheFiveMinuteExpiryMargin() = runBlocking {
+        val nowMillis = 1_800_000_000_000L
+        val store = InMemoryAtomicStoredSettingsStore(authenticatedSettings().copy(
+            backendAccessToken = accessToken(nowMillis / 1_000L + 300L),
+        ))
+        val api = ControlledAuthRefreshApi(rotatedTokens()).also { it.releaseResponse.complete(Unit) }
+
+        AuthTokenRefresher(store, api).refreshExpiringStoredTokens(nowMillis)
+
+        assertEquals(1, api.callCount.get())
+        assertEquals("new-refresh", store.load().backendRefreshToken)
+        assertNull(store.load().backendRefreshRequestId)
+    }
+
+    @Test
+    fun backgroundRetriesPendingRotationEvenWhenAccessTokenIsStillFresh() = runBlocking {
+        val nowMillis = 1_800_000_000_000L
+        val store = InMemoryAtomicStoredSettingsStore(authenticatedSettings().copy(
+            backendAccessToken = accessToken(nowMillis / 1_000L + 3_600L),
+        ))
+        val api = RetryAwareAuthRefreshApi(rotatedTokens())
+        val refresher = AuthTokenRefresher(store, api)
+        assertTrue(runCatching { refresher.refreshStoredTokens() }.isFailure)
+        val pendingId = store.load().backendRefreshRequestId
+        assertNotNull(pendingId)
+
+        refresher.refreshExpiringStoredTokens(nowMillis)
+
+        assertEquals(listOf(pendingId, pendingId), api.requestIds)
+        assertEquals("new-refresh", store.load().backendRefreshToken)
+        assertNull(store.load().backendRefreshRequestId)
+    }
+
+    @Test
+    fun backgroundCannotRefreshLoggedOutOrUnboundSessions() = runBlocking {
+        for (settings in listOf(
+            authenticatedSettings().copy(isAuthenticated = false),
+            authenticatedSettings().copy(backendDeviceId = ""),
+        )) {
+            val store = InMemoryAtomicStoredSettingsStore(settings)
+            val api = ControlledAuthRefreshApi(rotatedTokens()).also { it.releaseResponse.complete(Unit) }
+
+            assertNull(AuthTokenRefresher(store, api).refreshExpiringStoredTokens())
+
+            assertEquals(0, api.callCount.get())
+            assertEquals(settings, store.load())
+        }
+    }
+
+    @Test
+    fun concurrentBackgroundAndForegroundRefreshKeepOneRotation() = runBlocking {
+        val store = InMemoryAtomicStoredSettingsStore(authenticatedSettings())
+        val api = ControlledAuthRefreshApi(rotatedTokens())
+        val background = async { AuthTokenRefresher(store, api).refreshExpiringStoredTokens() }
+        api.requestStarted.await()
+        val foreground = async { AuthTokenRefresher(store, api).refreshStoredTokens() }
+        yield()
+        api.releaseResponse.complete(Unit)
+
+        awaitAll(background, foreground)
+
+        assertEquals(1, api.callCount.get())
+        assertEquals("new-refresh", store.load().backendRefreshToken)
+    }
+
+    @Test
     fun refreshPreservesUiMutationCommittedWhileNetworkCallIsInFlight() = runBlocking {
         val store = InMemoryAtomicStoredSettingsStore(authenticatedSettings())
         val api = ControlledAuthRefreshApi(rotatedTokens())
@@ -216,6 +296,12 @@ class AuthTokenRefresherTest {
             backendDeviceId = "device-1",
         )
 
+    private fun accessToken(expiresAtSeconds: Long): String {
+        val payload = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("{\"exp\":$expiresAtSeconds}".toByteArray())
+        return "header.$payload.signature"
+    }
+
     private fun rotatedTokens(): BackendAuthTokens =
         BackendAuthTokens(
             accessToken = "new-access",
@@ -317,6 +403,7 @@ internal class InMemoryAtomicStoredSettingsStore(
             }
             settings = settings.copy(
                 isAuthenticated = true,
+                userProfile = settings.userProfile.copy(credentialsSetupRequired = tokens.credentialsSetupRequired),
                 backendAccessToken = tokens.accessToken,
                 backendRefreshToken = refreshToken,
                 backendRefreshRequestId = null,

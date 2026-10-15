@@ -1,8 +1,5 @@
 package com.noki.vpn.ui
 
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -16,8 +13,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import com.noki.vpn.AccountSecurityActionState
 import com.noki.vpn.AppUiState
 import com.noki.vpn.MainViewModel
@@ -48,20 +45,19 @@ internal fun AccountCredentialChangeScreen(
         val logoTop = if (isPasswordDetailsStep) authMetrics.dp(250f) else authMetrics.dp(259f)
         val contentBottom = if (isPasswordDetailsStep) authMetrics.dp(602f) else authMetrics.dp(545f)
 
-        val authBackdrop = rememberLayerBackdrop()
+        val authBackdrop = rememberPrismalGlassLayer()
 
         AuthBackground(
             backgroundRes = R.drawable.login_background,
             modifier = Modifier.then(
-                if (liveGlassEnabled) Modifier.layerBackdrop(authBackdrop) else Modifier,
+                if (liveGlassEnabled) Modifier.prismalGlassLayer(authBackdrop) else Modifier,
             ),
         )
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
+                .authFormScroll(maxHeight, contentBottom)
                 .height(maxHeight.coerceAtLeast((contentBottom) + authMetrics.dp(24f))),
         ) scrollForm@ {
             val activeStep = when (action) {

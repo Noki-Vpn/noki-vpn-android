@@ -165,6 +165,11 @@ class EndpointHealthEventReporter(
         event: EndpointHealthEvent,
     ) {
         val current = currentSettings(settings) ?: return
+        if (settings.advancedSettings.ruRelayEnabled || settings.advancedSettings.multiHop.enabled ||
+            current.advancedSettings.ruRelayEnabled || current.advancedSettings.multiHop.enabled) {
+            flush(settings)
+            return
+        }
         if (!AppDiagnosticLogPolicy.shouldUploadAutomatically(current.advancedSettings)) {
             flush(settings)
             return
@@ -172,7 +177,8 @@ class EndpointHealthEventReporter(
         val normalized = EndpointHealthEvents.normalized(event) ?: return
         store.updateEndpointHealthEventQueue { queue ->
             val latest = currentSettings(settings)
-            if (latest != null && AppDiagnosticLogPolicy.shouldUploadAutomatically(latest.advancedSettings)) {
+            if (latest != null && !latest.advancedSettings.ruRelayEnabled && !latest.advancedSettings.multiHop.enabled &&
+                AppDiagnosticLogPolicy.shouldUploadAutomatically(latest.advancedSettings)) {
                 (queue + normalized).takeLast(EndpointHealthEvents.MAX_QUEUE_SIZE)
             } else queue
         }
@@ -217,6 +223,8 @@ class EndpointHealthEventReporter(
         health: EndpointHealth?,
     ) {
         val current = currentSettings(settings) ?: return
+        if (settings.advancedSettings.ruRelayEnabled || settings.advancedSettings.multiHop.enabled ||
+            current.advancedSettings.ruRelayEnabled || current.advancedSettings.multiHop.enabled) return
         if (!AppDiagnosticLogPolicy.shouldUploadAutomatically(current.advancedSettings)) {
             flush(settings)
             return

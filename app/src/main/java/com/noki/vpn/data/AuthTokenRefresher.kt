@@ -13,6 +13,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
+import org.json.JSONObject
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 import java.util.UUID
 
@@ -22,12 +24,22 @@ internal class AuthTokenRefresher(
     private val onRefreshFailure: (Throwable) -> Unit = {},
     private val onRevocationPending: () -> Unit = {},
 ) {
-    suspend fun refreshStoredTokens(): BackendAuthTokens? {
+    suspend fun refreshStoredTokens(): BackendAuthTokens? = refreshStoredTokensIfExpiringBefore(null)
+
+    suspend fun refreshExpiringStoredTokens(nowMillis: Long = System.currentTimeMillis()): BackendAuthTokens? =
+        refreshStoredTokensIfExpiringBefore(nowMillis / 1_000L + REFRESH_AHEAD_SECONDS)
+
+    private suspend fun refreshStoredTokensIfExpiringBefore(expiryCutoffSeconds: Long?): BackendAuthTokens? {
         val observed = store.load()
         val observedRefreshToken = observed.backendRefreshToken?.takeIf { it.isNotBlank() } ?: return null
         return refreshMutex.withLock {
             val current = store.load()
             val storedRefreshToken = current.backendRefreshToken?.takeIf { it.isNotBlank() } ?: return@withLock null
+            if (expiryCutoffSeconds != null) {
+                if (!current.isAuthenticated || current.backendDeviceId.isBlank()) return@withLock null
+                if (current.backendRefreshRequestId == null &&
+                    !accessTokenExpiresBy(current.backendAccessToken, expiryCutoffSeconds)) return@withLock null
+            }
             if (
                 storedRefreshToken != observedRefreshToken ||
                 current.backendAccessToken != observed.backendAccessToken
@@ -129,7 +141,17 @@ internal class AuthTokenRefresher(
             backendAccessTokenExpiresInSeconds != other.backendAccessTokenExpiresInSeconds ||
             backendRefreshExpiresAt != other.backendRefreshExpiresAt
 
+    private fun accessTokenExpiresBy(token: String?, cutoffSeconds: Long): Boolean {
+        // JWT payload is only a scheduling hint; the API still validates authentication.
+        val expiresAt = runCatching {
+            val payload = checkNotNull(token).split('.').also { check(it.size == 3) }[1]
+            JSONObject(String(Base64.getUrlDecoder().decode(payload), Charsets.UTF_8)).getLong("exp")
+        }.getOrNull()
+        return expiresAt == null || expiresAt <= cutoffSeconds
+    }
+
     private companion object {
+        const val REFRESH_AHEAD_SECONDS = 5 * 60L
         val refreshMutex = Mutex()
     }
 }

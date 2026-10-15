@@ -18,6 +18,7 @@ import com.noki.vpn.data.RuntimeProfilePolicy
 import com.noki.vpn.data.SettingsRepository
 import com.noki.vpn.data.VpnConnectionState
 import com.noki.vpn.vpn.AppVpnService
+import com.noki.vpn.vpn.PendingRuWireGuardRevokeWorker
 import com.noki.vpn.vpn.VpnRuntimeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -105,6 +106,7 @@ internal class AppUiRuntime(
         bootstrapLoader = backendApi,
         androidUpdateLoader = androidUpdateCoordinator,
         profileAvatarLoader = profileAvatarCoordinator,
+        ruCatalogLoader = { token, device, key -> backendApi.ruRelayCatalog(token, device, key) },
     )
 
     internal var backendDeviceKey: String = ""
@@ -151,7 +153,9 @@ internal class AppUiRuntime(
     var uiState: AppUiState
         get() = _uiState
         internal set(value) {
-            _uiState = SettingsPreparedStatePolicy.withPreparedSettingsState(value)
+            _uiState = SettingsPreparedStatePolicy.withPreparedSettingsState(
+                requireStartupFlow(value, _uiState),
+            )
         }
 
     internal val accountSecurityUiWorkflow = AccountSecurityUiWorkflow(
@@ -247,7 +251,24 @@ internal class AppUiRuntime(
                     // The encrypted tombstone remains and will be scheduled on the next app start.
                 }
             }
+            val hasPendingRuRevoke = withContext(Dispatchers.IO) {
+                val live = AppVpnService.liveRuntimeState()
+                runCatching {
+                    repository.recoverProvisionalRuWireGuardRevokes(
+                        activeSessionId = live.ruSessionId,
+                        preparationActive = live.state == VpnConnectionState.CONNECTING,
+                    )
+                }.getOrDefault(false)
+            }
+            if (hasPendingRuRevoke) {
+                try {
+                    PendingRuWireGuardRevokeWorker.enqueue(application)
+                } catch (_: Exception) {
+                    // The encrypted queue remains for the next app start.
+                }
+            }
             val settings = withContext(Dispatchers.IO) { repository.load() }
+            val installOnboardingStep = withContext(Dispatchers.IO) { repository.loadInstallOnboardingStep() }
             val prepared = RuntimeProfilePolicy.normalize(settings)
             val liveVpnRuntimeState = AppVpnService.liveRuntimeState()
             if (liveVpnRuntimeState.state == VpnConnectionState.DISCONNECTED) {
@@ -259,9 +280,16 @@ internal class AppUiRuntime(
             backendDeviceKey = repository.ensureBackendDeviceKey(prepared.backendDeviceKey)
             backendDeviceId = prepared.backendDeviceId
             backendDeviceAccessRole = prepared.backendDeviceAccessRole.ifBlank { "owner" }
-            val firstDestination = if (prepared.isAuthenticated) AppDestination.HOME else AppDestination.LOGIN
+            val interruptedTelegramPurpose = telegramAuthPurposeState.interruptedPurpose
+            val firstScreenStack = when {
+                prepared.isAuthenticated && interruptedTelegramPurpose == TelegramAuthPurpose.LINK ->
+                    listOf(AppDestination.HOME, AppDestination.SECURITY)
+                prepared.isAuthenticated -> listOf(AppDestination.HOME)
+                else -> listOf(AppDestination.LOGIN)
+            }
 
             uiState = AppUiState(
+                installOnboardingStep = installOnboardingStep,
                 isReady = true,
                 screenStack = listOf(AppDestination.SPLASH),
                 profile = prepared.profile,
@@ -274,6 +302,15 @@ internal class AppUiRuntime(
                 advancedSettings = prepared.advancedSettings,
                 endpointOptions = prepared.endpointOptions,
                 isAuthenticated = prepared.isAuthenticated,
+                telegramLoginState = interruptedTelegramPurpose?.let { purpose ->
+                    TelegramLoginStateReducer.error(
+                        AppErrorMapper.readableTelegramSdkError(
+                            prepared.personalizationSettings.language,
+                            "callback_not_received",
+                        ),
+                        purpose,
+                    )
+                } ?: TelegramLoginState.Idle,
                 connectionState = liveVpnRuntimeState.state,
                 vpnRuntimeMode = liveVpnRuntimeState.runtimeMode,
                 connectedAtMillis = liveVpnRuntimeState.connectedAtMillis,
@@ -295,7 +332,7 @@ internal class AppUiRuntime(
             withContext(Dispatchers.IO) { androidUpdateCoordinator.clearSameOrOlderCachedApks() }
             val download = androidUpdateCoordinator.observeDownloads().first()
             uiState = uiState.copy(
-                screenStack = listOf(firstDestination),
+                screenStack = firstScreenStack,
                 androidUpdate = uiState.androidUpdate.copy(
                     isDownloading = download != null && !download.state.isFinished,
                     isReadyToInstall = androidUpdateCoordinator.readyFile(download) != null,

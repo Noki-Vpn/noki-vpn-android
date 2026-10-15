@@ -1,8 +1,5 @@
 package com.noki.vpn.ui
 
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -29,8 +26,8 @@ import androidx.compose.ui.unit.dp
 import com.noki.vpn.AppUiState
 import com.noki.vpn.MainViewModel
 import com.noki.vpn.R
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 @Composable
 fun PasswordRecoveryScreen(
     state: AppUiState,
@@ -54,21 +51,21 @@ fun PasswordRecoveryScreen(
     ) {
         val authMetrics = nokiAdaptiveMetrics(maxWidth)
         val recoveryLogoTop = if (isPasswordStep) authMetrics.dp(250f) else authMetrics.dp(259f)
+        val contentBottom = if (isPasswordStep) authMetrics.dp(602f) else authMetrics.dp(545f)
 
-        val authBackdrop = rememberLayerBackdrop()
+        val authBackdrop = rememberPrismalGlassLayer()
         AuthBackground(
             backgroundRes = R.drawable.login_background,
             modifier = Modifier.then(
-                if (liveGlassEnabled) Modifier.layerBackdrop(authBackdrop) else Modifier,
+                if (liveGlassEnabled) Modifier.prismalGlassLayer(authBackdrop) else Modifier,
             ),
         )
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .height(maxHeight.coerceAtLeast((if (isPasswordStep) authMetrics.dp(602f) else authMetrics.dp(545f)) + authMetrics.dp(24f))),
+                .authFormScroll(maxHeight, contentBottom)
+                .height(maxHeight.coerceAtLeast(contentBottom + authMetrics.dp(24f))),
         ) scrollForm@ {
             RecoveryStepsIndicator(
                 activeStep = activeStep,

@@ -4,11 +4,40 @@ import com.noki.vpn.data.AppFilterMode
 import com.noki.vpn.data.DomainRulePolicy
 import com.noki.vpn.data.EndpointGroupPolicy
 import com.noki.vpn.data.EndpointSelectionMode
+import com.noki.vpn.data.EndpointSecurityPolicy
 import com.noki.vpn.data.RuntimeProfilePolicy
+import com.noki.vpn.data.MultiHopSettings
+import com.noki.vpn.data.ServerSelectionMode
 import com.noki.vpn.data.VpnEndpointOption
 import com.noki.vpn.data.VpnProtocol
 
 object AdvancedSettingsStateReducer {
+    fun setRuRelayEnabled(
+        current: AppUiState,
+        enabled: Boolean,
+    ): AppUiState {
+        val advanced = current.advancedSettings
+        val nextAdvanced = advanced.copy(
+            ruRelayEnabled = enabled,
+        )
+        return current.copy(
+            advancedSettings = nextAdvanced,
+            profile = if (nextAdvanced == advanced) current.profile
+                else RuntimeProfilePolicy.profileAfterServerSelection(current.profile),
+        )
+    }
+
+    fun setMultiHop(current: AppUiState, settings: MultiHopSettings): AppUiState {
+        val nextAdvanced = current.advancedSettings.copy(
+            multiHop = settings,
+        )
+        return current.copy(
+            advancedSettings = nextAdvanced,
+            profile = if (nextAdvanced == current.advancedSettings) current.profile
+                else RuntimeProfilePolicy.profileAfterServerSelection(current.profile),
+        )
+    }
+
     fun setFilterMode(
         current: AppUiState,
         mode: AppFilterMode,
@@ -78,8 +107,9 @@ object AdvancedSettingsStateReducer {
                 manualEndpointGroupKey = "",
             )
         } else {
-            val selected = current.endpointOptions.firstOrNull { it.code == current.profile.endpointCode }
-                ?: current.endpointOptions.firstOrNull()
+            val options = current.endpointOptions.filter { !it.canaryOnly && EndpointSecurityPolicy.isAllowedOption(it) }
+            val selected = options.firstOrNull { it.code == current.profile.endpointCode }
+                ?: options.firstOrNull()
             current.advancedSettings.copy(
                 protocol = VpnProtocol.fromBackendCode(selected?.security),
                 endpointSelectionMode = EndpointSelectionMode.MANUAL,
@@ -126,17 +156,6 @@ object AdvancedSettingsStateReducer {
     ): AppUiState {
         return current.copy(
             advancedSettings = current.advancedSettings.copy(anonymousLogsEnabled = enabled),
-        )
-    }
-
-    fun setYoutubeDirectDpiEnabled(
-        current: AppUiState,
-        enabled: Boolean,
-    ): AppUiState {
-        return current.copy(
-            advancedSettings = current.advancedSettings.copy(
-                youtubeDirectDpiEnabled = enabled,
-            ),
         )
     }
 

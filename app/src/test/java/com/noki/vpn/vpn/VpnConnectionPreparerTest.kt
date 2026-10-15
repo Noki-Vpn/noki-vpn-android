@@ -4,6 +4,7 @@ import com.noki.vpn.data.AtomicStoredSettingsStore
 import com.noki.vpn.data.BackendException
 import com.noki.vpn.data.DefaultStoredSettingsFactory
 import com.noki.vpn.data.EndpointRankingPolicy
+import com.noki.vpn.data.RuntimeProfilePolicy
 import com.noki.vpn.data.StoredSettings
 import com.noki.vpn.data.VpnEndpointOption
 import com.noki.vpn.data.VpnSessionSelection
@@ -19,6 +20,70 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VpnConnectionPreparerTest {
+    @Test
+    fun `required client update never retries or starts the usable cached profile`() = runBlocking {
+        val settings = cachedSettings().copy(backendAccessToken = "token", isAuthenticated = true)
+        assertTrue(RuntimeProfilePolicy.isCachedProfileUsable(settings))
+        val rejection = BackendException("client_update_required", 426)
+        var prepares = 0
+        val coordinator = VpnStartCoordinator(VpnStartCoordinator.VpnSessionPreparer { _, _, _, _ ->
+            prepares++
+            throw rejection
+        })
+        val preparer = VpnConnectionPreparer(
+            store = PreparerStore(settings),
+            currentNetworkKind = { EndpointRankingPolicy.NetworkKind.WIFI },
+            resolveStart = { token, baseline, allowCachedFallback, selection ->
+                coordinator.resolveStart(token, baseline, emptyList(), allowCachedFallback, selection)
+            },
+            refreshAccessToken = { error("required update must not refresh auth") },
+            sleep = { error("required update must not retry") },
+            retryCount = 2,
+        )
+
+        val result = preparer.prepare(
+            strategy = VpnPreparationStrategy.FreshWithCachedFallback,
+            onCachedFallback = { error("required update must not start cached profile") },
+        ) as VpnConnectionPreparer.Outcome.Failure
+
+        assertEquals(rejection, result.error)
+        assertEquals(1, prepares)
+    }
+
+    @Test
+    fun `RU mode never requests a fresh Xray session`() = runBlocking {
+        val baseline = cachedSettings().copy(backendAccessToken = "token", isAuthenticated = true)
+        val ru = baseline.copy(advancedSettings = baseline.advancedSettings.copy(ruRelayEnabled = true))
+        var invoked = false
+        val preparer = VpnConnectionPreparer(
+            store = PreparerStore(ru),
+            currentNetworkKind = { EndpointRankingPolicy.NetworkKind.WIFI },
+            resolveStart = { _, _, _, _ -> invoked = true; error("Xray session must not be requested") },
+            refreshAccessToken = { error("refresh must not run") },
+        )
+
+        val result = preparer.prepare(VpnPreparationStrategy.FreshOnly)
+
+        assertTrue(result is VpnConnectionPreparer.Outcome.Failure)
+        assertEquals(false, invoked)
+    }
+
+    @Test
+    fun `RU mode never returns cached Xray and fails closed before WG runtime exists`() = runBlocking {
+        val baseline = cachedSettings().copy(backendAccessToken = "token")
+        val ru = baseline.copy(advancedSettings = baseline.advancedSettings.copy(ruRelayEnabled = true))
+        var invoked = false
+        val preparer = VpnConnectionPreparer(
+            store = PreparerStore(ru),
+            currentNetworkKind = { EndpointRankingPolicy.NetworkKind.WIFI },
+            resolveStart = { _, _, _, _ -> invoked = true; error("Xray session must not be requested") },
+            refreshAccessToken = { error("refresh must not run") },
+        )
+
+        val result = preparer.prepare(VpnPreparationStrategy.CachedFirst)
+        assertTrue(result is VpnConnectionPreparer.Outcome.Failure)
+        assertEquals(false, invoked)
+    }
     @Test
     fun `blocking backend call is bounded by the total preparation deadline`() = runBlocking {
         val settings = cachedSettings().copy(backendAccessToken = "token", isAuthenticated = true)
@@ -227,6 +292,7 @@ class VpnConnectionPreparerTest {
         val baseline = DefaultStoredSettingsFactory.create()
         val endpoint = VpnEndpointOption(code = "lv-1", locationCode = "lv")
         return baseline.copy(
+            advancedSettings = baseline.advancedSettings.copy(ruRelayEnabled = false),
             profile = baseline.profile.copy(
                 endpointCode = endpoint.code,
                 host = "vpn.example",

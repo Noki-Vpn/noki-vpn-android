@@ -1,5 +1,6 @@
 package com.noki.vpn.data
 
+import com.noki.vpn.BuildConfig
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -43,6 +44,7 @@ class BackendPaymentContractTest {
             assertEquals("Bearer access", it.header("Authorization"))
             assertEquals("device", it.header("X-Device-Id"))
             assertEquals("proof", it.header("X-Device-Key"))
+            assertEquals(BuildConfig.VERSION_CODE.toString(), it.header("X-Noki-Version-Code"))
         }
         assertTrue(payloads.first().isNull("payment_method"))
         assertEquals(2, payloads[1].getInt("payment_method"))

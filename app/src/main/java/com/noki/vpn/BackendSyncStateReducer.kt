@@ -3,6 +3,7 @@ package com.noki.vpn
 import com.noki.vpn.data.DeviceSession
 import com.noki.vpn.data.PlanSummary
 import com.noki.vpn.data.ServerLocation
+import com.noki.vpn.data.RuForeignNode
 import com.noki.vpn.data.UserProfile
 import com.noki.vpn.data.VlessProfile
 
@@ -14,6 +15,7 @@ internal data class BackendSyncPatch(
     val profile: VlessProfile,
     val currentDeviceAccessRole: String,
     val androidUpdate: AndroidUpdateUiState,
+    val ruForeignNodes: List<RuForeignNode> = emptyList(),
 )
 
 internal data class BackendSyncOwner(
@@ -84,6 +86,7 @@ internal object BackendSyncStateReducer {
             userProfile = patch.userProfile,
             devices = patch.devices,
             locations = patch.locations,
+            ruForeignNodes = patch.ruForeignNodes,
             plans = patch.plans,
             profile = patch.profile,
             currentDeviceAccessRole = patch.currentDeviceAccessRole,

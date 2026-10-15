@@ -4,6 +4,8 @@ import com.noki.vpn.AppDialog
 import com.noki.vpn.AppDestination
 import com.noki.vpn.confirmedServerCode
 import com.noki.vpn.data.ServerLocation
+import com.noki.vpn.data.RuForeignNode
+import com.noki.vpn.data.ServerSelectionMode
 import com.noki.vpn.loadInstalledAppsOrEmpty
 import com.noki.vpn.navigationStackAfterOpen
 import kotlinx.coroutines.CancellationException
@@ -15,6 +17,33 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PrimaryNavigationPolicyTest {
+    @Test
+    fun missingRuDiscoveryKeepsBootstrapSelectionButNeverConfirmsOfflineNodes() {
+        val node = com.noki.vpn.data.VpnServer("lv-2", "Latvia 2", "LV", "lv2", "probe.example", 443, true)
+        val locations = listOf(ServerLocation("LV", "LV", "Латвия", "", "probe.example",
+            isOnline = true, servers = listOf(node)))
+        assertEquals("LV", confirmedServerCode(AppDialog.ChangeServer("LV", ServerSelectionMode.COUNTRY),
+            locations, emptyList(), true))
+        assertEquals("lv-2", confirmedServerCode(AppDialog.ChangeServer("lv-2", ServerSelectionMode.SERVER),
+            locations, emptyList(), true))
+        assertEquals("", confirmedServerCode(AppDialog.ChangeServer("", ServerSelectionMode.AUTO),
+            locations, emptyList(), true))
+        assertNull(confirmedServerCode(AppDialog.ChangeServer("lv-2", ServerSelectionMode.SERVER),
+            locations.map { it.copy(servers = listOf(node.copy(isOnline = false))) }, emptyList(), true))
+    }
+
+    @Test
+    fun overlaySelectionUsesRuDiscoveryAndRevalidatesWithdrawnNodes() {
+        val nodes = listOf(RuForeignNode("nl", "NL overlay", "NL"))
+        val dialog = AppDialog.ChangeServer("nl", ServerSelectionMode.SERVER)
+        assertEquals("nl", confirmedServerCode(dialog, emptyList(), nodes, true))
+        assertNull(confirmedServerCode(dialog, emptyList(), nodes))
+        assertNull(confirmedServerCode(dialog, emptyList(), emptyList(), true))
+        assertEquals("NL", confirmedServerCode(AppDialog.ChangeServer("NL", ServerSelectionMode.COUNTRY),
+            emptyList(), nodes, true))
+        assertEquals("", confirmedServerCode(AppDialog.ChangeServer("", ServerSelectionMode.AUTO),
+            emptyList(), nodes, true))
+    }
     @Test
     fun selectionModeIsPartOfIdentityAndOfflineNodeCannotBeConfirmed() {
         val profile = com.noki.vpn.data.UserProfile(selectedCountryCode = "DE")

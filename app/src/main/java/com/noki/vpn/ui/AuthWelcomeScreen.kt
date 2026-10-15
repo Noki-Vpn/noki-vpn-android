@@ -47,7 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.noki.vpn.R
 import com.noki.vpn.data.AppLanguage
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 
 internal fun handleTelegramErrorCancel(
     temporaryVpnActive: Boolean,
@@ -76,7 +76,7 @@ internal fun WelcomeLoginScreen(
     inlineMessage: String?,
     telegramErrorMessage: String?,
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onLoginClick: () -> Unit,
     onRegistrationClick: () -> Unit,
@@ -358,7 +358,7 @@ internal fun WelcomeLoginScreen(
 internal fun WelcomeTopActions(
     metrics: NokiAdaptiveMetrics,
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onSupportClick: () -> Unit,
 ) {
@@ -405,7 +405,7 @@ internal fun WelcomeTopActions(
 internal fun TemporaryVpnInfoModal(
     metrics: NokiAdaptiveMetrics,
     language: AppLanguage,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     connecting: Boolean,
     errorMessage: String?,
@@ -562,7 +562,7 @@ internal fun WelcomeSocialButton(
     textFontSize: TextUnit,
     textLetterSpacing: TextUnit,
     modifier: Modifier = Modifier,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     enabled: Boolean = true,
     onClick: () -> Unit,
@@ -610,7 +610,7 @@ internal fun WelcomeSocialButton(
 internal fun WelcomeGlassButton(
     modifier: Modifier,
     shape: Shape,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     enabled: Boolean = true,
     surfaceColor: Color = authButtonSurfaceColor(NokiBgLighter),

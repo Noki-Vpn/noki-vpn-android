@@ -33,19 +33,19 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.noki.vpn.R
 import com.noki.vpn.data.AppLanguage
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.colorControls
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.highlight.Highlight
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.drawPrismalGlass
+import com.styropyr0.prismal.effects.prismalBlur
+import com.styropyr0.prismal.effects.colorControls
+import com.styropyr0.prismal.effects.prismalLens
+import com.styropyr0.prismal.effects.vibrancy
+import com.styropyr0.prismal.specular.PrismalSpecular
 
 @Composable
 internal fun RemoveAllDevicesButton(
     language: AppLanguage,
     scale: Float,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onClick: () -> Unit,
 ) {
@@ -58,12 +58,12 @@ internal fun RemoveAllDevicesButton(
             .height(devicesDp(50f, scale))
             .then(
                 if (liveGlassEnabled && backdrop != null) {
-                    Modifier.drawBackdrop(
+                    Modifier.drawPrismalGlass(
                         backdrop = backdrop,
                         shape = { shape },
                         effects = { vibrancy() },
-                        highlight = {
-                            Highlight.Default.copy(
+                        specular = {
+                            PrismalSpecular.Default.copy(
                                 width = 0.5.dp,
                                 blurRadius = 0.25.dp,
                                 alpha = 0.18f,
@@ -124,7 +124,7 @@ internal fun DevicesConfirmDialog(
     message: String,
     confirmText: String,
     dismissText: String,
-    backdrop: LayerBackdrop?,
+    backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     scale: Float,
     onDismiss: () -> Unit,
@@ -152,7 +152,7 @@ internal fun DevicesConfirmDialog(
                 .clip(shape)
                 .then(
                     if (liveGlassEnabled && backdrop != null) {
-                        Modifier.drawBackdrop(
+                        Modifier.drawPrismalGlass(
                             backdrop = backdrop,
                             shape = { shape },
                             effects = {
@@ -161,14 +161,14 @@ internal fun DevicesConfirmDialog(
                                     contrast = 1f,
                                     brightness = -0.1f,
                                 )
-                                blur(devicesDp(40f, scale).toPx())
-                                lens(
+                                prismalBlur(devicesDp(40f, scale).toPx())
+                                prismalLens(
                                     devicesDp(8f, scale).toPx(),
                                     devicesDp(10f, scale).toPx(),
                                 )
                             },
-                            highlight = {
-                                Highlight.Default.copy(alpha = 0.22f)
+                            specular = {
+                                PrismalSpecular.Default.copy(alpha = 0.22f)
                             },
                         )
                     } else {

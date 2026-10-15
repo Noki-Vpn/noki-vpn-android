@@ -1,5 +1,6 @@
 package com.noki.vpn.data
 
+import com.noki.vpn.BuildConfig
 import java.time.Instant
 import java.time.LocalDate
 import java.util.Locale
@@ -14,20 +15,87 @@ class SettingsPersistenceCodecsTest {
     private val settingsCodec = StoredSettingsCodec { defaults }
 
     @Test
-    fun `multiHop intent and runtime survive process storage round trip`() {
+    fun `pending credentials survive process storage while legacy accounts default complete`() {
+        val pending = defaults.copy(
+            isAuthenticated = true,
+            userProfile = defaults.userProfile.copy(credentialsSetupRequired = true),
+        )
+        val restored = settingsCodec.decode(settingsCodec.encode(pending))
+
+        assertTrue(restored.isAuthenticated)
+        assertTrue(restored.userProfile.credentialsSetupRequired)
+        assertFalse(settingsCodec.decode("{}").userProfile.credentialsSetupRequired)
+        assertFalse(settingsCodec.decode(settingsCodec.encode(pending.copy(
+            userProfile = pending.userProfile.copy(credentialsSetupRequired = false),
+        ))).userProfile.credentialsSetupRequired)
+    }
+
+    @Test
+    fun `RU relay build default preserves explicit choice across storage`() {
+        assertEquals(BuildConfig.RU_RELAY_DEFAULT_ENABLED, settingsCodec.decode(null).advancedSettings.ruRelayEnabled)
+        assertEquals(BuildConfig.RU_RELAY_DEFAULT_ENABLED, settingsCodec.decode("{}").advancedSettings.ruRelayEnabled)
+        assertEquals(BuildConfig.RU_RELAY_DEFAULT_ENABLED,
+            DefaultStoredSettingsFactory.create(isFreshInstall = false).advancedSettings.ruRelayEnabled)
+        val settings = defaults.copy(advancedSettings = defaults.advancedSettings.copy(
+            protocol = VpnProtocol.REALITY,
+            ruRelayEnabled = true,
+        ))
+        val restored = settingsCodec.decode(settingsCodec.encode(settings)).advancedSettings
+        assertTrue(restored.ruRelayEnabled)
+        assertEquals(VpnProtocol.REALITY, restored.protocol)
+        assertEquals(VpnProtocol.WIREGUARD, restored.effectiveProtocol)
+        assertEquals(VpnProtocol.REALITY, restored.copy(ruRelayEnabled = false).effectiveProtocol)
+        val disabled = settings.copy(advancedSettings = settings.advancedSettings.copy(ruRelayEnabled = false))
+        assertFalse(settingsCodec.decode(settingsCodec.encode(disabled)).advancedSettings.ruRelayEnabled)
+        val damaged = settingsCodec.decode("""{"protocol":"WIREGUARD","ruRelayEnabled":false}""")
+        assertFalse(damaged.advancedSettings.ruRelayEnabled)
+        assertEquals(VpnProtocol.AUTO, damaged.advancedSettings.effectiveProtocol)
+    }
+
+    @Test
+    fun `country only MultiHop selection cannot become an explicit RU chain`() {
+        val restored = settingsCodec.decode("""{"multiHopSettings":{"enabled":true,
+            "entry":{"kind":"COUNTRY","countryCode":"RU"},
+            "exit":{"kind":"SERVER","nodeId":"node-b"}}}""")
+        assertEquals(BuildConfig.RU_RELAY_DEFAULT_ENABLED, restored.advancedSettings.ruRelayEnabled)
+        assertTrue(restored.advancedSettings.multiHop.enabled)
+        assertNull(restored.advancedSettings.multiHop.entry)
+        assertEquals("node-b", restored.advancedSettings.multiHop.exit?.nodeId)
+        assertTrue(runCatching { restored.advancedSettings.multiHop.explicitNodeIds() }.isFailure)
+        assertEquals(BuildConfig.RU_RELAY_DEFAULT_ENABLED,
+            settingsCodec.decode("""{"multiHopSettings":{"enabled":false}}""")
+                .advancedSettings.ruRelayEnabled)
+    }
+
+    @Test
+    fun `legacy manual RU preference is ignored after upgrade`() {
+        val saved = defaults.copy(ruRelaySelectionRevision = 17L, advancedSettings = defaults.advancedSettings.copy(
+            ruRelayEnabled = true,
+        ))
+        val legacy = org.json.JSONObject(settingsCodec.encode(saved))
+            .put("ruRelayAutoPath", false).put("manualRuRelayNodeId", "relay-a").toString()
+        val restored = settingsCodec.decode(legacy)
+        assertTrue(restored.advancedSettings.ruRelayEnabled)
+        assertEquals(RuRelaySelection.Auto, restored.advancedSettings.ruRelaySelection)
+        assertEquals(17L, restored.ruRelaySelectionRevision)
+        assertFalse(settingsCodec.encode(restored).contains("manualRuRelayNodeId"))
+    }
+
+    @Test
+    fun `explicit RU multiHop intent and direct preferences survive process storage round trip`() {
         val selection = MultiHopSettings(true,
-            HopSelection(ServerSelectionMode.COUNTRY, countryCode = "RU"),
-            HopSelection(ServerSelectionMode.SERVER, nodeId = "node-b"))
-        val runtime = MultiHopRuntime(selection, "node-a", "node-b",
-            VlessProfile(remark = "Noki Russia", host = "203.0.113.1", uuid = "relay-user"),
-            "hash", System.currentTimeMillis() + 30_000)
+            HopSelection(ServerSelectionMode.SERVER, nodeId = "11111111-1111-4111-8111-111111111111"),
+            HopSelection(ServerSelectionMode.SERVER, nodeId = "22222222-2222-4222-8222-222222222222"))
         val stored = defaults.copy(
-            profile = defaults.profile.copy(multiHop = runtime),
-            advancedSettings = defaults.advancedSettings.copy(multiHop = selection),
+            advancedSettings = defaults.advancedSettings.copy(multiHop = selection, ruRelayEnabled = true,
+                protocol = VpnProtocol.REALITY, manualEndpointGroupKey = "saved-direct-group"),
         )
         val restored = settingsCodec.decode(settingsCodec.encode(stored))
         assertEquals(selection, restored.advancedSettings.multiHop)
-        assertEquals(runtime, restored.profile.multiHop)
+        assertEquals(selection.explicitNodeIds(), restored.advancedSettings.multiHop.explicitNodeIds())
+        assertTrue(restored.advancedSettings.ruRelayEnabled)
+        assertEquals(VpnProtocol.REALITY, restored.advancedSettings.protocol)
+        assertEquals("saved-direct-group", restored.advancedSettings.manualEndpointGroupKey)
     }
 
     @Test
@@ -36,6 +104,26 @@ class SettingsPersistenceCodecsTest {
         assertFalse(settingsCodec.decode("{}").advancedSettings.killSwitchEnabled)
         val enabled = defaults.copy(advancedSettings = defaults.advancedSettings.copy(killSwitchEnabled = true))
         assertTrue(settingsCodec.decode(settingsCodec.encode(enabled)).advancedSettings.killSwitchEnabled)
+    }
+
+    @Test
+    fun `no RU pair identity survives storage but cannot bypass entry or survive selection change`() {
+        val selection = MultiHopSettings(true,
+            HopSelection(ServerSelectionMode.SERVER, nodeId = "11111111-1111-4111-8111-111111111111"),
+            HopSelection(ServerSelectionMode.SERVER, nodeId = "22222222-2222-4222-8222-222222222222"))
+        val route = BackendMultiHopSession(selection, selection.entry!!.nodeId!!, selection.exit!!.nodeId!!,
+            "8.8.8.8", "a".repeat(64))
+        val stored = defaults.copy(profile = VlessProfile(host = route.entryIp, port = "20000", endpointCode = "exit-tls",
+            uuid = "00000000-0000-0000-0000-000000000099", security = "tls", serverName = "exit.example", multiHop = route),
+            advancedSettings = AdvancedSettings(ruRelayEnabled = false, multiHop = selection))
+        val restored = settingsCodec.decode(settingsCodec.encode(stored))
+        assertEquals(stored.profile, restored.profile)
+        assertTrue(VpnProfileValidator.isUsable(restored))
+        assertFalse(RuntimeProfilePolicy.isCachedProfileUsable(restored))
+        assertFalse(VpnProfileValidator.isUsable(restored.copy(advancedSettings = restored.advancedSettings.copy(multiHop = MultiHopSettings()))))
+        assertFalse(VpnProfileValidator.isUsable(restored.copy(advancedSettings = restored.advancedSettings.copy(multiHop = selection.copy(
+            entry = HopSelection(ServerSelectionMode.SERVER, nodeId = "33333333-3333-4333-8333-333333333333"))))))
+        assertNull(RuntimeProfilePolicy.profileAfterServerSelection(restored.profile).multiHop)
     }
 
     @Test
@@ -105,15 +193,6 @@ class SettingsPersistenceCodecsTest {
     @Test
     fun `stored settings current payload round trips`() {
         val expected = defaults.copy(
-            profile = defaults.profile.copy(
-                youtubeCascade = YoutubeCascadeProfile(
-                    host = "ru-cascade.example",
-                    uuid = "cascade-uuid",
-                    serverName = "www.lu.lv",
-                    publicKey = "cascade-public",
-                    shortId = "cascade-short",
-                ),
-            ),
             selectedPackages = setOf("org.example.two", "org.example.one"),
             isAuthenticated = true,
             backendAccessToken = "access",
@@ -125,33 +204,6 @@ class SettingsPersistenceCodecsTest {
         )
 
         assertEquals(expected, settingsCodec.decode(settingsCodec.encode(expected)))
-    }
-
-    @Test
-    fun `removed YouTube DNS preference is ignored and not persisted`() {
-        val decoded = settingsCodec.decode("""{"youtubeRussianDnsEnabled":true}""")
-
-        assertFalse(settingsCodec.encode(decoded).contains("youtubeRussianDnsEnabled"))
-    }
-
-    @Test
-    fun `YouTube direct DPI mode defaults off and round trips`() {
-        assertFalse(
-            settingsCodec.decode("""{}""")
-                .advancedSettings
-                .youtubeDirectDpiEnabled,
-        )
-
-        val enabled = defaults.copy(
-            advancedSettings = defaults.advancedSettings.copy(
-                youtubeDirectDpiEnabled = true,
-            ),
-        )
-        val encoded = settingsCodec.encode(enabled)
-        val decoded = settingsCodec.decode(encoded)
-
-        assertTrue(decoded.advancedSettings.youtubeDirectDpiEnabled)
-        assertTrue(encoded.contains("\"youtubeDirectDpiEnabled\":true"))
     }
 
     @Test
