@@ -60,7 +60,7 @@ internal class VpnStatsCoordinator(
     ) {
         val date = LocalDate.now().toString()
         val locationCode = settings.userProfile.selectedServerCode
-        if (initialLatencyMs != null && locationCode.isNotBlank()) {
+        if (initialLatencyMs != null) {
             val latencyMs = initialLatencyMs.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
             tracker.markLatencySample(runtimeOwner)
             repository.addDailyStatsPingSample(date, latencyMs)
@@ -89,7 +89,7 @@ internal class VpnStatsCoordinator(
     }
 
     private fun recordImmediateLatency(request: LatencySampleRequest) {
-        if (request.locationCode.isBlank() || latencyJob?.isActive == true) return
+        if (latencyJob?.isActive == true) return
         latencyJob = scope.launch {
             if (!tracker.accepts(request)) return@launch
             measureConnectedLatencyMs()?.let { latencyMs ->

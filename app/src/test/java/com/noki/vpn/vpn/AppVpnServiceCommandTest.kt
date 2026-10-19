@@ -802,11 +802,41 @@ class AppVpnServiceCommandTest {
     }
 
     @Test
-    fun requestedLatencyPublishesFreshSamplesAndCoalescesConcurrentRefreshes() = runBlocking {
+    fun connectedLatencyIsReplayedOnStateQueriesAndClearedOnStop() = runBlocking {
+        val fixture = Fixture(this, probeFallback = true, workingEndpoint = "tcp1")
+        fixture.startPrepared()
+        val publish = AppVpnService::class.java.getDeclaredMethod("broadcastState",
+            VpnConnectionState::class.java, String::class.java, String::class.java, Int::class.javaObjectType)
+            .apply { isAccessible = true }
+        publish.invoke(fixture.service, VpnConnectionState.CONNECTED, "", "lv1", 30)
+        assertEquals(30, AppVpnService.liveRuntimeState().latencyMs)
+        fixture.invoke("broadcastCurrentState")
+        val query = shadowOf(fixture.service).broadcastIntents.last {
+            it.action == AppVpnService.ACTION_STATE_CHANGED
+        }
+        assertEquals(30, query.getIntExtra(AppVpnService.EXTRA_LATENCY_MS, 0))
+
+        fixture.set("connectedAtMillis", checkNotNull(AppVpnService.liveRuntimeState().connectedAtMillis) + 1L)
+        fixture.invoke("broadcastCurrentState")
+        assertNull(AppVpnService.liveRuntimeState().latencyMs)
+        publish.invoke(fixture.service, VpnConnectionState.CONNECTED, "", "lv1", 87)
+
+        fixture.stop(1)
+        fixture.orchestrator.activeTransitionJob()!!.join()
+        assertNull(AppVpnService.liveRuntimeState().latencyMs)
+        val stopped = shadowOf(fixture.service).broadcastIntents.last {
+            it.action == AppVpnService.ACTION_STATE_CHANGED
+        }
+        assertEquals(0, stopped.getIntExtra(AppVpnService.EXTRA_LATENCY_MS, 0))
+    }
+
+    @Test
+    fun requestedLatencyWithoutDirectLocationPublishesFreshSamplesAndCoalescesConcurrentRefreshes() = runBlocking {
         val fixture = Fixture(this)
         val repository = SettingsRepository(fixture.service)
         val settings = repository.load().let {
-            it.copy(userProfile = it.userProfile.copy(selectedServerCode = "lv"))
+            it.copy(userProfile = it.userProfile.copy(selectedServerCode = ""),
+                advancedSettings = it.advancedSettings.copy(ruRelayEnabled = true))
         }
         var measured = 40
         var probes = 0
@@ -822,19 +852,21 @@ class AppVpnServiceCommandTest {
             onLatencySample = { _, latency -> samples += latency },
         )
         coordinator.start(settings, RuntimeOwner(1L, 1L))
+        coordinator.recordInitialLatency(settings, RuntimeOwner(1L, 1L), 25L)
+        assertEquals(listOf(25), samples)
         coordinator.refreshLatency()
         coordinator.refreshLatency()
         repeat(3) { yield() }
-        assertEquals(listOf(40), samples)
+        assertEquals(listOf(25, 40), samples)
         assertEquals(1, probes)
         measured = 75
         coordinator.refreshLatency()
         repeat(3) { yield() }
-        assertEquals(listOf(40, 75), samples)
+        assertEquals(listOf(25, 40, 75), samples)
         coordinator.refreshLatency()
         coordinator.reset()
         repeat(3) { yield() }
-        assertEquals(listOf(40, 75), samples)
+        assertEquals(listOf(25, 40, 75), samples)
     }
 
     @Test

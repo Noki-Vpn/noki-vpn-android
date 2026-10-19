@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity() {
                 reason = reason,
                 connectedAtMillis = connectedAtMillis.takeIf { it > 0L },
                 runtimeMode = runtimeMode,
+                latencyMs = intent.getIntExtra(AppVpnService.EXTRA_LATENCY_MS, 0).takeIf { it > 0 },
             )
         }
     }

@@ -11,6 +11,31 @@ import org.junit.Test
 
 class ConnectionStateReducerTest {
     @Test
+    fun tunnelLatencyFollowsConnectedServiceSnapshotsAndClearsOnEveryOtherState() {
+        val coordinator = ConnectionUiCoordinator()
+        val current = AppUiState(connectionState = VpnConnectionState.CONNECTED, connectionLatencyMs = 39)
+        for (state in VpnConnectionState.entries) {
+            for (latency in listOf(87, 0, -1, null)) {
+                val transition = coordinator.reduce(current, state, ConnectionReason.Unknown(""),
+                    1234L, 1234L, emptyList(), "", latency) as ConnectionStateReducer.Transition.Normal
+                assertEquals(latency?.takeIf { state == VpnConnectionState.CONNECTED && it > 0 },
+                    transition.state.connectionLatencyMs)
+            }
+        }
+        for (reason in listOf("traffic_limit", "device_limit", "empty_selected_apps")) {
+            val transition = coordinator.reduce(current, VpnConnectionState.FAILED, ConnectionReason.parse(reason),
+                null, 1234L, emptyList(), "", 87)
+            val failed = when (transition) {
+                is ConnectionStateReducer.Transition.Normal -> transition.state
+                is ConnectionStateReducer.Transition.TrafficLimit -> transition.state
+                is ConnectionStateReducer.Transition.DeviceLimit -> transition.state
+                is ConnectionStateReducer.Transition.EmptySelectedApps -> transition.state
+            }
+            assertEquals(null, failed.connectionLatencyMs)
+        }
+    }
+
+    @Test
     fun requiredClientUpdateExplainsHowToConnectWithoutLosingDiagnosticCode() {
         for ((language, labels) in listOf(
             AppLanguage.RU to Pair(

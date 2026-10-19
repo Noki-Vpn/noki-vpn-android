@@ -42,6 +42,7 @@ internal object ConnectionStateReducer {
         nowMillis: Long,
         dailyStats: List<DailyStats>,
         endpointRating: String,
+        latencyMs: Int? = null,
     ): Transition {
         val language = current.personalizationSettings.language
         val rawReason = reason.raw
@@ -51,7 +52,7 @@ internal object ConnectionStateReducer {
             rawReason.isBlank()
         ) {
             return Transition.Normal(
-                state = current.copy(dailyStats = dailyStats),
+                state = current.copy(dailyStats = dailyStats, connectionLatencyMs = null),
                 runtimeAction = RuntimeAction.Clear,
                 logAction = null,
             )
@@ -60,6 +61,7 @@ internal object ConnectionStateReducer {
             return Transition.TrafficLimit(
                 current.copy(
                     connectionState = VpnConnectionState.FAILED,
+                    connectionLatencyMs = null,
                     connectedAtMillis = null,
                     connectionReason = tr(language, "Бесплатный трафик закончился", "Free traffic limit reached"),
                     inlineMessage = null,
@@ -71,6 +73,7 @@ internal object ConnectionStateReducer {
             return Transition.DeviceLimit(
                 current.copy(
                     connectionState = VpnConnectionState.FAILED,
+                    connectionLatencyMs = null,
                     connectedAtMillis = null,
                     connectionReason = AppErrorMapper.deviceLimitMessage(language),
                     inlineMessage = null,
@@ -81,6 +84,7 @@ internal object ConnectionStateReducer {
             return Transition.EmptySelectedApps(
                 current.copy(
                     connectionState = VpnConnectionState.FAILED,
+                    connectionLatencyMs = null,
                     connectedAtMillis = null,
                     connectionReason = AppErrorMapper.localizeConnectionReason(language, rawReason),
                     inlineMessage = null,
@@ -98,6 +102,7 @@ internal object ConnectionStateReducer {
         }
         val nextState = current.copy(
             connectionState = state,
+            connectionLatencyMs = latencyMs?.takeIf { state == VpnConnectionState.CONNECTED && it > 0 },
             connectedAtMillis = nextConnectedAtMillis,
             connectionReason = if (state == VpnConnectionState.DISCONNECTED) "" else {
                 AppErrorMapper.localizeConnectionReason(language, rawReason)

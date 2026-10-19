@@ -38,6 +38,7 @@ internal class ConnectionUiCoordinator {
         nowMillis: Long,
         dailyStats: List<DailyStats>,
         endpointRating: String,
+        latencyMs: Int? = null,
     ): ConnectionStateReducer.Transition = ConnectionStateReducer.reduce(
         current = current,
         state = state,
@@ -46,5 +47,6 @@ internal class ConnectionUiCoordinator {
         nowMillis = nowMillis,
         dailyStats = dailyStats,
         endpointRating = endpointRating,
+        latencyMs = latencyMs,
     )
 }

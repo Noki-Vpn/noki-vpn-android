@@ -319,6 +319,7 @@ internal class AppUiRuntime(
                 connectionState = liveVpnRuntimeState.state,
                 vpnRuntimeMode = liveVpnRuntimeState.runtimeMode,
                 connectedAtMillis = liveVpnRuntimeState.connectedAtMillis,
+                connectionLatencyMs = liveVpnRuntimeState.latencyMs,
                 plans = BootstrapStateMapper.initialPlans(),
                 devices = BootstrapStateMapper.initialDevices(),
                 appNotificationHistory = notificationHistoryState.notifications,

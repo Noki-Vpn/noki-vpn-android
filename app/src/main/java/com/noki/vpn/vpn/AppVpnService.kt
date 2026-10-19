@@ -3220,7 +3220,7 @@ class AppVpnService : VpnService() {
         val publicConnectedAtMillis = connectedAtMillis.takeIf { publicState == VpnConnectionState.CONNECTED }
         currentState = publicState
         updateLiveRuntimeState(publicState, publicConnectedAtMillis, currentRuntimeMode,
-            ruSession?.identity?.sessionId)
+            ruSession?.identity?.sessionId, latencyMs)
         val intent = Intent(ACTION_STATE_CHANGED)
             .setPackage(packageName)
             .putExtra(EXTRA_STATE, publicState.name)
@@ -3230,7 +3230,7 @@ class AppVpnService : VpnService() {
         latencyLocationCode?.takeIf { it.isNotBlank() }?.let { code ->
             intent.putExtra(EXTRA_LATENCY_LOCATION_CODE, code)
         }
-        latencyMs?.let { value ->
+        liveRuntimeState().latencyMs?.let { value ->
             intent.putExtra(EXTRA_LATENCY_MS, value)
         }
         sendBroadcast(
@@ -3244,6 +3244,7 @@ class AppVpnService : VpnService() {
         val connectedAtMillis: Long?,
         val runtimeMode: VpnRuntimeMode,
         val ruSessionId: String? = null,
+        val latencyMs: Int? = null,
     )
 
     companion object {
@@ -3291,12 +3292,20 @@ class AppVpnService : VpnService() {
             connectedAtMillis: Long?,
             runtimeMode: VpnRuntimeMode = VpnRuntimeMode.ACCOUNT,
             ruSessionId: String? = null,
+            latencyMs: Int? = null,
         ) {
+            val previous = liveRuntimeState
             liveRuntimeState = LiveRuntimeState(
                 state = state,
                 connectedAtMillis = connectedAtMillis.takeIf { state == VpnConnectionState.CONNECTED },
                 runtimeMode = runtimeMode,
                 ruSessionId = ruSessionId.takeIf { state == VpnConnectionState.CONNECTED },
+                latencyMs = if (state == VpnConnectionState.CONNECTED) {
+                    latencyMs?.takeIf { it > 0 } ?: previous.latencyMs.takeIf {
+                        previous.state == state && previous.connectedAtMillis == connectedAtMillis &&
+                            previous.runtimeMode == runtimeMode && previous.ruSessionId == ruSessionId
+                    }
+                } else null,
             )
         }
 

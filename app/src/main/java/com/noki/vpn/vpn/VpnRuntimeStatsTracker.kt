@@ -86,7 +86,6 @@ internal class VpnRuntimeStatsTracker(
             onlineSeconds = elapsedSeconds,
         )
         val latencyRequest = locationCode
-            ?.takeIf(String::isNotBlank)
             ?.takeIf {
                 lastLatencyElapsedMillis == 0L ||
                     nowElapsedMillis - lastLatencyElapsedMillis >= latencyIntervalMillis
@@ -128,7 +127,7 @@ internal class VpnRuntimeStatsTracker(
     @Synchronized
     fun requestLatencySample(): LatencySampleRequest? {
         val currentOwner = owner ?: return null
-        val code = locationCode?.takeIf(String::isNotBlank) ?: return null
+        val code = locationCode ?: return null
         return LatencySampleRequest(currentOwner, currentDate().toString(), code)
     }
 

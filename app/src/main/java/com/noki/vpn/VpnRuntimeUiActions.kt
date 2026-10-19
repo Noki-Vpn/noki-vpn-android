@@ -25,8 +25,9 @@ internal fun AppUiRuntime.updateConnectionState(
     reason: String = "",
     connectedAtMillis: Long? = null,
     runtimeMode: VpnRuntimeMode = uiState.vpnRuntimeMode,
+    latencyMs: Int? = null,
 ) {
-    when (val transition = connectionStateTransition(state, reason, connectedAtMillis)) {
+    when (val transition = connectionStateTransition(state, reason, connectedAtMillis, latencyMs)) {
         is ConnectionStateReducer.Transition.TrafficLimit -> {
             uiState = withFreeTrafficLimitNotice(
                 transition.state.copy(vpnRuntimeMode = runtimeMode),
@@ -53,6 +54,7 @@ internal fun AppUiRuntime.connectionStateTransition(
     state: VpnConnectionState,
     reason: String,
     connectedAtMillis: Long?,
+    latencyMs: Int? = null,
 ): ConnectionStateReducer.Transition {
     return connectionUiCoordinator.reduce(
         current = uiState,
@@ -62,6 +64,7 @@ internal fun AppUiRuntime.connectionStateTransition(
         nowMillis = System.currentTimeMillis(),
         dailyStats = repository.loadDailyStats(),
         endpointRating = repository.endpointRatingSnapshot(uiState.endpointOptions.map { it.code }),
+        latencyMs = latencyMs,
     )
 }
 

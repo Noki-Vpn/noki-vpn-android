@@ -43,14 +43,15 @@ class HomeTextPolicyTest {
     }
 
     @Test
-    fun `RU protocol label stays Auto in either language and endpoint mode`() {
+    fun `RU protocol label identifies the relay in either language and endpoint mode`() {
         for (language in AppLanguage.entries) {
             val state = AppUiState(
                 advancedSettings = AdvancedSettings(ruRelayEnabled = true),
                 personalizationSettings = PersonalizationSettings(language = language),
             )
-            assertEquals("Auto", protocolCardLabel(state, autoEndpointSelection = true))
-            assertEquals("Auto", protocolCardLabel(state, autoEndpointSelection = false))
+            val expected = if (language == AppLanguage.RU) "WireGuard · RU-реле" else "WireGuard · RU relay"
+            assertEquals(expected, protocolCardLabel(state, autoEndpointSelection = true))
+            assertEquals(expected, protocolCardLabel(state, autoEndpointSelection = false))
         }
     }
 
@@ -146,21 +147,23 @@ class HomeTextPolicyTest {
             currentMetrics(state, traffic),
         )
         assertEquals(
-            HomeMetricsSnapshot(download = "2.5", upload = "1", latency = "39", sessionBytes = 1_048_576L),
-            currentMetrics(state.copy(connectionState = VpnConnectionState.CONNECTED), traffic),
+            HomeMetricsSnapshot(download = "2.5", upload = "1", latency = "87", sessionBytes = 1_048_576L),
+            currentMetrics(state.copy(connectionState = VpnConnectionState.CONNECTED, connectionLatencyMs = 87), traffic),
         )
         for (mode in ServerSelectionMode.entries) {
             val connected = state.copy(
                 connectionState = VpnConnectionState.CONNECTED,
+                connectionLatencyMs = 87,
                 userProfile = state.userProfile.copy(serverSelectionMode = mode, selectedNodeId = node.id),
             )
-            assertEquals(node.latencyMs.toString(), currentMetrics(connected, traffic).latency)
-            assertNull(currentMetrics(connected.copy(locations = listOf(server.copy(
+            assertEquals("87", currentMetrics(connected, traffic).latency)
+            assertEquals("87", currentMetrics(connected.copy(locations = listOf(server.copy(
                 servers = listOf(node.copy(latencyMs = null)),
             ))), traffic).latency)
-            assertNull(currentMetrics(connected.copy(userProfile = connected.userProfile.copy(
+            assertEquals("87", currentMetrics(connected.copy(userProfile = connected.userProfile.copy(
                 selectedServerCode = "missing",
             )), traffic).latency)
+            assertNull(currentMetrics(connected.copy(connectionLatencyMs = null), traffic).latency)
         }
         val manual = state.copy(userProfile = state.userProfile.copy(
             serverSelectionMode = ServerSelectionMode.SERVER, selectedNodeId = node.id,
@@ -170,7 +173,27 @@ class HomeTextPolicyTest {
         val relay = manual.copy(advancedSettings = manual.advancedSettings.copy(ruRelayEnabled = true),
             userProfile = manual.userProfile.copy(selectedServerCode = "stale-xray-profile"))
         for (connection in VpnConnectionState.entries) {
-            assertEquals("39", currentMetrics(relay.copy(connectionState = connection), traffic).latency)
+            assertEquals(if (connection == VpnConnectionState.CONNECTED) null else "39",
+                currentMetrics(relay.copy(connectionState = connection), traffic).latency)
+        }
+    }
+
+    @Test
+    fun `connected RU metrics use the tunnel sample without direct or catalog fallback`() {
+        val direct = location(latencyMs = 5)
+        val foreign = RuForeignNode("exit", "Latvia", "LV", latencyMs = 12)
+        val state = AppUiState(
+            advancedSettings = AdvancedSettings(ruRelayEnabled = true),
+            connectionState = VpnConnectionState.CONNECTED,
+            connectionLatencyMs = 87,
+            locations = listOf(direct),
+            ruForeignNodes = listOf(foreign),
+        )
+        for (mode in ServerSelectionMode.entries) {
+            val connected = state.copy(userProfile = state.userProfile.copy(serverSelectionMode = mode))
+            assertEquals("87", currentMetrics(connected, HomeDeviceTrafficSnapshot()).latency)
+            assertEquals("87", currentMetrics(connected.copy(locations = emptyList()), HomeDeviceTrafficSnapshot()).latency)
+            assertNull(currentMetrics(connected.copy(connectionLatencyMs = null), HomeDeviceTrafficSnapshot()).latency)
         }
     }
 

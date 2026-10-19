@@ -21,10 +21,12 @@ class VpnRuntimeStatsTrackerTest {
         val request = checkNotNull(tracker.requestLatencySample())
         assertEquals("lv", request.locationCode)
         assertEquals(owner, request.owner)
-        tracker.start(RuntimeOwner(2L, 2L), "de")
+        val nextOwner = RuntimeOwner(2L, 2L)
+        tracker.start(nextOwner, "")
         assertFalse(tracker.accepts(request))
-        assertEquals("de", tracker.requestLatencySample()?.locationCode)
-        tracker.clear(RuntimeOwner(2L, 2L))
+        assertEquals("", tracker.requestLatencySample()?.locationCode)
+        assertEquals(nextOwner, tracker.flush(nextOwner, finalFlush = true)?.latencyRequest?.owner)
+        tracker.clear(nextOwner)
         assertEquals(null, tracker.requestLatencySample())
     }
 

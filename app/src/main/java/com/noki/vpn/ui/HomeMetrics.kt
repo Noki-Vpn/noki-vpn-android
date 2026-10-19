@@ -425,13 +425,11 @@ internal fun currentMetrics(
 
     val servers = state.locations.flatMap { it.servers }
     val serverLatency = when {
+        isConnected -> state.connectionLatencyMs
         state.advancedSettings.ruRelayEnabled ->
             if (state.userProfile.serverSelectionMode == com.noki.vpn.data.ServerSelectionMode.SERVER) {
                 servers.firstOrNull { it.id == state.userProfile.selectedNodeId }?.latencyMs
             } else selectedLocation?.latencyMs
-        isConnected -> servers.firstOrNull {
-            it.locationCode.equals(state.userProfile.selectedServerCode, ignoreCase = true)
-        }?.latencyMs
         state.userProfile.serverSelectionMode == com.noki.vpn.data.ServerSelectionMode.SERVER ->
             servers.firstOrNull { it.id == state.userProfile.selectedNodeId }?.latencyMs
         else -> selectedLocation?.latencyMs
