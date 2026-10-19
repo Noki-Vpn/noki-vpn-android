@@ -35,11 +35,13 @@ class AccountSecurityCoordinatorTest {
             authAttempt = AuthSessionAttempt("access", 0),
             currentPassword = "old-password",
             newPassword = "new-password",
+            verificationCode = "123456",
         )
 
         assertTrue(result.user.hasPassword)
         assertEquals("new-access", store.load().backendAccessToken)
         assertEquals("new-refresh", store.load().backendRefreshToken)
+        assertEquals("123456", api.passwordVerificationCode)
     }
 
     @Test
@@ -137,6 +139,7 @@ class AccountSecurityCoordinatorTest {
     ) : AccountSecurityApi {
         var usernameCalled = false
         var unlinkTelegramCalled = false
+        var passwordVerificationCode: String? = null
 
         override suspend fun sendAccountEmailCode(
             token: String,
@@ -145,7 +148,16 @@ class AccountSecurityCoordinatorTest {
             currentDeviceKey: String?,
             currentEmail: String?,
             currentVerificationCode: String?,
+            purpose: String?,
         ): Int = 60
+
+        override suspend fun verifyCurrentAccountEmailCode(
+            token: String,
+            email: String,
+            verificationCode: String,
+            currentDeviceId: String?,
+            currentDeviceKey: String?,
+        ) = Unit
 
         override suspend fun changeAccountEmail(
             token: String,
@@ -163,7 +175,19 @@ class AccountSecurityCoordinatorTest {
             newPassword: String,
             currentDeviceId: String?,
             currentDeviceKey: String?,
-        ): BackendAccountPasswordChange = passwordOperation?.invoke() ?: passwordResult
+            verificationCode: String?,
+        ): BackendAccountPasswordChange {
+            passwordVerificationCode = verificationCode
+            return passwordOperation?.invoke() ?: passwordResult
+        }
+
+        override suspend fun verifyAccountPasswordCode(
+            token: String,
+            email: String,
+            verificationCode: String,
+            currentDeviceId: String?,
+            currentDeviceKey: String?,
+        ) = Unit
 
         override suspend fun changeAccountUsername(
             token: String,

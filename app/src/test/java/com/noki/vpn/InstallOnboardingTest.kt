@@ -12,15 +12,34 @@ import org.junit.Test
 
 class InstallOnboardingTest {
     @Test
-    fun `fresh and existing authenticated installations cannot skip consent`() {
-        listOf(false, true).forEach { authenticated ->
-            val state = AppUiState(isReady = true, isAuthenticated = authenticated,
-                screenStack = listOf(AppDestination.HOME))
+    fun `every installation step waits for successful authentication without hiding errors`() {
+        InstallOnboardingStep.entries.forEach { step ->
+            listOf(AppDestination.LOGIN, AppDestination.REGISTRATION, AppDestination.PASSWORD_RECOVERY,
+                AppDestination.INVITE_DEVICE, AppDestination.SUPPORT).forEach { destination ->
+                val state = AppUiState(isReady = true, installOnboardingStep = step,
+                    screenStack = listOf(destination), inlineMessage = "auth error",
+                    loginForm = LoginFormState(error = "login error"),
+                    registrationForm = RegistrationFormState(error = "registration error"))
 
-            val gated = requireStartupFlow(state)
+                assertEquals(state, requireStartupFlow(state))
+                assertFalse(showsInstallAppearanceDialog(state))
+            }
+        }
+    }
 
-            assertEquals(InstallOnboardingStep.CONSENT, gated.installOnboardingStep)
-            assertEquals(listOf(AppDestination.ONBOARDING), gated.screenStack)
+    @Test
+    fun `successful authentication starts at the persisted incomplete step`() {
+        listOf(InstallOnboardingStep.CONSENT, InstallOnboardingStep.ROUTING,
+            InstallOnboardingStep.APPEARANCE).forEach { step ->
+            val login = AppUiState(isReady = true, installOnboardingStep = step,
+                screenStack = listOf(AppDestination.LOGIN))
+            val state = login.copy(isAuthenticated = true, screenStack = listOf(AppDestination.HOME))
+
+            val gated = requireStartupFlow(state, login)
+
+            assertEquals(step, gated.installOnboardingStep)
+            assertEquals(if (step == InstallOnboardingStep.APPEARANCE) AppDestination.HOME
+                else AppDestination.ONBOARDING, gated.currentDestination)
         }
     }
 
@@ -40,35 +59,48 @@ class InstallOnboardingTest {
     }
 
     @Test
-    fun `Telegram credentials finish before appearance and survive session restoration`() {
-        val pending = AppUiState(isReady = true, isAuthenticated = true,
-            userProfile = UserProfile(username = "telegram_user", credentialsSetupRequired = true),
-            installOnboardingStep = InstallOnboardingStep.APPEARANCE,
-            screenStack = listOf(AppDestination.HOME))
+    fun `Telegram credentials finish before every startup step and survive session restoration`() {
+        InstallOnboardingStep.entries.forEach { step ->
+            val pending = AppUiState(isReady = true, isAuthenticated = true,
+                userProfile = UserProfile(username = "telegram_user", credentialsSetupRequired = true),
+                installOnboardingStep = step,
+                screenStack = listOf(AppDestination.HOME))
 
-        val restored = requireStartupFlow(pending)
-        assertEquals(listOf(AppDestination.REGISTRATION), restored.screenStack)
-        assertEquals(AuthStep.REGISTRATION_PROFILE, restored.authStep)
-        assertEquals("telegram_user", restored.registrationForm.username)
-        assertFalse(showsInstallAppearanceDialog(restored))
-        assertEquals(AppDestination.REGISTRATION, requireStartupFlow(restored.copy(
-            screenStack = listOf(AppDestination.SETTINGS),
-        )).currentDestination)
-        val completedCredentials = requireStartupFlow(restored.copy(
-            userProfile = restored.userProfile.copy(credentialsSetupRequired = false),
-        ), restored)
-        assertEquals(AppDestination.HOME, completedCredentials.currentDestination)
-        assertTrue(showsInstallAppearanceDialog(completedCredentials))
+            val restored = requireStartupFlow(pending)
+            assertEquals(listOf(AppDestination.REGISTRATION), restored.screenStack)
+            assertEquals(AuthStep.REGISTRATION_PROFILE, restored.authStep)
+            assertEquals("telegram_user", restored.registrationForm.username)
+            assertFalse(showsInstallAppearanceDialog(restored))
+            assertEquals(AppDestination.REGISTRATION, requireStartupFlow(restored.copy(
+                screenStack = listOf(AppDestination.SETTINGS),
+            )).currentDestination)
+            val password = restored.copy(authStep = AuthStep.REGISTRATION_PASSWORD,
+                registrationForm = restored.registrationForm.copy(password = "password", error = "setup error"))
+            assertEquals(password, requireStartupFlow(password, restored))
+            val completedCredentials = requireStartupFlow(password.copy(
+                userProfile = password.userProfile.copy(credentialsSetupRequired = false),
+            ), password)
+            assertEquals(step, completedCredentials.installOnboardingStep)
+            assertEquals(if (step == InstallOnboardingStep.CONSENT || step == InstallOnboardingStep.ROUTING)
+                AppDestination.ONBOARDING else AppDestination.HOME, completedCredentials.currentDestination)
+            assertEquals(step == InstallOnboardingStep.APPEARANCE, showsInstallAppearanceDialog(completedCredentials))
+        }
     }
 
     @Test
-    fun `appearance waits for login without blocking authentication navigation`() {
-        listOf(AppDestination.LOGIN, AppDestination.REGISTRATION, AppDestination.PASSWORD_RECOVERY,
-            AppDestination.INVITE_DEVICE, AppDestination.SUPPORT).forEach { destination ->
-            val state = AppUiState(isReady = true, installOnboardingStep = InstallOnboardingStep.APPEARANCE,
-                screenStack = listOf(destination))
-            assertEquals(state, requireStartupFlow(state))
-            assertFalse(showsInstallAppearanceDialog(state))
+    fun `losing authentication hides incomplete startup without losing progress`() {
+        listOf(InstallOnboardingStep.CONSENT, InstallOnboardingStep.ROUTING,
+            InstallOnboardingStep.APPEARANCE).forEach { step ->
+            val active = requireStartupFlow(AppUiState(isReady = true, isAuthenticated = true,
+                installOnboardingStep = step, screenStack = listOf(AppDestination.HOME)))
+            val loggedOut = requireStartupFlow(LogoutStateReducer.reduce(active), active)
+            assertEquals(AppDestination.LOGIN, loggedOut.currentDestination)
+            assertEquals(step, loggedOut.installOnboardingStep)
+            assertFalse(showsInstallAppearanceDialog(loggedOut))
+            val stale = requireStartupFlow(active.copy(isAuthenticated = false,
+                screenStack = listOf(AppDestination.ONBOARDING, AppDestination.APP_FILTER)), active)
+            assertEquals(listOf(AppDestination.LOGIN), stale.screenStack)
+            assertEquals(step, stale.installOnboardingStep)
         }
     }
 

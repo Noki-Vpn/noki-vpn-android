@@ -1,6 +1,7 @@
 package com.noki.vpn
 
 import android.os.SystemClock
+import com.noki.vpn.data.BackendException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -162,13 +163,22 @@ internal fun AppUiRuntime.requestPasswordRecoveryCode() {
         is AccountRecoveryStateReducer.CodeRequestTransition.UpdateState -> uiState = transition.state
         is AccountRecoveryStateReducer.CodeRequestTransition.Send -> {
             val email = transition.form.email.trim()
+            val purpose = transition.state.passwordRecoveryPurpose
             val requestKey = "send:$email"
             val workflowOwner = accountRecoveryWorkflow.begin(requestKey)
             val job = scope.launch(start = CoroutineStart.LAZY) {
                 val ownerJob = currentCoroutineContext()[Job]
                     ?: error("Password recovery code request coroutine has no Job")
                 try {
-                    val cooldownSeconds = accountRecoveryWorkflow.sendCode(transition.form.email)
+                    val cooldownSeconds = if (purpose == PasswordRecoveryPurpose.ACCOUNT_SECURITY) {
+                        authSessionCoordinator.run { token ->
+                            accountSecurityCoordinator().sendEmailCode(
+                                context = accountSecurityContext(token), email = email,
+                                currentEmail = null, currentVerificationCode = null,
+                                purpose = "account_password_change",
+                            )
+                        }
+                    } else accountRecoveryWorkflow.sendCode(transition.form.email)
                     if (isCurrentPasswordRecoveryOperation(ownerJob, workflowOwner, requestKey)) {
                         uiState = AccountRecoveryStateReducer.codeRequestSent(uiState, cooldownSeconds, language)
                         startPasswordRecoveryCooldown(cooldownSeconds)
@@ -206,12 +216,21 @@ internal fun AppUiRuntime.submitPasswordRecovery() {
         is AccountRecoveryStateReducer.SubmitTransition.UpdateState -> uiState = transition.state
         is AccountRecoveryStateReducer.SubmitTransition.VerifyCode -> {
             val key = "verify:${transition.form.email.trim()}:${transition.form.verificationCode.trim()}"
+            val purpose = transition.state.passwordRecoveryPurpose
             val workflowOwner = accountRecoveryWorkflow.begin(key)
             val job = scope.launch(start = CoroutineStart.LAZY) {
                 val ownerJob = currentCoroutineContext()[Job]
                     ?: error("Password recovery code verification coroutine has no Job")
                 try {
-                    accountRecoveryWorkflow.verifyCode(transition.form)
+                    if (purpose == PasswordRecoveryPurpose.ACCOUNT_SECURITY) {
+                        authSessionCoordinator.run { token ->
+                            accountSecurityCoordinator().verifyPasswordCode(
+                                accountSecurityContext(token),
+                                transition.form.email.trim(),
+                                transition.form.verificationCode.trim(),
+                            )
+                        }
+                    } else accountRecoveryWorkflow.verifyCode(transition.form)
                     if (isCurrentPasswordRecoveryOperation(ownerJob, workflowOwner, key)) {
                         val staleCooldown = passwordRecoveryCooldownJob
                         passwordRecoveryCooldownJob = null
@@ -248,37 +267,33 @@ internal fun AppUiRuntime.submitPasswordRecovery() {
                 val ownerJob = currentCoroutineContext()[Job]
                     ?: error("Password reset coroutine has no Job")
                 try {
-                    accountRecoveryWorkflow.resetPassword(transition.form)
-                    requireCurrentPasswordRecoveryOperation(ownerJob, workflowOwner, key)
-                    val authenticatedResult = if (purpose == PasswordRecoveryPurpose.ACCOUNT_SECURITY) {
-                        authFlowCoordinator().login(
-                            form = LoginFormState(
-                                email = transition.form.email.trim(),
-                                password = transition.form.password,
-                            ),
-                            baseState = uiState.copy(
-                                passwordRecoveryForm = PasswordRecoveryFormState(),
-                                passwordRecoveryPurpose = PasswordRecoveryPurpose.LOGIN,
-                                accountSecurityState = AccountSecurityUiState(),
-                                inlineMessage = null,
-                            ),
-                            language = language,
-                            deviceId = backendDeviceId.ifBlank { null },
-                            presentation = AuthFlowCoordinator.LoginPresentation(
-                                screenStack = returnStack,
-                                inlineMessage = null,
-                            ),
-                        )
+                    val changedUser = if (purpose == PasswordRecoveryPurpose.ACCOUNT_SECURITY) {
+                        val attempt = authSessionCoordinator.attempt() ?: throw BackendException("auth_required", 401)
+                        authSessionCoordinator.run(attempt) { token ->
+                            accountSecurityCoordinator().changePassword(
+                                context = accountSecurityContext(token),
+                                authAttempt = attempt,
+                                currentPassword = null,
+                                newPassword = transition.form.password,
+                                verificationCode = transition.form.verificationCode.trim(),
+                            ).user
+                        }
                     } else {
+                        accountRecoveryWorkflow.resetPassword(transition.form)
                         null
                     }
-                    if (!isCurrentPasswordRecoveryOperation(ownerJob, workflowOwner, key)) return@launch
-                    if (purpose == PasswordRecoveryPurpose.ACCOUNT_SECURITY) {
-                        if (authenticatedResult != null) {
-                            startAppNotificationPolling()
-                            syncFcmTokenIfAvailable()
-                            maybeUploadLogsAutomatically()
-                        }
+                    requireCurrentPasswordRecoveryOperation(ownerJob, workflowOwner, key)
+                    if (changedUser != null) {
+                        applyAccountSecurityUser(changedUser)
+                        uiState = uiState.copy(
+                            passwordRecoveryForm = PasswordRecoveryFormState(),
+                            passwordRecoveryPurpose = PasswordRecoveryPurpose.LOGIN,
+                            screenStack = returnStack,
+                            inlineMessage = null,
+                        )
+                        startAppNotificationPolling()
+                        syncFcmTokenIfAvailable()
+                        maybeUploadLogsAutomatically()
                     } else {
                         uiState = AccountRecoveryStateReducer.passwordReset(uiState, language)
                     }

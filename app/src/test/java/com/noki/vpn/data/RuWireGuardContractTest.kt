@@ -18,10 +18,35 @@ import okio.Buffer
 import com.noki.vpn.vpn.awaitRuWireGuardReady
 
 class RuWireGuardContractTest {
+    private fun youtubeCascade(): JSONObject = JSONObject()
+        .put("host", "cascade.example.test").put("port", 443)
+        .put("uuid", "11111111-1111-4111-8111-111111111111").put("server_name", "cdn.example.test")
+        .put("public_key", java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 7 }))
+        .put("short_id", "0123456789abcdef")
+
+    @Test
+    fun ruRoutesIgnoreObsoleteYouTubeCredentials() {
+        val root = fixture()
+        val now = Instant.parse(root.getString("frozen_now"))
+        val cascade = youtubeCascade()
+        for (entryId in listOf(null, "88888888-8888-4888-8888-888888888888")) {
+            val expected = expectation(root).copy(entryNodeId = entryId)
+            val payload = JSONObject(root.getJSONObject("ready").toString())
+                .put("entry_node_id", entryId ?: JSONObject.NULL).put("youtube_cascade", cascade)
+            val ready = RuWireGuardSessionJsonParser.parse(payload, expected, now) as BackendRuWireGuardSession.Ready
+            payload.put("youtube_cascade", JSONObject(cascade.toString()).apply { remove("uuid") })
+            assertEquals(ready, RuWireGuardSessionJsonParser.parse(payload, expected, now))
+        }
+        val pending = JSONObject(root.getJSONObject("pending").toString()).put("youtube_cascade", cascade)
+        assertTrue(RuWireGuardSessionJsonParser.parse(pending, expectation(root), now) is BackendRuWireGuardSession.Pending)
+        pending.put("youtube_cascade", JSONObject.NULL)
+        assertTrue(RuWireGuardSessionJsonParser.parse(pending, expectation(root), now) is BackendRuWireGuardSession.Pending)
+    }
+
     @Test
     fun persistentStatusAndExplicitRevokeTargetTheSameSession() = runBlocking {
         val root = fixture()
-        val payload = root.getJSONObject("ready")
+        val payload = root.getJSONObject("ready").put("youtube_cascade", youtubeCascade())
         val current = RuWireGuardSessionJsonParser.parse(payload, expectation(root),
             Instant.parse(root.getString("frozen_now"))) as BackendRuWireGuardSession.Ready
         val requests = mutableListOf<okhttp3.Request>()

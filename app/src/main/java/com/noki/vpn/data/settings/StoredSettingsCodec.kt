@@ -8,9 +8,12 @@ internal class StoredSettingsCodec(
 ) {
     fun decode(raw: String?): StoredSettings {
         if (raw.isNullOrBlank()) return defaults()
+        val json = runCatching { JSONObject(raw) }.getOrElse { return defaults() }
         return runCatching {
-            val json = JSONObject(raw)
-            val stored = decode(json)
+            val decoded = decode(json)
+            val stored = if (json.has("youtubeCascade") && !json.isNull("youtubeCascade")) decoded.copy(
+                profile = RuntimeProfilePolicy.profileAfterServerSelection(decoded.profile),
+            ) else decoded
             if (json.optInt("russianDirectDefaultsVersion") >= 1) stored else stored.copy(selectedPackages = DefaultStoredSettingsFactory.updatedDefaultPackages(
                 stored.selectedPackages, stored.filterMode,
             ))
@@ -66,6 +69,14 @@ internal class StoredSettingsCodec(
         .put("actualCountryCode", settings.userProfile.actualCountryCode)
         .put("trafficUsedGb", settings.userProfile.trafficUsedGb)
         .put("trafficLimitGb", settings.userProfile.trafficLimitGb)
+        .put("primaryDeviceLimit", settings.userProfile.primaryDeviceLimit)
+        .put("sharedTrafficUsedGb", settings.userProfile.sharedTrafficUsedGb)
+        .put("sharedTrafficLimitGb", settings.userProfile.sharedTrafficLimitGb)
+        .put("sharedPeriodStart", settings.userProfile.sharedPeriodStart)
+        .put("sharedPeriodEnd", settings.userProfile.sharedPeriodEnd)
+        .put("sharedFreeOnly", settings.userProfile.sharedFreeOnly)
+        .put("trialTrafficRemainingGb", settings.userProfile.trialTrafficRemainingGb)
+        .put("freeLocationsOnly", settings.userProfile.freeLocationsOnly)
         .put("subscriptionExpiresAt", settings.userProfile.subscriptionExpiresAt ?: "")
         .put("subscriptionStatus", settings.userProfile.subscriptionStatus)
         .put("language", settings.personalizationSettings.language.tag)
@@ -85,6 +96,7 @@ internal class StoredSettingsCodec(
         .put("errorLogsEnabled", settings.advancedSettings.errorLogsEnabled)
         .put("anonymousLogsEnabled", settings.advancedSettings.anonymousLogsEnabled)
         .put("anonymousLogConsentVersion", 1)
+        .put("youtubeDirectDpiEnabled", settings.advancedSettings.youtubeNoAdsEnabled)
         .put("multiHopSettings", encodeMultiHopSettings(settings.advancedSettings.multiHop))
         .put("killSwitchEnabled", settings.advancedSettings.killSwitchEnabled)
         .put("alwaysOnDomains", JSONArray(settings.advancedSettings.alwaysOnDomains))
@@ -161,6 +173,14 @@ internal class StoredSettingsCodec(
             selectedServerCode = json.optString("selectedServerCode", "lv"),
             trafficUsedGb = json.optNullableDouble("trafficUsedGb"),
             trafficLimitGb = json.optNullableDouble("trafficLimitGb"),
+            primaryDeviceLimit = if (json.has("primaryDeviceLimit") && !json.isNull("primaryDeviceLimit")) json.optInt("primaryDeviceLimit") else null,
+            sharedTrafficUsedGb = json.optNullableDouble("sharedTrafficUsedGb"),
+            sharedTrafficLimitGb = json.optNullableDouble("sharedTrafficLimitGb"),
+            sharedPeriodStart = json.optString("sharedPeriodStart").takeIf { it.isNotBlank() },
+            sharedPeriodEnd = json.optString("sharedPeriodEnd").takeIf { it.isNotBlank() },
+            sharedFreeOnly = json.optBoolean("sharedFreeOnly", false),
+            trialTrafficRemainingGb = json.optNullableDouble("trialTrafficRemainingGb"),
+            freeLocationsOnly = json.optBoolean("freeLocationsOnly", false),
             subscriptionExpiresAt = json.optString("subscriptionExpiresAt").takeIf { it.isNotBlank() },
             subscriptionStatus = json.optString("subscriptionStatus", "active"),
         ),
@@ -205,6 +225,7 @@ internal class StoredSettingsCodec(
                 json.optInt("anonymousLogConsentVersion", 0) >= 1 &&
                     json.optBoolean("anonymousLogsEnabled", false),
             multiHop = decodeMultiHopSettings(json.optJSONObject("multiHopSettings")),
+            youtubeNoAdsEnabled = json.optBoolean("youtubeDirectDpiEnabled", false),
             killSwitchEnabled = json.optBoolean("killSwitchEnabled", false),
             alwaysOnDomains = DefaultStoredSettingsFactory.normalizeAlwaysOnDomains(
                 json.optJSONArray("alwaysOnDomains").toStringList(),

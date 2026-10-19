@@ -261,7 +261,7 @@ internal fun AppUiRuntime.exchangeTelegramLogin(idToken: String) {
         authStep = AuthStep.WELCOME,
         screenStack = listOf(AppDestination.HOME),
         telegramLoginState = TelegramLoginState.Authenticated,
-        inlineMessage = tr(language, "Вы вошли в Noki Vpn", "You are signed in to Noki Vpn"),
+        inlineMessage = null,
     )
     recordAppLog("auth", message = "telegram_login_exchange_start")
     launchSessionOperation(
@@ -371,7 +371,6 @@ internal fun AppUiRuntime.submitLogin() {
             val result = authFlowCoordinator().login(
                 form = form,
                 baseState = uiState,
-                language = language,
                 deviceId = backendDeviceId.ifBlank { null },
             )
             loginResponseTimeMs = elapsedSince(loginStartedAt)

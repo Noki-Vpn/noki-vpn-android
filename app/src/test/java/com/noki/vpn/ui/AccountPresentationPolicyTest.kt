@@ -422,7 +422,7 @@ class AccountPresentationPolicyTest {
         dailyStats: List<DailyStats> = emptyList(),
     ): AppUiState = AppUiState(
         userProfile = UserProfile(
-            username = "ykino",
+            username = "user1",
             selectedPlanCode = planCode,
             selectedPlanCodeRaw = rawCode,
             trafficUsedGb = usedGb,

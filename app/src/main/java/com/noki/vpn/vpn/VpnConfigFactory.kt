@@ -13,6 +13,8 @@ import org.json.JSONObject
 object VpnConfigFactory {
     private const val DNS_TAG = "noki-node-dns"
     private const val BOOTSTRAP_TAG = "bootstrap"
+    private const val YOUTUBE_TAG = "youtube-ru"
+    private const val YOUTUBE_RULE = "geosite:youtube"
 
     // The same V2Fly private set used by the server compiler, including CGNAT/reserved ranges.
     private val privateCidrs = listOf(
@@ -22,28 +24,36 @@ object VpnConfigFactory {
         "255.255.255.255/32", "::/128", "::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
     )
 
-    fun build(profile: VlessProfile, advancedSettings: AdvancedSettings, geositeBytes: ByteArray): String {
+    fun build(profile: VlessProfile, advancedSettings: AdvancedSettings, geositeBytes: ByteArray,
+              youtubeConnection: YoutubeConnectionConfig? = null): String {
         require(!advancedSettings.ruRelayEnabled) { "ru_wireguard_session_required" }
         require(profile.multiHop == null && !advancedSettings.multiHop.enabled ||
             VpnProfileValidator.isUsable(profile, advancedSettings)) { "multihop_profile_invalid" }
         return routedConfig(advancedSettings, geositeBytes, JSONArray().put(proxyOutbound(profile)),
-            mtu = VpnTunnelPolicy.MTU, address = "10.10.0.2/32", dnsServers = listOf(VpnTunnelPolicy.DNS_SERVER)).toString(2)
+            mtu = VpnTunnelPolicy.MTU, address = "10.10.0.2/32", dnsServers = listOf(VpnTunnelPolicy.DNS_SERVER),
+            youtubeConnection = youtubeConnection).toString(2)
     }
 
     fun buildWireGuard(config: BackendRuWireGuardConfig, privateKey: ByteArray,
-                       advancedSettings: AdvancedSettings, geositeBytes: ByteArray): String {
+                       advancedSettings: AdvancedSettings, geositeBytes: ByteArray,
+                       youtubeConnection: YoutubeConnectionConfig? = null): String {
         require(advancedSettings.ruRelayEnabled) { "wireguard_requires_ru_relay" }
+        val endpoints = JSONArray().put(wireGuardEndpoint(config, privateKey, "proxy", keepalive = 5))
+        return routedConfig(advancedSettings, geositeBytes, JSONArray(), config.mtu, config.address, config.dns,
+            youtubeConnection, endpoints).toString(2)
+    }
+
+    private fun wireGuardEndpoint(config: BackendRuWireGuardConfig, privateKey: ByteArray,
+                                  tag: String, keepalive: Int): JSONObject {
         require(privateKey.size == 32 && privateKey.any { it != 0.toByte() } && config.dns.isNotEmpty()) { "wireguard_config_invalid" }
         val peerHost = config.endpoint.substringBeforeLast(':')
         val peerPort = config.endpoint.substringAfterLast(':').toIntOrNull()
         require(peerHost.isNotBlank() && peerPort != null && peerPort in 1..65535) { "wireguard_config_invalid" }
-        val endpoint = JSONObject().put("type", "wireguard").put("tag", "proxy").put("system", false)
+        return JSONObject().put("type", "wireguard").put("tag", tag).put("system", false)
             .put("address", JSONArray().put(config.address)).put("private_key", Base64.getEncoder().encodeToString(privateKey))
             .put("mtu", config.mtu).put("peers", JSONArray().put(JSONObject()
                 .put("address", peerHost).put("port", peerPort).put("public_key", config.serverPublicKey)
-                .put("allowed_ips", JSONArray(config.allowedIps)).put("persistent_keepalive_interval", 5)))
-        return routedConfig(advancedSettings, geositeBytes, JSONArray(), config.mtu, config.address, config.dns)
-            .put("endpoints", JSONArray().put(endpoint)).toString(2)
+                .put("allowed_ips", JSONArray(config.allowedIps)).put("persistent_keepalive_interval", keepalive)))
     }
 
     fun buildProbe(profile: VlessProfile): String = JSONObject()
@@ -55,16 +65,18 @@ object VpnConfigFactory {
         .toString(2)
 
     private fun routedConfig(settings: AdvancedSettings, geositeBytes: ByteArray, outbounds: JSONArray,
-                              mtu: Int, address: String, dnsServers: List<String>): JSONObject {
+                              mtu: Int, address: String, dnsServers: List<String>,
+                              youtubeConnection: YoutubeConnectionConfig?, endpoints: JSONArray = JSONArray()): JSONObject {
         val normalized = DomainRulePolicy.normalizeSettings(settings)
-        val selectors = (normalized.alwaysOnDomains + normalized.bypassDomains + DomainRulePolicy.RUSSIAN_RESOURCES_RULE)
+        val selectors = (normalized.alwaysOnDomains + normalized.bypassDomains + DomainRulePolicy.RUSSIAN_RESOURCES_RULE +
+            if (normalized.youtubeNoAdsEnabled) listOf(YOUTUBE_RULE) else emptyList())
             .filter { it.startsWith("geosite:") }.toSet()
         val resolved = GeositeAsset.resolveDomains(geositeBytes, selectors)
         val russian = domainMatch(listOf(DomainRulePolicy.RUSSIAN_RESOURCES_RULE), resolved)
             ?: throw IllegalArgumentException("geosite_category_ru_empty")
         val rules = JSONArray()
             .put(JSONObject().put("inbound", JSONArray().put("tun")).put("action", "sniff")
-                .put("sniffer", JSONArray().put("http").put("tls")))
+                .put("sniffer", JSONArray().put("http").put("tls").apply { if (normalized.youtubeNoAdsEnabled) put("quic") }))
             .put(JSONObject().put("port", JSONArray().put(53)).put("action", "hijack-dns"))
             .put(JSONObject().put("port", JSONArray().put(853)).put("network", JSONArray().put("tcp").put("udp"))
                 .put("action", "reject"))
@@ -72,9 +84,28 @@ object VpnConfigFactory {
                 .put(JSONObject().put("domain_suffix", JSONArray().put("cloudflare-dns.com").put("one.one.one.one")))
                 .put(JSONObject().put("port", JSONArray().put(443)))
                 .put(JSONObject().put("network", JSONArray().put("tcp")))).put("action", "reject"))
-            .put(route(JSONObject(russian.toString()), "direct"))
-            .put(route(JSONObject().put("domain_suffix", JSONArray().put("googleapis.cn")), "direct"))
             .put(route(JSONObject().put("ip_cidr", JSONArray(privateCidrs)), "direct"))
+        val dnsRules = JSONArray()
+        if (normalized.youtubeNoAdsEnabled) {
+            val youtube = domainMatch(listOf(YOUTUBE_RULE), resolved)
+                ?: throw IllegalArgumentException("geosite_youtube_empty")
+            rules.put(JSONObject().put("type", "logical").put("mode", "and").put("rules", JSONArray()
+                .put(JSONObject(youtube.toString())).put(JSONObject().put("ip_version", 6))).put("action", "reject"))
+            rules.put(networkDomainMatch(youtube, "udp", 443).put("action", "reject"))
+            val tcp = networkDomainMatch(youtube, "tcp")
+            rules.put(if (youtubeConnection == null) tcp.put("action", "reject") else route(tcp, YOUTUBE_TAG))
+            dnsRules.put(JSONObject(youtube.toString()).put("server", DNS_TAG))
+            when (youtubeConnection) {
+                is YoutubeConnectionConfig.WireGuard -> endpoints.put(wireGuardEndpoint(
+                    youtubeConnection.wireguard, youtubeConnection.privateKey, YOUTUBE_TAG, keepalive = 0))
+                is YoutubeConnectionConfig.SelectedTransport -> outbounds.put(
+                    proxyOutbound(youtubeConnection.profile).put("tag", YOUTUBE_TAG))
+                null -> Unit
+            }
+        }
+        dnsRules.put(JSONObject(russian.toString()).put("server", BOOTSTRAP_TAG))
+        rules.put(route(JSONObject(russian.toString()), "direct"))
+            .put(route(JSONObject().put("domain_suffix", JSONArray().put("googleapis.cn")), "direct"))
         domainMatch(normalized.bypassDomains.filterNot { it == DomainRulePolicy.RUSSIAN_RESOURCES_RULE }, resolved)
             ?.let { rules.put(route(it, "direct")) }
         rules.put(JSONObject().put("ip_version", 6).put("action", "reject"))
@@ -97,14 +128,20 @@ object VpnConfigFactory {
             .put("outbounds", outbounds.put(JSONObject().put("type", "direct").put("tag", "direct")
                 .put("domain_resolver", resolver(BOOTSTRAP_TAG))))
             .put("dns", JSONObject().put("servers", dns).put("final", DNS_TAG).put("strategy", "ipv4_only")
-                .put("reverse_mapping", true).put("rules", JSONArray().put(JSONObject(russian.toString()).put("server", BOOTSTRAP_TAG))))
+                .put("reverse_mapping", true).put("rules", dnsRules))
             .put("route", JSONObject().put("rules", rules).put("final", "proxy").put("auto_detect_interface", true)
                 .put("default_domain_resolver", resolver(DNS_TAG)))
+            .apply { if (endpoints.length() > 0) put("endpoints", endpoints) }
     }
 
     private fun route(match: JSONObject, outbound: String): JSONObject = match.put("action", "route").put("outbound", outbound)
     private fun bootstrapServer(): JSONObject = JSONObject().put("type", "local").put("tag", BOOTSTRAP_TAG)
     private fun resolver(server: String): JSONObject = JSONObject().put("server", server).put("strategy", "ipv4_only")
+
+    private fun networkDomainMatch(domains: JSONObject, network: String, port: Int? = null): JSONObject =
+        JSONObject().put("type", "logical").put("mode", "and").put("rules", JSONArray()
+            .put(JSONObject(domains.toString())).put(JSONObject().put("network", JSONArray().put(network))
+                .apply { port?.let { put("port", JSONArray().put(it)) } }))
 
     private fun domainMatch(selectors: List<String>, geosite: Map<String, JSONObject>): JSONObject? {
         val fields = linkedMapOf<String, LinkedHashSet<String>>()

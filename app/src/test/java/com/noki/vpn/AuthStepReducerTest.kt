@@ -162,11 +162,11 @@ class AuthStepReducerTest {
         val state = AppUiState(
             authStep = AuthStep.REGISTRATION_PASSWORD,
             registrationForm = RegistrationFormState(
-                username = "ykino",
+                username = "user1",
                 email = "user@example.com",
                 verificationCode = "1234",
-                password = "00000000",
-                passwordRepeat = "00000000",
+                password = "example1",
+                passwordRepeat = "example1",
             ),
         )
 

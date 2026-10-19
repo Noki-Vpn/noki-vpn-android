@@ -237,6 +237,14 @@ data class UserProfile(
     val trafficLimitGb: Double? = null,
     val subscriptionExpiresAt: String? = null,
     val subscriptionStatus: String = "active",
+    val primaryDeviceLimit: Int? = null,
+    val sharedTrafficUsedGb: Double? = null,
+    val sharedTrafficLimitGb: Double? = null,
+    val sharedPeriodStart: String? = null,
+    val sharedPeriodEnd: String? = null,
+    val sharedFreeOnly: Boolean = false,
+    val trialTrafficRemainingGb: Double? = null,
+    val freeLocationsOnly: Boolean = false,
     val credentialsSetupRequired: Boolean = false,
 )
 
@@ -274,6 +282,7 @@ data class AdvancedSettings(
     val connectionLogsEnabled: Boolean = true,
     val errorLogsEnabled: Boolean = true,
     val anonymousLogsEnabled: Boolean = false,
+    val youtubeNoAdsEnabled: Boolean = false,
     val killSwitchEnabled: Boolean = false,
     val alwaysOnDomains: List<String> = emptyList(),
     val bypassDomains: List<String> = emptyList(),
@@ -320,6 +329,7 @@ data class DeviceSession(
     val isOnline: Boolean,
     val isActive: Boolean = true,
     val accessRole: String = "owner",
+    val trafficPool: String = "primary",
 )
 
 @Immutable

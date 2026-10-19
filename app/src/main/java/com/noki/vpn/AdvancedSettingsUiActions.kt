@@ -76,6 +76,14 @@ internal fun AppUiRuntime.applyAppRoutingSettings() {
     vpnCommands.restart()
 }
 
+internal fun AppUiRuntime.setYoutubeNoAdsEnabled(enabled: Boolean) {
+    val next = AdvancedSettingsStateReducer.setYoutubeNoAdsEnabled(uiState, enabled)
+    if (next == uiState) return
+    applyAndPersist(next)
+    if (uiState.connectionState == VpnConnectionState.CONNECTED ||
+        uiState.connectionState == VpnConnectionState.CONNECTING) vpnCommands.restart()
+}
+
 internal fun AppUiRuntime.setMultiHop(settings: MultiHopSettings) {
     val next = AdvancedSettingsStateReducer.setMultiHop(uiState, settings)
     if (next == uiState) return

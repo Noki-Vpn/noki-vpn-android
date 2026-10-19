@@ -28,6 +28,14 @@ internal fun JSONObject.toBackendSubscription(): BackendSubscription =
         planName = optBackendString("plan_name"),
         planTier = optBackendString("plan_tier"),
         planBadgeColor = optBackendString("plan_badge_color"),
+        primaryDeviceLimit = if (has("primary_device_limit") && !isNull("primary_device_limit")) optInt("primary_device_limit") else null,
+        sharedTrafficUsedGb = optBackendDouble("shared_traffic_used_gb"),
+        sharedTrafficLimitGb = optBackendDouble("shared_traffic_limit_gb"),
+        sharedPeriodStart = optBackendString("shared_period_start"),
+        sharedPeriodEnd = optBackendString("shared_period_end"),
+        sharedFreeOnly = optBoolean("shared_free_only", false),
+        trialTrafficRemainingGb = optBackendDouble("trial_traffic_remaining_gb"),
+        freeLocationsOnly = optBoolean("free_locations_only", false),
     )
 
 internal fun JSONObject.toBackendVpnAccess(): BackendVpnAccess =
@@ -57,6 +65,7 @@ internal fun JSONObject.toBackendDevice(): BackendDevice =
         accessRole = optString("access_role", "owner"),
         isActive = optBoolean("is_active", true),
         lastSeenAt = optString("last_seen_at").takeIf { it.isNotBlank() },
+        trafficPool = optString("traffic_pool", "primary"),
     )
 
 internal fun JSONObject.toBackendIncyDevice(): BackendIncyDevice =
@@ -65,6 +74,7 @@ internal fun JSONObject.toBackendIncyDevice(): BackendIncyDevice =
         name = getString("name"),
         status = optString("status", "waiting"),
         isSlotActive = optBoolean("is_slot_active", true),
+        trafficPool = optString("traffic_pool", "primary"),
         hwidFingerprint = optBackendString("hwid_fingerprint"),
         deviceOs = optBackendString("device_os"),
         osVersion = optBackendString("os_version"),
@@ -140,6 +150,7 @@ internal fun JSONObject.toBackendPlan(): BackendPlan =
         deviceLimit = optInt("device_limit", 1),
         trafficLimitGb = optBackendDouble("traffic_limit_gb"),
         speedProfile = optString("speed_profile"),
+        sharedTrafficLimitGb = optBackendDouble("shared_traffic_limit_gb"),
         features = optJSONArray("features").toBackendStringList(),
         headline = optBackendString("headline"),
         badgeColor = optBackendString("badge_color"),
@@ -296,7 +307,7 @@ internal object RuWireGuardSessionJsonParser {
         else -> throw IllegalArgumentException("ru_relay_selection_invalid")
     }
 
-    private fun parseConfig(json: JSONObject): BackendRuWireGuardConfig {
+    internal fun parseConfig(json: JSONObject): BackendRuWireGuardConfig {
         val endpoint = json.getString("endpoint")
         val host = endpoint.substringBeforeLast(':', "")
         val port = endpoint.substringAfterLast(':', "").toIntOrNull()
@@ -540,6 +551,40 @@ internal object BackendTemporaryVpnResponseParser {
     }
 }
 
+internal object BackendYoutubeAccessJsonParser {
+    fun parse(json: JSONObject, now: Instant = Instant.now()): BackendYoutubeAccess {
+        require(json.opt("version") == 1) { "youtube_access_version_invalid" }
+        val mode = json.getString("mode")
+        val status = json.getString("status")
+        require(mode in setOf("wireguard", "selected_transport") && status in setOf("pending", "ready", "blocked")) {
+            "youtube_access_state_invalid"
+        }
+        val grantId = canonicalRuUuid(json.getString("grant_id"))
+        val generation = json.opt("generation") as? Int
+        require(generation != null && generation > 0) { "youtube_access_generation_invalid" }
+        val expires = Instant.parse(json.getString("expires_at")).toEpochMilli()
+        require(status == "blocked" || expires > now.toEpochMilli()) { "youtube_access_expired" }
+        val revokeToken = json.getString("revoke_token")
+        require(revokeToken.isNotBlank()) { "youtube_access_revoke_invalid" }
+        val readyWg = status == "ready" && mode == "wireguard"
+        val readySelected = status == "ready" && mode == "selected_transport"
+        require((!json.isNull("wireguard")) == readyWg && (!json.isNull("public_key_id")) == readyWg &&
+            (!json.isNull("endpoint")) == readySelected && (!json.isNull("vpn_secret")) == readySelected) {
+            "youtube_access_payload_invalid"
+        }
+        val endpoint = if (readySelected) BackendVpnSessionJsonParser.parseEndpointCandidate(json.getJSONObject("endpoint")) else null
+        if (endpoint != null) require(EndpointSecurityPolicy.isAllowedCandidate(endpoint) && !endpoint.canaryOnly) {
+            "youtube_access_endpoint_invalid"
+        }
+        val secret = if (readySelected) json.getString("vpn_secret") else null
+        if (secret != null) require(secret.isNotBlank()) { "youtube_access_credential_invalid" }
+        return BackendYoutubeAccess(mode, status, grantId, generation, expires, revokeToken,
+            if (readyWg) canonicalRuUuid(json.getString("public_key_id")) else null,
+            if (readyWg) RuWireGuardSessionJsonParser.parseConfig(json.getJSONObject("wireguard")) else null,
+            endpoint, secret)
+    }
+}
+
 internal object BackendVpnSessionJsonParser {
     fun parse(json: JSONObject): BackendVpnSession {
         val routeMode = json.optString("route_mode", "direct")
@@ -622,7 +667,7 @@ internal object BackendVpnSessionJsonParser {
         }
     }
 
-    private fun parseEndpointCandidate(item: JSONObject): BackendEndpointCandidate = BackendEndpointCandidate(
+    internal fun parseEndpointCandidate(item: JSONObject): BackendEndpointCandidate = BackendEndpointCandidate(
         code = item.getString("code"),
         nodeId = item.optBackendString("node_id"),
         label = item.optString("label"),

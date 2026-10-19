@@ -64,15 +64,28 @@ class PrimaryNavigationPolicyTest {
 
     @Test
     fun devicesPullRefreshLoadsBothNativeAndIncyDataWithoutProbingLatency() {
-        val requests = mutableListOf<String>()
+        for (destination in listOf(AppDestination.DEVICES, AppDestination.EXTRA_DEVICES)) {
+            val requests = mutableListOf<String>()
+            refreshVisibleScreenData(
+                destination = destination,
+                refreshAllData = { latency -> requests += "bootstrap:$latency" },
+                refreshIncyDevices = { requests += "incy" },
+            )
+            assertEquals(destination.name, listOf("bootstrap:false", "incy"), requests)
+        }
+    }
 
-        refreshVisibleScreenData(
-            destination = AppDestination.DEVICES,
-            refreshAllData = { latency -> requests += "bootstrap:$latency" },
-            refreshIncyDevices = { requests += "incy" },
+    @Test
+    fun additionalDevicesRemainADetailOfTheDevicesScreen() {
+        val destination = AppDestination.EXTRA_DEVICES
+        assertFalse(PrimaryNavigationPolicy.isTopLevelDestination(destination))
+        assertTrue(PrimaryNavigationPolicy.showsSharedNavigation(true, destination))
+        assertFalse(PrimaryNavigationPolicy.showsSharedNavigation(false, destination))
+        assertEquals(2, PrimaryNavigationPolicy.selectedTabIndex(destination))
+        assertEquals(
+            listOf(AppDestination.DEVICES, destination),
+            navigationStackAfterOpen(listOf(AppDestination.DEVICES), destination, false),
         )
-
-        assertEquals(listOf("bootstrap:false", "incy"), requests)
     }
 
     @Test

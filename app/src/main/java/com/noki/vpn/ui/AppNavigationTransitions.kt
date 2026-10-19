@@ -187,6 +187,7 @@ internal fun AppDestination.navigationOrder(): Int {
         AppDestination.SUPPORT -> 10
         AppDestination.PERSONALIZATION -> 11
         AppDestination.DEVICES -> 12
+        AppDestination.EXTRA_DEVICES -> 13
         AppDestination.SPLASH,
         AppDestination.ONBOARDING,
         AppDestination.LOGIN,

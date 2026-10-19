@@ -65,7 +65,6 @@ internal fun AppUiRuntime.updateRegistrationEmail(value: String) {
 
 internal fun AppUiRuntime.scheduleRegistrationUsernameAvailabilityCheck() {
     if (uiState.authStep != AuthStep.REGISTRATION_PROFILE) return
-    if (uiState.isAuthenticated && uiState.userProfile.credentialsSetupRequired) return
     val language = uiState.personalizationSettings.language
     val form = uiState.registrationForm
     val username = form.username.trim()
@@ -90,7 +89,7 @@ internal fun AppUiRuntime.scheduleRegistrationUsernameAvailabilityCheck() {
                 registrationForm = beforeCheckForm.copy(isLoading = true, error = null),
                 inlineMessage = null,
             )
-            val available = backendApi.checkRegistrationUsernameAvailable(username)
+            val available = registrationUsernameAvailable(username)
             val latestForm = uiState.registrationForm
             if (
                 registrationUsernameCheckJob === ownerJob &&
@@ -142,6 +141,13 @@ internal fun AppUiRuntime.scheduleRegistrationUsernameAvailabilityCheck() {
     registrationUsernameCheckJob = job
     job.start()
 }
+
+private suspend fun AppUiRuntime.registrationUsernameAvailable(username: String): Boolean =
+    if (uiState.isAuthenticated && uiState.userProfile.credentialsSetupRequired) {
+        authSessionCoordinator.run { token -> backendApi.checkRegistrationUsernameAvailable(username, token) }
+    } else {
+        backendApi.checkRegistrationUsernameAvailable(username)
+    }
 
 internal fun AppUiRuntime.updateRegistrationVerificationCode(value: String) {
     val staleVerification = registrationCodeVerificationJob
@@ -371,23 +377,13 @@ internal fun AppUiRuntime.nextRegistrationStep() {
         val staleUsernameCheck = registrationUsernameCheckJob
         registrationUsernameCheckJob = null
         staleUsernameCheck?.cancel()
-        if (uiState.isAuthenticated && uiState.userProfile.credentialsSetupRequired) {
-            registrationWorkflow.invalidate()
-            val transition = AuthStepReducer.nextRegistrationStep(
-                current = uiState.copy(registrationForm = form.copy(username = username)),
-                language = language,
-                isValidEmail = ::isValidEmailAddress,
-            )
-            if (transition is AuthStepReducer.RegistrationStepTransition.UpdateState) uiState = transition.state
-            return
-        }
         val requestKey = "username-submit:$username"
         val workflowOwner = registrationWorkflow.begin(requestKey)
         val job = scope.launch(start = CoroutineStart.LAZY) {
             val ownerJob = currentCoroutineContext()[Job]
                 ?: error("Registration username submit coroutine has no Job")
             try {
-                val available = backendApi.checkRegistrationUsernameAvailable(username)
+                val available = registrationUsernameAvailable(username)
                 val latestForm = uiState.registrationForm
                 if (
                     registrationUsernameCheckJob !== ownerJob ||
@@ -476,11 +472,14 @@ internal fun AppUiRuntime.nextRegistrationStep() {
                     onSuccess = { user ->
                         cancelBackendRefresh()
                         applyAccountSecurityUser(user)
+                        launchBackendRefresh(BackendRefreshTrigger.Initial)
                     },
                     onFailure = { error ->
                         uiState = RegistrationStateReducer.registrationFailed(
                             current = uiState,
                             error = AppErrorMapper.readableRegistrationError(language, error),
+                            usernameConflict = error is BackendException && error.statusCode == 409 &&
+                                error.message.contains("username", ignoreCase = true),
                         )
                         if (error is BackendException && error.statusCode == 409 &&
                             error.message == "Credentials setup is not required"
@@ -498,7 +497,6 @@ internal fun AppUiRuntime.nextRegistrationStep() {
                     authFlowCoordinator().register(
                         form = transition.form,
                         baseState = transition.state,
-                        language = language,
                         deviceId = backendDeviceId.ifBlank { null },
                     )
                 },

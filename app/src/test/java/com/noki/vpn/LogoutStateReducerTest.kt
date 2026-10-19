@@ -2,6 +2,7 @@ package com.noki.vpn
 
 import com.noki.vpn.data.UserProfile
 import com.noki.vpn.data.RuForeignNode
+import com.noki.vpn.data.VlessProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -16,6 +17,7 @@ class LogoutStateReducerTest {
             screenStack = listOf(AppDestination.REGISTRATION),
             authStep = AuthStep.REGISTRATION_PROFILE,
             registrationForm = RegistrationFormState(password = "secret123", passwordRepeat = "secret123"),
+            profile = VlessProfile(uuid = "primary-secret"),
         )
 
         val loggedOut = AuthStepReducer.requireCredentialsSetup(LogoutStateReducer.reduce(pending), pending)
@@ -24,6 +26,7 @@ class LogoutStateReducerTest {
         assertFalse(loggedOut.userProfile.credentialsSetupRequired)
         assertEquals(listOf(AppDestination.LOGIN), loggedOut.screenStack)
         assertEquals(RegistrationFormState(), loggedOut.registrationForm)
+        assertEquals("", loggedOut.profile.uuid)
     }
 
     @Test

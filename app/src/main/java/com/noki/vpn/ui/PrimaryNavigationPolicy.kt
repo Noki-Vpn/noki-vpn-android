@@ -28,7 +28,8 @@ internal object PrimaryNavigationPolicy {
         AppDestination.SECURITY,
         AppDestination.SUPPORT,
         AppDestination.PERSONALIZATION,
-        AppDestination.DEVICES -> true
+        AppDestination.DEVICES,
+        AppDestination.EXTRA_DEVICES -> true
         else -> false
     }
 

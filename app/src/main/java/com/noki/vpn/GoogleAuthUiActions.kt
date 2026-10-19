@@ -51,7 +51,7 @@ private fun AppUiRuntime.exchangeGoogleLogin(idToken: String) {
         authStep = AuthStep.WELCOME,
         screenStack = listOf(AppDestination.HOME),
         loginForm = uiState.loginForm.copy(isLoading = false, error = null),
-        inlineMessage = tr(language, "Вы вошли в Noki Vpn", "You are signed in to Noki Vpn"),
+        inlineMessage = null,
     )
     recordAppLog("auth", message = "google_login_exchange_start")
     launchSessionOperation(

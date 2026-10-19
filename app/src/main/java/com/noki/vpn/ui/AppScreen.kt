@@ -80,7 +80,7 @@ internal fun refreshVisibleScreenData(
     refreshIncyDevices: () -> Unit,
 ) {
     refreshAllData(destination == AppDestination.HOME)
-    if (destination == AppDestination.DEVICES) refreshIncyDevices()
+    if (destination == AppDestination.DEVICES || destination == AppDestination.EXTRA_DEVICES) refreshIncyDevices()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -414,9 +414,10 @@ fun AppScreen(
                             liveGlassEnabled = liveGlassEnabled,
                             showBackground = false,
                         )
-                        AppDestination.DEVICES -> DevicesScreen(
+                        AppDestination.DEVICES, AppDestination.EXTRA_DEVICES -> DevicesScreen(
                             state = state,
                             viewModel = viewModel,
+                            showAdditional = destination == AppDestination.EXTRA_DEVICES,
                             showBackground = false,
                             sharedBackdrop = sharedBackgroundBackdrop,
                             deviceRowsBackdrop = sharedBackgroundBackdrop,

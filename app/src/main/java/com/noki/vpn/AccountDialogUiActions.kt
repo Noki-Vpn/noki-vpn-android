@@ -58,11 +58,16 @@ internal fun AppUiRuntime.dismissDialog() {
     val activeDialog = uiState.dialog
     if (
         (activeDialog is AppDialog.DeleteAccount && activeDialog.isDeleting) ||
-        (activeDialog is AppDialog.UnlinkTelegram && activeDialog.isUnlinking)
+        (activeDialog is AppDialog.UnlinkTelegram && activeDialog.isUnlinking) ||
+        (activeDialog is AppDialog.MoveDevice && activeDialog.isLoading)
     ) {
         return
     }
-    uiState = uiState.copy(dialog = null)
+    uiState = uiState.copy(dialog = if (activeDialog is AppDialog.MoveDevice && !activeDialog.isIncy) {
+        if (uiState.devices.any { it.id == activeDialog.deviceId && it.isCurrent }) {
+            AppDialog.RenameDevice(activeDialog.deviceId)
+        } else AppDialog.RemoveDevice(activeDialog.deviceId)
+    } else null)
 }
 
 internal fun AppUiRuntime.confirmDialog() {
@@ -71,6 +76,7 @@ internal fun AppUiRuntime.confirmDialog() {
         AppDialog.LogoutOthers -> confirmLogoutOthersDialog()
         is AppDialog.RemoveDevice -> confirmRemoveDeviceDialog(dialog.deviceId)
         is AppDialog.RenameDevice -> Unit
+        is AppDialog.MoveDevice -> confirmDeviceTrafficPoolChange(dialog)
         AppDialog.AccessDenied -> dismissDialog()
         AppDialog.FreeTrafficLimitReached -> {
             uiState = uiState.copy(dialog = null, inlineMessage = null)

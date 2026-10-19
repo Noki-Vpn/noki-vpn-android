@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.Image
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -27,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -129,6 +132,8 @@ internal fun DevicesConfirmDialog(
     scale: Float,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
+    isLoading: Boolean = false,
+    error: String? = null,
 ) {
     Box(
         modifier = Modifier
@@ -223,6 +228,15 @@ internal fun DevicesConfirmDialog(
                 )
             }
 
+            if (!error.isNullOrBlank()) DevicesText(
+                text = error,
+                fontSize = 11f,
+                lineHeight = 15f,
+                color = DevicesError,
+                scale = scale,
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 4,
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(devicesDp(10f, scale)),
@@ -230,6 +244,7 @@ internal fun DevicesConfirmDialog(
             ) {
                 DevicesDialogButton(
                     text = dismissText,
+                    enabled = !isLoading,
                     scale = scale,
                     isPrimary = false,
                     modifier = Modifier.weight(1f),
@@ -237,6 +252,7 @@ internal fun DevicesConfirmDialog(
                 )
                 DevicesDialogButton(
                     text = confirmText,
+                    enabled = !isLoading,
                     scale = scale,
                     isPrimary = true,
                     modifier = Modifier.weight(1f),
@@ -254,6 +270,7 @@ internal fun DevicesDialogButton(
     isPrimary: Boolean,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    leadingIcon: ImageVector? = null,
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(devicesDp(18f, scale))
@@ -289,15 +306,24 @@ internal fun DevicesDialogButton(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        DevicesText(
-            text = text,
-            fontSize = 14f,
-            lineHeight = 16.8f,
-            color = textColor,
-            scale = scale,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier,
-            textAlign = TextAlign.Center,
-        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(devicesDp(8f, scale)),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            leadingIcon?.let {
+                Icon(it, contentDescription = null, tint = textColor,
+                    modifier = Modifier.size(devicesDp(18f, scale)))
+            }
+            DevicesText(
+                text = text,
+                fontSize = 14f,
+                lineHeight = 16.8f,
+                color = textColor,
+                scale = scale,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }

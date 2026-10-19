@@ -42,7 +42,7 @@ internal class BackendAuthClient(
         postJson("/auth/email-code/verify", payload)
     }
 
-    suspend fun checkRegistrationUsernameAvailable(username: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun checkRegistrationUsernameAvailable(username: String, token: String? = null): Boolean = withContext(Dispatchers.IO) {
         val url = jsonApi.apiUrl("/auth/registration/username/check")
             .toHttpUrl()
             .newBuilder()
@@ -50,6 +50,7 @@ internal class BackendAuthClient(
             .build()
         val request = Request.Builder()
             .url(url)
+            .apply { token?.let { header("Authorization", "Bearer $it") } }
             .get()
             .build()
         jsonApi.execute(request).optBoolean("available", false)

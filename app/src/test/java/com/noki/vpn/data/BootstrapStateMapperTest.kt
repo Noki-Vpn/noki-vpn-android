@@ -2,8 +2,12 @@ package com.noki.vpn.data
 
 import com.noki.vpn.AppUiState
 import com.noki.vpn.SettingsPreparedStatePolicy
+import com.noki.vpn.VpnStartStateReducer
 import com.noki.vpn.ui.AccountPresentationPolicy
 import com.noki.vpn.ui.AccountPlanTitleStyle
+import com.noki.vpn.ui.deviceLimit
+import com.noki.vpn.ui.primaryDeviceCount
+import com.noki.vpn.IncyDevicesUiState
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,6 +15,41 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BootstrapStateMapperTest {
+    @Test
+    fun `exhausted trial keeps Free location connections available`() {
+        val state = AppUiState(isAuthenticated = true, userProfile = UserProfile(
+            selectedPlanCode = PlanCode.FREE, selectedPlanCodeRaw = "free",
+            subscriptionStatus = "active", trafficUsedGb = 3.0, trafficLimitGb = 3.0,
+            freeLocationsOnly = true,
+        ))
+        assertFalse(VpnStartStateReducer.freeTrafficLimitReached(state))
+        assertFalse(VpnStartStateReducer.freeTrafficLimitReached(
+            state.copy(userProfile = state.userProfile.copy(freeLocationsOnly = false)),
+        ))
+        assertTrue(VpnStartStateReducer.freeTrafficLimitReached(state.copy(
+            userProfile = state.userProfile.copy(subscriptionStatus = "limited", freeLocationsOnly = false),
+        )))
+    }
+
+    @Test
+    fun `primary device counter includes INCY reservations and uses the assigned server limit`() {
+        val state = AppUiState(
+            userProfile = UserProfile(primaryDeviceLimit = 5),
+            plans = emptyList(),
+            devices = listOf(
+                DeviceSession("inactive", "Inactive", "Android", false, false, isActive = false),
+                DeviceSession("invited", "Invited", "Android", false, false, accessRole = "invited"),
+                DeviceSession("shared", "Shared", "Android", true, true, trafficPool = "shared"),
+            ),
+            incyDevices = IncyDevicesUiState(devices = listOf(
+                BackendIncyDevice("reserved", "Reserved", isSlotActive = false),
+                BackendIncyDevice("external-shared", "Shared", trafficPool = "shared"),
+            )),
+        )
+        assertEquals(2, primaryDeviceCount(state))
+        assertEquals(5, deviceLimit(state))
+    }
+
     @Test
     fun `bootstrap credentials marker replaces the saved marker in both directions`() {
         for (required in listOf(true, false)) {
@@ -42,6 +81,7 @@ class BootstrapStateMapperTest {
             customName = "Рабочий телефон",
             platform = "android",
             accessRole = "owner",
+            trafficPool = "shared",
             isActive = true,
             lastSeenAt = null,
         )
@@ -54,6 +94,8 @@ class BootstrapStateMapperTest {
         ).single()
 
         assertEquals("Рабочий телефон", row.title)
+        assertEquals("shared", row.trafficPool)
+        assertEquals("owner", row.accessRole)
         assertTrue(row.subtitle.startsWith("Google Pixel 6 • "))
         assertEquals("Google Pixel 6", AndroidDeviceInfo.displayName("google Pixel 6"))
         assertEquals("Unknown MODEL-123", AndroidDeviceInfo.displayName("Unknown MODEL-123"))
@@ -132,6 +174,14 @@ class BootstrapStateMapperTest {
         val account = AccountPresentationPolicy.prepare(state)
 
         assertEquals("Partner Special", settings.planTitle)
+        assertEquals(5, restored.userProfile.primaryDeviceLimit)
+        assertEquals(2048.0, restored.userProfile.sharedTrafficLimitGb!!, 0.0)
+        assertEquals(124.0, restored.userProfile.sharedTrafficUsedGb!!, 0.0)
+        assertEquals("2026-10-01T00:00:00Z", restored.userProfile.sharedPeriodStart)
+        assertEquals("2026-11-01T00:00:00Z", restored.userProfile.sharedPeriodEnd)
+        assertTrue(restored.userProfile.sharedFreeOnly)
+        assertEquals(0.0, restored.userProfile.trialTrafficRemainingGb!!, 0.0)
+        assertTrue(restored.userProfile.freeLocationsOnly)
         assertEquals("Partner Special", account.planTitle)
         assertEquals(0xFF12AABBL, account.planColorArgb)
         assertEquals("О тарифе", settings.planActionLabel)
@@ -157,7 +207,10 @@ class BootstrapStateMapperTest {
                     "status":"active", "plan_code":"partner-yearly",
                     "plan_name":"Partner Special", "plan_tier":"partner",
                     "plan_badge_color":"#12AABB", "traffic_used_gb":25,
-                    "traffic_limit_gb":800, "expires_at":"2027-08-30T00:00:00Z"
+                    "traffic_limit_gb":800, "expires_at":"2027-08-30T00:00:00Z",
+                    "primary_device_limit":5, "shared_traffic_used_gb":124, "shared_traffic_limit_gb":2048,
+                    "shared_period_start":"2026-10-01T00:00:00Z", "shared_period_end":"2026-11-01T00:00:00Z",
+                    "shared_free_only":true, "trial_traffic_remaining_gb":0, "free_locations_only":true
                 }""").toBackendSubscription(),
                 plans = plans, locations = emptyList(), devices = emptyList(), paymentsReady = false,
             ),

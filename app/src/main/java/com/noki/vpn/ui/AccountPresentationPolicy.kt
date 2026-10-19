@@ -113,7 +113,7 @@ internal object AccountPresentationPolicy {
             usageLabel = usageLabel,
             remainingPercent = remainingPercent,
             remainingFraction = remainingFraction,
-            remainingExplanation = tr(
+            remainingExplanation = if (state.userProfile.freeLocationsOnly) tr(language, "Доступны только Free-локации", "Only Free locations are available") else tr(
                 language,
                 "Осталось: $remainingPercent% трафика",
                 "Remaining: $remainingPercent% traffic",

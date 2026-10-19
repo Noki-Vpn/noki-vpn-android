@@ -58,6 +58,14 @@ data class BackendSubscription(
     val planName: String? = null,
     val planTier: String? = null,
     val planBadgeColor: String? = null,
+    val primaryDeviceLimit: Int? = null,
+    val sharedTrafficUsedGb: Double? = null,
+    val sharedTrafficLimitGb: Double? = null,
+    val sharedPeriodStart: String? = null,
+    val sharedPeriodEnd: String? = null,
+    val sharedFreeOnly: Boolean = false,
+    val trialTrafficRemainingGb: Double? = null,
+    val freeLocationsOnly: Boolean = false,
 )
 
 data class BackendVpnAccess(
@@ -84,6 +92,7 @@ data class BackendDevice(
     val accessRole: String,
     val isActive: Boolean,
     val lastSeenAt: String?,
+    val trafficPool: String = "primary",
 )
 
 data class BackendIncyDevice(
@@ -103,6 +112,7 @@ data class BackendIncyDevice(
     val lastRequestedAt: String? = null,
     val createdAt: String = "",
     val updatedAt: String = "",
+    val trafficPool: String = "primary",
 )
 
 data class BackendIncyDeviceCreate(
@@ -205,6 +215,7 @@ data class BackendPlan(
     val badgeColor: String?,
     val isActive: Boolean,
     val sortOrder: Int,
+    val sharedTrafficLimitGb: Double? = null,
 )
 
 data class BackendAppNotification(
@@ -329,6 +340,19 @@ data class BackendRuWireGuardConfig(
     val dns: List<String>,
     val mtu: Int,
     val allowedIps: List<String>,
+)
+
+data class BackendYoutubeAccess(
+    val mode: String,
+    val status: String,
+    val grantId: String,
+    val generation: Int,
+    val expiresAtEpochMillis: Long,
+    val revokeToken: String,
+    val publicKeyId: String? = null,
+    val wireguard: BackendRuWireGuardConfig? = null,
+    val endpoint: BackendEndpointCandidate? = null,
+    val vpnSecret: String? = null,
 )
 
 sealed interface BackendRuWireGuardSession {

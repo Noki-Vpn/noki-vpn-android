@@ -90,7 +90,16 @@ interface AccountSecurityApi {
         currentDeviceKey: String?,
         currentEmail: String?,
         currentVerificationCode: String?,
+        purpose: String? = null,
     ): Int
+
+    suspend fun verifyCurrentAccountEmailCode(
+        token: String,
+        email: String,
+        verificationCode: String,
+        currentDeviceId: String?,
+        currentDeviceKey: String?,
+    )
 
     suspend fun changeAccountEmail(
         token: String,
@@ -108,7 +117,16 @@ interface AccountSecurityApi {
         newPassword: String,
         currentDeviceId: String?,
         currentDeviceKey: String?,
+        verificationCode: String? = null,
     ): BackendAccountPasswordChange
+
+    suspend fun verifyAccountPasswordCode(
+        token: String,
+        email: String,
+        verificationCode: String,
+        currentDeviceId: String?,
+        currentDeviceKey: String?,
+    )
 
     suspend fun changeAccountUsername(
         token: String,

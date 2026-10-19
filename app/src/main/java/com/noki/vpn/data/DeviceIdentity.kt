@@ -10,8 +10,16 @@ import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.Signature
 import java.security.spec.RSAKeyGenParameterSpec
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 object DeviceIdentity {
+    // The server has one single-use device nonce shared by main and YouTube admission.
+    private val challengeMutex = Mutex()
+
+    internal suspend fun <T> withChallengeTransaction(action: suspend () -> T): T =
+        challengeMutex.withLock { action() }
+
     private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
     private const val KEY_ALIAS = "noki_device_identity_v1"
     private const val SIGNATURE_ALGORITHM = "SHA256withRSA"

@@ -180,15 +180,20 @@ object EndpointSelector {
             require(candidate.nodeId == route.exitNodeId && candidate.entryHost == route.entryIp &&
                 candidate.connectIp == route.entryIp && candidate.entryPort in 20000..29999) { "multihop_exit_mismatch" }
         }
-        return VlessProfile(
-            remark = "Noki ${candidate.locationName.ifBlank { session.locationName }}",
+        return profileFromCandidate(candidate.copy(proxyType = candidate.proxyType.ifBlank { session.proxyType }), session.vpnSecret)
+            .copy(remark = "Noki ${candidate.locationName.ifBlank { session.locationName }}", multiHop = session.multiHop)
+    }
+
+    internal fun profileFromCandidate(candidate: BackendEndpointCandidate, vpnSecret: String): VlessProfile =
+        VlessProfile(
+            remark = "Noki ${candidate.locationName}",
             endpointCode = candidate.code,
-            proxyType = candidate.proxyType.ifBlank { session.proxyType },
+            proxyType = candidate.proxyType,
             transport = candidate.normalizedTransport(),
             transportMode = candidate.transportMode.orEmpty(),
             host = candidate.connectionHost(),
             port = candidate.entryPort.toString(),
-            uuid = session.vpnSecret,
+            uuid = vpnSecret,
             flow = candidate.flow.orEmpty(),
             security = candidate.security,
             fingerprint = candidate.fingerprint ?: "chrome",
@@ -202,9 +207,7 @@ object EndpointSelector {
             publicKey = candidate.publicKey.orEmpty(),
             shortId = candidate.shortId.orEmpty(),
             spiderX = "/",
-            multiHop = session.multiHop,
         )
-    }
 
     private fun profileFromLegacySession(session: BackendVpnSession): VlessProfile =
         VlessProfile(

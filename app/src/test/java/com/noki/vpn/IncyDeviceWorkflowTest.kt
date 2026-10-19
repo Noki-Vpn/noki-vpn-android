@@ -11,6 +11,24 @@ import org.junit.Test
 
 class IncyDeviceWorkflowTest {
     @Test
+    fun `forbidden device name operations ask for another name in the selected language`() {
+        val error = BackendException("Forbidden", 403)
+
+        assertEquals("Попробуйте другое имя", AppErrorMapper.readableDeviceNameError(AppLanguage.RU, error))
+        assertEquals("Try another name", AppErrorMapper.readableDeviceNameError(AppLanguage.EN, error))
+        assertEquals("Forbidden", AppErrorMapper.readableNetworkError(AppLanguage.RU, error))
+    }
+
+    @Test
+    fun `device name mapping keeps other errors unchanged`() {
+        for (error in listOf(BackendException("Unauthorized", 401), BackendException("Invalid name", 422),
+            BackendException("Unavailable", 503), java.io.IOException())) {
+            assertEquals(AppErrorMapper.readableNetworkError(AppLanguage.RU, error),
+                AppErrorMapper.readableDeviceNameError(AppLanguage.RU, error))
+        }
+    }
+
+    @Test
     fun `duplicate device name is explained instead of generic validation`() {
         val error = BackendException("Устройство INCY с таким названием уже существует", 422)
 

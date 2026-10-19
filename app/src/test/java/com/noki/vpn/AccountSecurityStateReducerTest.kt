@@ -57,7 +57,7 @@ class AccountSecurityStateReducerTest {
     @Test
     fun `dismiss removes transient action`() {
         val current = AccountSecurityUiState(
-            action = AccountSecurityActionState.Username(username = "ykino"),
+            action = AccountSecurityActionState.Username(username = "user1"),
         )
 
         assertEquals(AccountSecurityUiState(), AccountSecurityStateReducer.dismiss(current))

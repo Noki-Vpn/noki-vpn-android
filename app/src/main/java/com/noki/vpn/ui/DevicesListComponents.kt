@@ -38,6 +38,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.noki.vpn.data.AppLanguage
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import com.noki.vpn.data.DeviceSession
 import com.styropyr0.prismal.sources.PrismalGlassLayer
 import com.styropyr0.prismal.drawPrismalGlass
@@ -57,6 +59,7 @@ internal fun OtherDevicesSection(
     backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onDeviceClick: (String) -> Unit,
+    showAddAction: Boolean = true,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -64,14 +67,14 @@ internal fun OtherDevicesSection(
         horizontalAlignment = Alignment.Start,
     ) {
         DevicesText(
-            text = tr(language, "Другие устройства", "Other devices"),
+            text = tr(language, "Noki устройства", "Noki devices"),
             fontSize = 12f,
             lineHeight = 14.4f,
             color = DevicesTextSecondary,
             scale = scale,
             modifier = Modifier.fillMaxWidth(),
         )
-        DeviceInviteCard(
+        if (showAddAction) DeviceInviteCard(
             isLoading = inviteIsLoading,
             language = language,
             scale = scale,
@@ -79,7 +82,7 @@ internal fun OtherDevicesSection(
             liveGlassEnabled = liveGlassEnabled,
             onClick = onInviteClick,
         )
-        if (!inviteError.isNullOrBlank()) {
+        if (showAddAction && !inviteError.isNullOrBlank()) {
             DevicesText(
                 text = inviteError,
                 fontSize = 11f,
@@ -195,6 +198,7 @@ internal fun DeleteDeviceDialog(
     liveGlassEnabled: Boolean,
     onDismiss: () -> Unit,
     onFullAccessChanged: (String, Boolean) -> Unit,
+    onMove: () -> Unit,
     onRename: () -> Unit,
     onConfirm: () -> Unit,
 ) {
@@ -226,7 +230,7 @@ internal fun DeleteDeviceDialog(
                 .padding(start = 21.dp, end = 21.dp, bottom = bottomPadding)
                 .fillMaxWidth()
                 .widthIn(max = 370.dp)
-                .height(devicesDp(350f, scale))
+                .height(devicesDp(410f, scale))
                 .clip(shape)
                 .then(
                     if (liveGlassEnabled && backdrop != null) {
@@ -316,7 +320,7 @@ internal fun DeleteDeviceDialog(
                 scale = scale,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = devicesDp(275f, scale)),
+                    .offset(y = devicesDp(335f, scale)),
                 onClick = onConfirm,
             )
             DevicesDialogButton(
@@ -329,6 +333,15 @@ internal fun DeleteDeviceDialog(
                     .width(devicesDp(300f, scale))
                     .height(devicesDp(50f, scale)),
                 onClick = onRename,
+            )
+            DevicesDialogButton(
+                text = tr(language, if (device?.trafficPool == "shared") "В основные устройства" else "В доп. устройства", if (device?.trafficPool == "shared") "Move to primary devices" else "Move to additional devices"),
+                scale = scale,
+                isPrimary = false,
+                enabled = device != null,
+                modifier = Modifier.align(Alignment.TopCenter).offset(y = devicesDp(267f, scale)).width(devicesDp(300f, scale)).height(devicesDp(50f, scale)),
+                onClick = onMove,
+                leadingIcon = Icons.AutoMirrored.Rounded.ArrowForward,
             )
             FullAccessOptionRow(
                 checked = fullAccessChecked,

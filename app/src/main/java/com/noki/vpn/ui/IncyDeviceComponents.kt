@@ -44,6 +44,8 @@ import androidx.lifecycle.LifecycleOwner
 import com.styropyr0.prismal.sources.PrismalGlassLayer
 import com.noki.vpn.IncyDevicesUiState
 import com.noki.vpn.data.AppLanguage
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import com.noki.vpn.data.BackendIncyDevice
 import java.util.concurrent.atomic.AtomicLong
 import java.util.UUID
@@ -63,6 +65,7 @@ internal fun IncyDevicesSection(
     onAddClick: () -> Unit,
     onDeviceClick: (String) -> Unit,
     onRetryClick: () -> Unit,
+    showAddAction: Boolean = true,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -76,7 +79,7 @@ internal fun IncyDevicesSection(
             scale = scale,
             modifier = Modifier.fillMaxWidth(),
         )
-        IncyAddDeviceCard(
+        if (showAddAction) IncyAddDeviceCard(
             language = language,
             scale = scale,
             backdrop = backdrop,
@@ -202,6 +205,7 @@ internal fun IncyDeviceDialogs(
     backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     onNameChanged: (String) -> Unit,
+    onMove: () -> Unit,
     onCreate: () -> Unit,
     onRename: () -> Unit,
     onReissue: () -> Unit,
@@ -264,6 +268,16 @@ internal fun IncyDeviceDialogs(
             liveGlassEnabled = liveGlassEnabled,
             onDismiss = onDismiss,
         ) {
+            val selectedDevice = state.devices.firstOrNull { it.id == state.selectedDeviceId }
+            DevicesDialogButton(
+                text = tr(language, if (selectedDevice?.trafficPool == "shared") "В основные устройства" else "В доп. устройства", if (selectedDevice?.trafficPool == "shared") "Move to primary devices" else "Move to additional devices"),
+                scale = scale,
+                isPrimary = false,
+                enabled = selectedDevice != null && !state.isLoading,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onMove,
+                leadingIcon = Icons.AutoMirrored.Rounded.ArrowForward,
+            )
             SettingsCompactInputField(
                 value = state.nameInput,
                 onValueChange = onNameChanged,

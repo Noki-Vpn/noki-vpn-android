@@ -1,6 +1,5 @@
 package com.noki.vpn
 
-import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.AuthFlowApi
 import com.noki.vpn.data.BackendAuthTokens
 import com.noki.vpn.data.BackendDevice
@@ -16,11 +15,6 @@ class AuthFlowCoordinator private constructor(
     data class Result(
         val tokens: BackendAuthTokens,
         val state: AppUiState,
-    )
-
-    data class LoginPresentation(
-        val screenStack: List<AppDestination>,
-        val inlineMessage: String?,
     )
 
     internal constructor(
@@ -53,9 +47,7 @@ class AuthFlowCoordinator private constructor(
     suspend fun login(
         form: LoginFormState,
         baseState: AppUiState,
-        language: AppLanguage,
         deviceId: String? = null,
-        presentation: LoginPresentation? = null,
     ): Result {
         val tokens = loginWithOptionalDevice(form.email.trim(), form.password, deviceId)
         val preparedState = baseState.copy(
@@ -65,12 +57,8 @@ class AuthFlowCoordinator private constructor(
                 error = null,
             ),
             isAuthenticated = true,
-            screenStack = presentation?.screenStack ?: listOf(AppDestination.HOME),
-            inlineMessage = if (presentation != null) {
-                presentation.inlineMessage
-            } else {
-                tr(language, "Вы вошли в Noki Vpn", "You are signed in to Noki Vpn")
-            },
+            screenStack = listOf(AppDestination.HOME),
+            inlineMessage = null,
         )
         val completed = completeAuthenticatedSession(tokens, preparedState)
         return Result(
@@ -82,7 +70,6 @@ class AuthFlowCoordinator private constructor(
     suspend fun register(
         form: RegistrationFormState,
         baseState: AppUiState,
-        language: AppLanguage,
         deviceId: String? = null,
     ): Result {
         authApi.register(
@@ -104,7 +91,7 @@ class AuthFlowCoordinator private constructor(
             ),
             isAuthenticated = true,
             screenStack = listOf(AppDestination.HOME),
-            inlineMessage = tr(language, "Аккаунт создан", "Your account is ready"),
+            inlineMessage = null,
         )
         val completed = completeAuthenticatedSession(tokens, preparedState)
         return Result(
@@ -127,8 +114,5 @@ class AuthFlowCoordinator private constructor(
             authApi.login(email, password, null)
         }
     }
-
-    private fun tr(language: AppLanguage, russian: String, english: String): String =
-        if (language == AppLanguage.RU) russian else english
 
 }

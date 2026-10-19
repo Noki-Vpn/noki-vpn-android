@@ -19,7 +19,7 @@ class AuthFlowCoordinatorTest {
         )
         assertEquals(
             "Введите пароль",
-            AuthStepReducer.validateLogin(LoginFormState(email = "ykino", password = ""), AppLanguage.RU),
+            AuthStepReducer.validateLogin(LoginFormState(email = "user1", password = ""), AppLanguage.RU),
         )
     }
 
@@ -46,15 +46,14 @@ class AuthFlowCoordinatorTest {
             },
             syncBootstrap = { token, baseState ->
                 assertEquals("token-1-bound", token)
-                baseState.copy(userProfile = baseState.userProfile.copy(username = "ykino"))
+                baseState.copy(userProfile = baseState.userProfile.copy(username = "user1"))
             },
         )
 
         val result = runBlocking {
             coordinator.login(
-                form = LoginFormState(email = " ykino ", password = "00000000"),
+                form = LoginFormState(email = " user1 ", password = "example1"),
                 baseState = AppUiState(),
-                language = AppLanguage.EN,
                 deviceId = "device-known",
             )
         }
@@ -63,9 +62,9 @@ class AuthFlowCoordinatorTest {
         assertEquals("refresh-1-bound", result.tokens.refreshToken)
         assertEquals(listOf(AppDestination.HOME), result.state.screenStack)
         assertEquals("", result.state.loginForm.password)
-        assertEquals("ykino", result.state.userProfile.username)
-        assertEquals("You are signed in to Noki Vpn", result.state.inlineMessage)
-        assertEquals("ykino", api.loginEmail)
+        assertEquals("user1", result.state.userProfile.username)
+        assertNull(result.state.inlineMessage)
+        assertEquals("user1", api.loginEmail)
         assertEquals("device-known", api.loginDeviceId)
     }
 
@@ -93,26 +92,25 @@ class AuthFlowCoordinatorTest {
         val result = runBlocking {
             coordinator.register(
                 form = RegistrationFormState(
-                    username = " ykino ",
-                    email = " ykino@example.com ",
+                    username = " user1 ",
+                    email = " user1@example.com ",
                     verificationCode = " 1234 ",
-                    password = "00000000",
-                    passwordRepeat = "00000000",
+                    password = "example1",
+                    passwordRepeat = "example1",
                 ),
                 baseState = AppUiState(),
-                language = AppLanguage.RU,
                 deviceId = "device-known",
             )
         }
 
         assertEquals("token-2-bound", result.tokens.accessToken)
         assertEquals("refresh-2-bound", result.tokens.refreshToken)
-        assertEquals("ykino", api.registerUsername)
-        assertEquals("ykino@example.com", api.registerEmail)
+        assertEquals("user1", api.registerUsername)
+        assertEquals("user1@example.com", api.registerEmail)
         assertEquals("1234", api.registerCode)
         assertEquals("device-known", api.loginDeviceId)
         assertEquals("", result.state.registrationForm.password)
-        assertEquals("Аккаунт создан", result.state.inlineMessage)
+        assertNull(result.state.inlineMessage)
     }
 
     @Test
@@ -135,48 +133,11 @@ class AuthFlowCoordinatorTest {
             coordinator.login(
                 form = LoginFormState(email = "user@example.com", password = "password"),
                 baseState = AppUiState(),
-                language = AppLanguage.EN,
                 deviceId = "restricted-device",
             )
         }
 
         assertEquals(listOf("restricted-device", null), api.loginDeviceIds)
-    }
-
-    @Test
-    fun `authenticated recovery login can return to security without a banner`() {
-        val api = FakeAuthApi(
-            loginTokens = BackendAuthTokens(
-                accessToken = "token",
-                refreshToken = "refresh",
-                expiresInSeconds = 3600,
-            ),
-        )
-        val coordinator = AuthFlowCoordinator(
-            authApi = api,
-            registerCurrentDevice = { backendDevice() },
-            syncBootstrap = { _, state -> state },
-        )
-        val returnStack = listOf(
-            AppDestination.HOME,
-            AppDestination.SETTINGS,
-            AppDestination.SECURITY,
-        )
-
-        val result = runBlocking {
-            coordinator.login(
-                form = LoginFormState(email = "user@example.com", password = "new-password"),
-                baseState = AppUiState(),
-                language = AppLanguage.RU,
-                presentation = AuthFlowCoordinator.LoginPresentation(
-                    screenStack = returnStack,
-                    inlineMessage = null,
-                ),
-            )
-        }
-
-        assertEquals(returnStack, result.state.screenStack)
-        assertNull(result.state.inlineMessage)
     }
 
     private class FakeAuthApi(

@@ -20,6 +20,7 @@ internal class AccountSecurityCoordinator(
     suspend fun sendEmailCode(
         context: AccountSecurityContext, email: String,
         currentEmail: String?, currentVerificationCode: String?,
+        purpose: String? = null,
     ): Int {
         context.requireOwner()
         return api.sendAccountEmailCode(
@@ -27,6 +28,22 @@ internal class AccountSecurityCoordinator(
             email = email,
             currentEmail = currentEmail,
             currentVerificationCode = currentVerificationCode,
+            currentDeviceId = context.currentDeviceId,
+            currentDeviceKey = context.currentDeviceKey,
+            purpose = purpose,
+        )
+    }
+
+    suspend fun verifyCurrentEmailCode(
+        context: AccountSecurityContext,
+        email: String,
+        verificationCode: String,
+    ) {
+        context.requireOwner()
+        api.verifyCurrentAccountEmailCode(
+            token = context.accessToken,
+            email = email,
+            verificationCode = verificationCode,
             currentDeviceId = context.currentDeviceId,
             currentDeviceKey = context.currentDeviceKey,
         )
@@ -56,6 +73,7 @@ internal class AccountSecurityCoordinator(
         authAttempt: AuthSessionAttempt,
         currentPassword: String?,
         newPassword: String,
+        verificationCode: String? = null,
     ): BackendAccountPasswordChange {
         context.requireOwner()
         val result = api.changeAccountPassword(
@@ -64,6 +82,7 @@ internal class AccountSecurityCoordinator(
             newPassword = newPassword,
             currentDeviceId = context.currentDeviceId,
             currentDeviceKey = context.currentDeviceKey,
+            verificationCode = verificationCode,
         )
         result.tokens?.let { tokens ->
             if (!authSessionCoordinator.commitIfCurrent(authAttempt, tokens)) {
@@ -71,6 +90,21 @@ internal class AccountSecurityCoordinator(
             }
         }
         return result
+    }
+
+    suspend fun verifyPasswordCode(
+        context: AccountSecurityContext,
+        email: String,
+        verificationCode: String,
+    ) {
+        context.requireOwner()
+        api.verifyAccountPasswordCode(
+            token = context.accessToken,
+            email = email,
+            verificationCode = verificationCode,
+            currentDeviceId = context.currentDeviceId,
+            currentDeviceKey = context.currentDeviceKey,
+        )
     }
 
     suspend fun changeUsername(

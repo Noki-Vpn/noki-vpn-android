@@ -12,6 +12,9 @@ import com.noki.vpn.data.VpnEndpointOption
 import com.noki.vpn.data.VpnProtocol
 
 object AdvancedSettingsStateReducer {
+    fun setYoutubeNoAdsEnabled(current: AppUiState, enabled: Boolean): AppUiState =
+        current.copy(advancedSettings = current.advancedSettings.copy(youtubeNoAdsEnabled = enabled))
+
     fun setRuRelayEnabled(
         current: AppUiState,
         enabled: Boolean,

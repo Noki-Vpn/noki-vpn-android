@@ -196,11 +196,12 @@ internal fun AppUiRuntime.renameDevice(deviceId: String, value: String) {
                 result = result,
                 language = language,
                 successMessage = tr(language, "Имя устройства сохранено", "Device name saved"),
+                isNameOperation = true,
             )
         },
         onFailure = { error ->
             uiState = uiState.copy(
-                inlineMessage = AppErrorMapper.readableNetworkError(language, error),
+                inlineMessage = AppErrorMapper.readableDeviceNameError(language, error),
             )
         },
     )
@@ -287,7 +288,7 @@ internal fun AppUiRuntime.createIncyDevice() {
                 ),
             )
         },
-        onFailure = ::handleIncyDeviceFailure,
+        onFailure = { error -> handleIncyDeviceFailure(error, isNameOperation = true) },
     )
 }
 
@@ -351,7 +352,7 @@ internal fun AppUiRuntime.renameIncyDevice() {
                 ),
             )
         },
-        onFailure = ::handleIncyDeviceFailure,
+        onFailure = { error -> handleIncyDeviceFailure(error, isNameOperation = true) },
     )
 }
 
@@ -477,7 +478,7 @@ internal fun AppUiRuntime.cancelReplaceableDeviceOperation(): Boolean {
     return true
 }
 
-private fun AppUiRuntime.handleIncyDeviceFailure(error: Throwable) {
+private fun AppUiRuntime.handleIncyDeviceFailure(error: Throwable, isNameOperation: Boolean = false) {
     if (error is AuthRefreshRejectedException) {
         logout()
         return
@@ -485,7 +486,11 @@ private fun AppUiRuntime.handleIncyDeviceFailure(error: Throwable) {
     uiState = uiState.copy(
         incyDevices = uiState.incyDevices.copy(
             isLoading = false,
-            error = AppErrorMapper.readableNetworkError(uiState.personalizationSettings.language, error),
+            error = if (isNameOperation) {
+                AppErrorMapper.readableDeviceNameError(uiState.personalizationSettings.language, error)
+            } else {
+                AppErrorMapper.readableNetworkError(uiState.personalizationSettings.language, error)
+            },
         ),
     )
 }
@@ -519,6 +524,83 @@ internal fun AppUiRuntime.setDeviceFullAccess(deviceId: String, fullAccess: Bool
                 inlineMessage = AppErrorMapper.readableNetworkError(language, error),
             )
         },
+    )
+}
+
+internal fun AppUiRuntime.requestDeviceTrafficPoolChange(deviceId: String, isIncy: Boolean) {
+    if (isCurrentDeviceInvited()) {
+        showCurrentDeviceAccessDenied()
+        return
+    }
+    if (!cancelReplaceableDeviceOperation()) return
+    val pool = if (isIncy) uiState.incyDevices.devices.firstOrNull { it.id == deviceId }?.trafficPool
+        else uiState.devices.firstOrNull { it.id == deviceId }?.trafficPool
+    if (pool == null) return
+    uiState = uiState.copy(dialog = AppDialog.MoveDevice(deviceId,
+        if (pool == "shared") "primary" else "shared", isIncy), inlineMessage = null)
+}
+
+internal fun AppUiRuntime.confirmDeviceTrafficPoolChange(dialog: AppDialog.MoveDevice) {
+    if (dialog.isLoading || uiState.dialog != dialog) return
+    if (dialog.isIncy) moveIncyDeviceTrafficPool(dialog) else setDeviceTrafficPool(dialog)
+}
+
+private fun AppUiRuntime.setDeviceTrafficPool(dialog: AppDialog.MoveDevice) {
+    val language = uiState.personalizationSettings.language
+    val launched = launchAuthenticatedDeviceOperation(
+        replaceActive = true,
+        allowsReplacement = false,
+        onStarted = { uiState = uiState.copy(dialog = dialog.copy(isLoading = true, error = null), inlineMessage = null) },
+        operation = { attempt ->
+            authSessionCoordinator.run(attempt) { token ->
+                backendApi.setDeviceTrafficPool(token, dialog.deviceId, dialog.trafficPool, backendDeviceId.ifBlank { null }, backendDeviceKey.ifBlank { null })
+            }
+        },
+        onSuccess = { devices ->
+            uiState = uiState.copy(dialog = null)
+            applyDeviceListActionResult(DeviceActionCoordinator.ActionResult.Success(devices), language, tr(language, "Группа устройства изменена", "Device group changed"))
+            launchBackendRefresh(BackendRefreshTrigger.Initial)
+        },
+        onFailure = { error -> handleDeviceTrafficPoolFailure(dialog, error) },
+    )
+    if (!launched && uiState.dialog == dialog) showDeviceTrafficPoolBusy(dialog)
+}
+
+private fun AppUiRuntime.moveIncyDeviceTrafficPool(dialog: AppDialog.MoveDevice) {
+    val device = uiState.incyDevices.devices.firstOrNull { it.id == dialog.deviceId } ?: return
+    val launched = launchAuthenticatedDeviceOperation(
+        replaceActive = true,
+        allowsReplacement = false,
+        targetId = device.id,
+        onStarted = { uiState = uiState.copy(dialog = dialog.copy(isLoading = true, error = null),
+            incyDevices = uiState.incyDevices.copy(isLoading = true, error = null)) },
+        operation = { attempt -> authSessionCoordinator.run(attempt) { token -> backendApi.setIncyDeviceTrafficPool(token, device.id, dialog.trafficPool) } },
+        onSuccess = { updated ->
+            uiState = uiState.copy(dialog = null, incyDevices = uiState.incyDevices.copy(
+                devices = uiState.incyDevices.devices.map { if (it.id == updated.id) updated else it },
+                isLoading = false,
+                isManageDialogVisible = false,
+                selectedDeviceId = null,
+                importLink = null,
+                v2raynSubscriptionUrl = null,
+            ))
+            launchBackendRefresh(BackendRefreshTrigger.Initial)
+        },
+        onFailure = { error -> handleDeviceTrafficPoolFailure(dialog, error) },
+    )
+    if (!launched && uiState.dialog == dialog) showDeviceTrafficPoolBusy(dialog)
+}
+
+private fun AppUiRuntime.showDeviceTrafficPoolBusy(dialog: AppDialog.MoveDevice) {
+    uiState = uiState.copy(dialog = dialog.copy(error = tr(uiState.personalizationSettings.language,
+        "Дождитесь завершения текущего действия и повторите попытку", "Wait for the current operation to finish and try again")))
+}
+
+private fun AppUiRuntime.handleDeviceTrafficPoolFailure(dialog: AppDialog.MoveDevice, error: Throwable) {
+    if (error is AuthRefreshRejectedException) logout()
+    else uiState = uiState.copy(
+        dialog = dialog.copy(isLoading = false, error = AppErrorMapper.readableNetworkError(uiState.personalizationSettings.language, error)),
+        incyDevices = uiState.incyDevices.copy(isLoading = false),
     )
 }
 
@@ -564,6 +646,7 @@ internal fun AppUiRuntime.applyDeviceListActionResult(
     result: DeviceActionCoordinator.ActionResult<List<BackendDevice>>,
     language: AppLanguage,
     successMessage: String,
+    isNameOperation: Boolean = false,
 ) {
     when (result) {
         is DeviceActionCoordinator.ActionResult.Success -> {
@@ -580,7 +663,11 @@ internal fun AppUiRuntime.applyDeviceListActionResult(
         }
         is DeviceActionCoordinator.ActionResult.LogoutRequired -> logout()
         is DeviceActionCoordinator.ActionResult.Failure -> {
-            uiState = uiState.copy(inlineMessage = AppErrorMapper.readableNetworkError(language, result.error))
+            uiState = uiState.copy(inlineMessage = if (isNameOperation) {
+                AppErrorMapper.readableDeviceNameError(language, result.error)
+            } else {
+                AppErrorMapper.readableNetworkError(language, result.error)
+            })
         }
     }
 }

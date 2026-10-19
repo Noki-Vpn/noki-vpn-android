@@ -23,6 +23,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +40,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
+import com.noki.vpn.AppDestination
 import com.noki.vpn.AppDialog
 import com.noki.vpn.AppUiState
 import com.noki.vpn.MainViewModel
@@ -67,6 +70,7 @@ fun DevicesScreen(
     state: AppUiState,
     viewModel: MainViewModel,
     showBackground: Boolean = true,
+    showAdditional: Boolean = false,
     sharedBackdrop: PrismalGlassLayer,
     deviceRowsBackdrop: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean = true,
@@ -75,6 +79,7 @@ fun DevicesScreen(
         val hasDeviceModal = state.dialog == AppDialog.LogoutOthers ||
             state.dialog is AppDialog.RemoveDevice ||
             state.dialog is AppDialog.RenameDevice ||
+            state.dialog is AppDialog.MoveDevice ||
             !state.inviteDeviceForm.generatedInviteCode.isNullOrBlank() ||
             state.incyDevices.isCreateDialogVisible ||
             state.incyDevices.isManageDialogVisible
@@ -107,8 +112,7 @@ fun DevicesScreen(
             val devices = state.devices
             val currentDevice = devices.firstOrNull { it.isCurrent } ?: devices.firstOrNull()
             val otherDevices = devices.filterNot { currentDevice != null && it.id == currentDevice.id }
-            val connectedCount = devices.count { it.isActive } +
-                state.incyDevices.devices.count { it.isSlotActive && !it.status.equals("revoked", true) }
+            val connectedCount = primaryDeviceCount(state)
 
             LaunchedEffect(state.isAuthenticated) {
                 if (state.isAuthenticated) viewModel.refreshIncyDevices()
@@ -142,81 +146,129 @@ fun DevicesScreen(
                         verticalArrangement = Arrangement.spacedBy(devicesDp(30f, scale)),
                         horizontalAlignment = Alignment.Start,
                     ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(devicesDp(15f, scale)),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(devicesDp(30f, scale)),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                DevicesHeader(
-                                    connectedCount = connectedCount,
-                                    deviceLimit = deviceLimit,
-                                    language = language,
-                                    scale = scale,
-                                )
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(devicesDp(15f, scale)),
-                                ) {
-                                    DevicesText(
-                                        text = tr(language, "Текущее устройство", "Current device"),
-                                        fontSize = 12f,
-                                        lineHeight = 14.4f,
-                                        color = DevicesTextSecondary,
-                                        scale = scale,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                    CurrentDeviceCard(
-                                        device = currentDevice,
-                                        language = language,
-                                        backdrop = cardBackdrop,
-                                        liveGlassEnabled = liveGlassEnabled,
-                                        scale = scale,
-                                        onRenameClick = { currentDevice?.id?.let(viewModel::requestRenameDevice) },
-                                    )
-                                }
-                            }
-                            RemoveAllDevicesButton(
+                        if (showAdditional) {
+                            val sharedDevices = devices.filter { it.trafficPool == "shared" }
+                            val sharedIncy = state.incyDevices.devices.filter { it.trafficPool == "shared" }
+                            DevicesHeader(
+                                connectedCount = sharedDevices.size + sharedIncy.size,
+                                deviceLimit = deviceLimit,
+                                language = language,
+                                scale = scale,
+                                isAdditional = true,
+                            )
+                            SharedDeviceTraffic(state, language, scale, cardBackdrop, liveGlassEnabled)
+                            OtherDevicesSection(
+                                devices = sharedDevices,
+                                inviteIsLoading = false,
+                                inviteError = null,
+                                language = language,
+                                scale = scale,
+                                onInviteClick = {},
+                                backdrop = cardBackdrop,
+                                liveGlassEnabled = liveGlassEnabled,
+                                onDeviceClick = { id ->
+                                    if (sharedDevices.firstOrNull { it.id == id }?.isCurrent == true) {
+                                        viewModel.requestRenameDevice(id)
+                                    } else viewModel.requestRemoveDevice(id)
+                                },
+                                showAddAction = false,
+                            )
+                            IncyDevicesSection(
+                                state = state.incyDevices.copy(devices = sharedIncy),
                                 language = language,
                                 scale = scale,
                                 backdrop = cardBackdrop,
                                 liveGlassEnabled = liveGlassEnabled,
-                                onClick = viewModel::requestLogoutOthers,
+                                onAddClick = {},
+                                onDeviceClick = viewModel::openIncyDevice,
+                                onRetryClick = viewModel::refreshIncyDevices,
+                                showAddAction = false,
+                            )
+                        } else {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(devicesDp(15f, scale)),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(devicesDp(30f, scale)),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    DevicesHeader(
+                                        connectedCount = connectedCount,
+                                        deviceLimit = deviceLimit,
+                                        language = language,
+                                        scale = scale,
+                                    )
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(devicesDp(15f, scale)),
+                                    ) {
+                                        DevicesText(
+                                            text = tr(language, "Текущее устройство", "Current device"),
+                                            fontSize = 12f,
+                                            lineHeight = 14.4f,
+                                            color = DevicesTextSecondary,
+                                            scale = scale,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                        CurrentDeviceCard(
+                                            device = currentDevice,
+                                            language = language,
+                                            backdrop = cardBackdrop,
+                                            liveGlassEnabled = liveGlassEnabled,
+                                            scale = scale,
+                                            onRenameClick = { currentDevice?.id?.let(viewModel::requestRenameDevice) },
+                                        )
+                                    }
+                                }
+                                RemoveAllDevicesButton(
+                                    language = language,
+                                    scale = scale,
+                                    backdrop = cardBackdrop,
+                                    liveGlassEnabled = liveGlassEnabled,
+                                    onClick = viewModel::requestLogoutOthers,
+                                )
+                            }
+
+                            OtherDevicesSection(
+                                devices = otherDevices.filter { it.trafficPool != "shared" },
+                                inviteIsLoading = state.inviteDeviceForm.isLoading,
+                                inviteError = state.inviteDeviceForm.error,
+                                language = language,
+                                scale = scale,
+                                onInviteClick = viewModel::createDeviceInvite,
+                                backdrop = cardBackdrop,
+                                liveGlassEnabled = liveGlassEnabled,
+                                onDeviceClick = viewModel::requestRemoveDevice,
+                            )
+
+                            IncyDevicesSection(
+                                state = state.incyDevices.copy(devices = state.incyDevices.devices.filter { it.trafficPool != "shared" }),
+                                language = language,
+                                scale = scale,
+                                backdrop = cardBackdrop,
+                                liveGlassEnabled = liveGlassEnabled,
+                                onAddClick = viewModel::showCreateIncyDevice,
+                                onDeviceClick = viewModel::openIncyDevice,
+                                onRetryClick = viewModel::refreshIncyDevices,
+                            )
+
+                            AdditionalDeviceInfo(
+                                remainingDevices = (deviceLimit - connectedCount).coerceAtLeast(0),
+                                language = language,
+                                scale = scale,
+                            )
+                            AuthSecondaryButton(
+                                text = tr(language, "Доп. устройства", "Additional devices"),
+                                enabled = true,
+                                modifier = Modifier.fillMaxWidth().height(devicesDp(50f, scale)),
+                                backdrop = cardBackdrop,
+                                liveGlassEnabled = liveGlassEnabled,
+                                onClick = { viewModel.openScreen(AppDestination.EXTRA_DEVICES) },
                             )
                         }
-
-                        OtherDevicesSection(
-                            devices = otherDevices,
-                            inviteIsLoading = state.inviteDeviceForm.isLoading,
-                            inviteError = state.inviteDeviceForm.error,
-                            language = language,
-                            scale = scale,
-                            onInviteClick = viewModel::createDeviceInvite,
-                            backdrop = cardBackdrop,
-                            liveGlassEnabled = liveGlassEnabled,
-                            onDeviceClick = viewModel::requestRemoveDevice,
-                        )
-
-                        IncyDevicesSection(
-                            state = state.incyDevices,
-                            language = language,
-                            scale = scale,
-                            backdrop = cardBackdrop,
-                            liveGlassEnabled = liveGlassEnabled,
-                            onAddClick = viewModel::showCreateIncyDevice,
-                            onDeviceClick = viewModel::openIncyDevice,
-                            onRetryClick = viewModel::refreshIncyDevices,
-                        )
-
-                        AdditionalDeviceInfo(
-                            remainingDevices = (deviceLimit - connectedCount).coerceAtLeast(0),
-                            language = language,
-                            scale = scale,
-                        )
                     }
                 }
             }
@@ -249,6 +301,7 @@ fun DevicesScreen(
                     liveGlassEnabled = liveGlassEnabled,
                     onDismiss = viewModel::dismissDialog,
                     onFullAccessChanged = viewModel::setDeviceFullAccess,
+                    onMove = { device?.let { viewModel.requestDeviceTrafficPoolChange(it.id) } },
                     onRename = { viewModel.requestRenameDevice(dialog.deviceId) },
                     onConfirm = viewModel::confirmDialog,
                 )
@@ -269,6 +322,17 @@ fun DevicesScreen(
                     maxLength = 80,
                     onDismiss = viewModel::dismissDialog,
                     onConfirm = { viewModel.renameDevice(dialog.deviceId, name) },
+                    extraContent = {
+                        if (device != null) DevicesDialogButton(
+                            text = tr(language, if (device.trafficPool == "shared") "В основные устройства" else "В доп. устройства",
+                                if (device.trafficPool == "shared") "Move to primary devices" else "Move to additional devices"),
+                            scale = scale,
+                            isPrimary = false,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { viewModel.requestDeviceTrafficPoolChange(device.id) },
+                            leadingIcon = Icons.AutoMirrored.Rounded.ArrowForward,
+                        )
+                    },
                 )
             }
 
@@ -285,19 +349,72 @@ fun DevicesScreen(
             }
 
             IncyDeviceDialogs(
-                state = state.incyDevices,
+                state = state.incyDevices.copy(isManageDialogVisible = state.incyDevices.isManageDialogVisible && state.dialog !is AppDialog.MoveDevice),
                 language = language,
                 scale = scale,
                 backdrop = modalBackdrop,
                 liveGlassEnabled = liveGlassEnabled,
                 onNameChanged = viewModel::updateIncyDeviceName,
+                onMove = { state.incyDevices.selectedDeviceId?.let { viewModel.requestDeviceTrafficPoolChange(it, isIncy = true) } },
                 onCreate = viewModel::createIncyDevice,
                 onRename = viewModel::renameIncyDevice,
                 onReissue = viewModel::reissueIncyDevice,
                 onDelete = viewModel::deleteIncyDevice,
                 onDismiss = viewModel::dismissIncyDeviceDialog,
             )
+
+            (state.dialog as? AppDialog.MoveDevice)?.let { dialog ->
+                val title = if (dialog.isIncy) state.incyDevices.devices.firstOrNull { it.id == dialog.deviceId }?.name
+                    else devices.firstOrNull { it.id == dialog.deviceId }?.title
+                DevicesConfirmDialog(
+                    title = tr(language, "Перенести устройство?", "Move device?"),
+                    message = tr(language,
+                        if (dialog.trafficPool == "shared") "«${title.orEmpty()}» будет использовать общий лимит трафика доп. устройств."
+                        else "«${title.orEmpty()}» займёт одно место в основном тарифе.",
+                        if (dialog.trafficPool == "shared") "“${title.orEmpty()}” will use the shared traffic allowance for additional devices."
+                        else "“${title.orEmpty()}” will use one primary device slot.",
+                    ),
+                    confirmText = tr(language, if (dialog.isLoading) "Перенос…" else "Перенести", if (dialog.isLoading) "Moving…" else "Move"),
+                    dismissText = tr(language, "Отмена", "Cancel"),
+                    backdrop = modalBackdrop,
+                    liveGlassEnabled = liveGlassEnabled,
+                    scale = scale,
+                    isLoading = dialog.isLoading,
+                    error = dialog.error,
+                    onDismiss = viewModel::dismissDialog,
+                    onConfirm = viewModel::confirmDialog,
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun SharedDeviceTraffic(
+    state: AppUiState,
+    language: AppLanguage,
+    scale: Float,
+    backdrop: PrismalGlassLayer?,
+    liveGlassEnabled: Boolean,
+) {
+    val profile = state.userProfile
+    val used = com.noki.vpn.data.TrafficFormat.gigabytes(profile.sharedTrafficUsedGb, language).label
+    val limit = profile.sharedTrafficLimitGb?.let { com.noki.vpn.data.TrafficFormat.gigabytes(it, language).label } ?: "∞"
+    Column(
+        modifier = Modifier.fillMaxWidth().nokiSettingsPanelGlassSurface(
+            shape = RoundedCornerShape(devicesDp(24f, scale)),
+            backdrop = backdrop,
+            liveGlassEnabled = liveGlassEnabled,
+            scale = scale,
+            elevationDp = 8f,
+            shadowAlpha = 0.25f,
+            surfaceColor = DevicesBgLighter.copy(alpha = 0.80f),
+        ).padding(devicesDp(20f, scale)),
+        verticalArrangement = Arrangement.spacedBy(devicesDp(10f, scale)),
+    ) {
+        DevicesText(tr(language, "Общий трафик", "Shared traffic"), 14f, 18f,
+            DevicesTextSecondary, scale, Modifier.fillMaxWidth())
+        DevicesText("$used / $limit", 24f, 30f, DevicesTextPrimary, scale, Modifier.fillMaxWidth())
     }
 }
 
@@ -307,6 +424,7 @@ private fun DevicesHeader(
     deviceLimit: Int,
     language: AppLanguage,
     scale: Float,
+    isAdditional: Boolean = false,
 ) {
     Row(
         modifier = Modifier
@@ -321,7 +439,7 @@ private fun DevicesHeader(
             horizontalAlignment = Alignment.Start,
         ) {
             DevicesText(
-                text = tr(language, "Устройства", "Devices"),
+                text = tr(language, if (isAdditional) "Доп. устройства" else "Устройства", if (isAdditional) "Additional devices" else "Devices"),
                 fontSize = 24f,
                 lineHeight = 28.8f,
                 color = DevicesTextPrimary,
@@ -331,8 +449,8 @@ private fun DevicesHeader(
             DevicesText(
                 text = tr(
                     language,
-                    "Подключено $connectedCount из $deviceLimit устройств",
-                    "$connectedCount of $deviceLimit devices connected",
+                    if (isAdditional) "Устройств: $connectedCount" else "Подключено $connectedCount из $deviceLimit устройств",
+                    if (isAdditional) "Devices: $connectedCount" else "$connectedCount of $deviceLimit devices connected",
                 ),
                 fontSize = 12f,
                 lineHeight = 14.4f,
@@ -356,7 +474,7 @@ private fun DevicesHeader(
             contentAlignment = Alignment.Center,
         ) {
             DevicesText(
-                text = tr(language, "Лимит $deviceLimit", "Limit $deviceLimit"),
+                text = if (isAdditional) "∞" else tr(language, "Лимит $deviceLimit", "Limit $deviceLimit"),
                 fontSize = 11f,
                 lineHeight = 13.2f,
                 color = DevicesAccentSecondary,

@@ -28,6 +28,7 @@ class BackendApiClient(
     private val client: OkHttpClient = defaultBackendControlPlaneClient(),
     baseUrl: String = NokiBackendConfig.apiBaseUrl,
     streamingClient: OkHttpClient = backendStreamingClient(client),
+    private val challengeSigner: (String) -> String = DeviceIdentity::signChallenge,
 ) : VpnSessionApi, TemporaryVpnApi, AuthFlowApi, TelegramAuthApi, GoogleAuthApi, TelegramOidcApi,
     AuthRefreshApi, PasswordRecoveryApi,
     AccountApi, AccountSecurityApi, DeviceActionApi,
@@ -41,6 +42,7 @@ class BackendApiClient(
         client = client.newBuilder().socketFactory(network.socketFactory)
             .dns { host -> network.getAllByName(host).toList() }.build(),
         baseUrl = baseUrl,
+        challengeSigner = challengeSigner,
     )
 
     suspend fun paymentConfig(): BackendPaymentConfig = withContext(Dispatchers.IO) {
@@ -105,8 +107,8 @@ class BackendApiClient(
     suspend fun verifyRegistrationCode(email: String, verificationCode: String) =
         authClient.verifyRegistrationCode(email, verificationCode)
 
-    suspend fun checkRegistrationUsernameAvailable(username: String): Boolean =
-        authClient.checkRegistrationUsernameAvailable(username)
+    suspend fun checkRegistrationUsernameAvailable(username: String, token: String? = null): Boolean =
+        authClient.checkRegistrationUsernameAvailable(username, token)
 
     override suspend fun sendPasswordRecoveryCode(email: String): Int =
         authClient.sendPasswordRecoveryCode(email)
@@ -164,15 +166,33 @@ class BackendApiClient(
         currentDeviceKey: String?,
         currentEmail: String?,
         currentVerificationCode: String?,
+        purpose: String?,
     ): Int = postJson(
         path = "/app/security/email-code",
         payload = JSONObject().put("email", email)
+            .put("purpose", purpose)
             .put("current_email", currentEmail)
             .put("current_verification_code", currentVerificationCode),
         token = token,
         currentDeviceId = currentDeviceId,
         currentDeviceKey = currentDeviceKey,
     ).optInt("cooldown_seconds", 60)
+
+    override suspend fun verifyCurrentAccountEmailCode(
+        token: String,
+        email: String,
+        verificationCode: String,
+        currentDeviceId: String?,
+        currentDeviceKey: String?,
+    ) {
+        postJson(
+            path = "/app/security/email/verify-current",
+            payload = JSONObject().put("email", email).put("verification_code", verificationCode),
+            token = token,
+            currentDeviceId = currentDeviceId,
+            currentDeviceKey = currentDeviceKey,
+        )
+    }
 
     override suspend fun changeAccountEmail(
         token: String,
@@ -202,9 +222,11 @@ class BackendApiClient(
         newPassword: String,
         currentDeviceId: String?,
         currentDeviceKey: String?,
+        verificationCode: String?,
     ): BackendAccountPasswordChange {
         val payload = JSONObject().put("new_password", newPassword)
         currentPassword?.takeIf { it.isNotBlank() }?.let { payload.put("current_password", it) }
+        verificationCode?.takeIf { it.isNotBlank() }?.let { payload.put("verification_code", it) }
         val response = postJson(
             path = "/app/security/password",
             payload = payload,
@@ -215,6 +237,22 @@ class BackendApiClient(
         return BackendAccountPasswordChange(
             user = BackendUserResponseParser.parse(response.getJSONObject("user")),
             tokens = response.optJSONObject("tokens")?.toBackendAuthTokens(),
+        )
+    }
+
+    override suspend fun verifyAccountPasswordCode(
+        token: String,
+        email: String,
+        verificationCode: String,
+        currentDeviceId: String?,
+        currentDeviceKey: String?,
+    ) {
+        postJson(
+            path = "/app/security/password/verify-code",
+            payload = JSONObject().put("email", email).put("verification_code", verificationCode),
+            token = token,
+            currentDeviceId = currentDeviceId,
+            currentDeviceKey = currentDeviceKey,
         )
     }
 
@@ -480,6 +518,45 @@ class BackendApiClient(
         }
     }
 
+    suspend fun createYoutubeAccess(
+        token: String, requestId: String, deviceId: String, deviceKey: String?,
+        deviceNonce: String, deviceSignature: String, publicKeyId: String,
+        primaryEndpointCode: String?,
+    ): BackendYoutubeAccess = BackendYoutubeAccessJsonParser.parse(postJson("/vpn/youtube-access", JSONObject()
+        .put("request_id", canonicalRuUuid(requestId)).put("device_id", canonicalRuUuid(deviceId))
+        .put("device_key", deviceKey).put("device_nonce", deviceNonce).put("device_signature", deviceSignature)
+        .put("public_key_id", canonicalRuUuid(publicKeyId)).put("primary_endpoint_code", primaryEndpointCode),
+        token, deviceId, deviceKey))
+
+    suspend fun pollYoutubeAccess(token: String, deviceId: String, deviceKey: String?, grantId: String): BackendYoutubeAccess =
+        youtubeAccessRequest(token, deviceId, deviceKey, grantId)
+
+    suspend fun renewYoutubeAccess(token: String, deviceId: String, deviceKey: String?,
+                                   grant: BackendYoutubeAccess): BackendYoutubeAccess =
+        youtubeAccessRequest(token, deviceId, deviceKey, grant.grantId, grant.generation)
+
+    private suspend fun youtubeAccessRequest(token: String, deviceId: String, deviceKey: String?,
+                                            grantId: String, generation: Int? = null): BackendYoutubeAccess = DeviceIdentity.withChallengeTransaction {
+        withContext(Dispatchers.IO) {
+            val proof = createDeviceChallenge(token, canonicalRuUuid(deviceId))
+            val suffix = if (generation == null) "" else "/renew"
+            val url = jsonApi.apiUrl("/vpn/youtube-access/${canonicalRuUuid(grantId)}$suffix").toHttpUrl().newBuilder()
+                .addQueryParameter("device_id", canonicalRuUuid(deviceId)).build()
+            val builder = Request.Builder().url(url).header("Authorization", "Bearer $token")
+                .currentDeviceHeaders(deviceId, deviceKey)
+                .header("X-Device-Nonce", proof.nonce)
+                .header("X-Device-Signature", challengeSigner(proof.nonce))
+            if (generation == null) builder.get() else builder.post(JSONObject().put("generation", generation).toString().toRequestBody(JSON_MEDIA_TYPE))
+            BackendYoutubeAccessJsonParser.parse(execute(builder.build()))
+        }
+    }
+
+    suspend fun revokeYoutubeAccess(grantId: String, revokeToken: String): Unit = withContext(Dispatchers.IO) {
+        execute(Request.Builder().url(jsonApi.apiUrl("/vpn/youtube-access/${canonicalRuUuid(grantId)}"))
+            .header("X-Youtube-Revoke-Token", revokeToken).delete().build())
+        Unit
+    }
+
     suspend fun registerRuWireGuardKey(
         token: String,
         deviceId: String,
@@ -671,6 +748,34 @@ class BackendApiClient(
     suspend fun getIncyImportLink(token: String, deviceId: String): IncyConnectionLinks {
         val id = java.net.URLEncoder.encode(deviceId, Charsets.UTF_8.name())
         return jsonApi.get("/incy/devices/$id/import-link", token).toIncyConnectionLinks()
+    }
+
+    suspend fun setDeviceTrafficPool(
+        token: String,
+        deviceId: String,
+        trafficPool: String,
+        currentDeviceId: String?,
+        currentDeviceKey: String?,
+    ): List<BackendDevice> = withContext(Dispatchers.IO) {
+        val id = java.net.URLEncoder.encode(deviceId, Charsets.UTF_8.name())
+        val request = Request.Builder()
+            .url("$baseUrl$API_PREFIX/devices/$id/traffic-pool")
+            .header("Authorization", "Bearer $token")
+            .currentDeviceHeaders(currentDeviceId, currentDeviceKey)
+            .patch(JSONObject().put("traffic_pool", trafficPool).toString().toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        executeArray(request).toDeviceList()
+    }
+
+    suspend fun setIncyDeviceTrafficPool(token: String, deviceId: String, trafficPool: String): BackendIncyDevice {
+        val id = java.net.URLEncoder.encode(deviceId, Charsets.UTF_8.name())
+        return patchJson(
+            path = "/incy/devices/$id/traffic-pool",
+            payload = JSONObject().put("traffic_pool", trafficPool),
+            token = token,
+            currentDeviceId = null,
+            currentDeviceKey = null,
+        ).toBackendIncyDevice()
     }
 
     suspend fun renameIncyDevice(token: String, deviceId: String, name: String): BackendIncyDevice {

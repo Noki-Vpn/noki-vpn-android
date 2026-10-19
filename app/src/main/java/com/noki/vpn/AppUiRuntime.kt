@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.SavedStateHandle
 import com.noki.vpn.data.AuthTokenRefresher
+import com.noki.vpn.data.AuthRefreshRejectedException
 import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.BackendApiClient
 import com.noki.vpn.data.BackendDevice
@@ -165,10 +166,20 @@ internal class AppUiRuntime(
         isInvitedDevice = { isCurrentDeviceInvited() },
         currentAuthAttempt = { authSessionCoordinator.attempt() },
         sendCurrentEmailCode = { attempt, email ->
-            authSessionCoordinator.run(attempt) { backendApi.sendPasswordRecoveryCode(email) }
+            authSessionCoordinator.run(attempt) { token ->
+                accountSecurityCoordinator().sendEmailCode(
+                    context = accountSecurityContext(token),
+                    email = email,
+                    currentEmail = null,
+                    currentVerificationCode = null,
+                    purpose = "account_email_change_current",
+                )
+            }
         },
         verifyCurrentEmailCode = { attempt, email, code ->
-            authSessionCoordinator.run(attempt) { backendApi.verifyPasswordRecoveryCode(email, code) }
+            authSessionCoordinator.run(attempt) { token ->
+                accountSecurityCoordinator().verifyCurrentEmailCode(accountSecurityContext(token), email, code)
+            }
         },
         sendEmailCode = { attempt, email, currentEmail, currentCode ->
             authSessionCoordinator.run(attempt) { token ->
@@ -281,12 +292,6 @@ internal class AppUiRuntime(
             backendDeviceId = prepared.backendDeviceId
             backendDeviceAccessRole = prepared.backendDeviceAccessRole.ifBlank { "owner" }
             val interruptedTelegramPurpose = telegramAuthPurposeState.interruptedPurpose
-            val firstScreenStack = when {
-                prepared.isAuthenticated && interruptedTelegramPurpose == TelegramAuthPurpose.LINK ->
-                    listOf(AppDestination.HOME, AppDestination.SECURITY)
-                prepared.isAuthenticated -> listOf(AppDestination.HOME)
-                else -> listOf(AppDestination.LOGIN)
-            }
 
             uiState = AppUiState(
                 installOnboardingStep = installOnboardingStep,
@@ -301,7 +306,7 @@ internal class AppUiRuntime(
                 securitySettings = prepared.securitySettings,
                 advancedSettings = prepared.advancedSettings,
                 endpointOptions = prepared.endpointOptions,
-                isAuthenticated = prepared.isAuthenticated,
+                isAuthenticated = prepared.isAuthenticated && authSessionCoordinator.attempt() != null,
                 telegramLoginState = interruptedTelegramPurpose?.let { purpose ->
                     TelegramLoginStateReducer.error(
                         AppErrorMapper.readableTelegramSdkError(
@@ -329,6 +334,26 @@ internal class AppUiRuntime(
                 repository.updateSettings { latest -> latest.copy(backendDeviceKey = backendDeviceKey) }
             }
 
+            if (uiState.isAuthenticated) {
+                authSessionCoordinator.attempt()?.let { startupAttempt ->
+                    try {
+                        authSessionCoordinator.retryAfterUnauthorized(startupAttempt)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: AuthRefreshRejectedException) {
+                        logout()
+                    } catch (_: Throwable) {
+                        // Keep the encrypted session. Normal authenticated calls retry refresh later.
+                    }
+                }
+            }
+            val firstScreenStack = when {
+                uiState.isAuthenticated && interruptedTelegramPurpose == TelegramAuthPurpose.LINK ->
+                    listOf(AppDestination.HOME, AppDestination.SECURITY)
+                uiState.isAuthenticated -> listOf(AppDestination.HOME)
+                else -> listOf(AppDestination.LOGIN)
+            }
+
             withContext(Dispatchers.IO) { androidUpdateCoordinator.clearSameOrOlderCachedApks() }
             val download = androidUpdateCoordinator.observeDownloads().first()
             uiState = uiState.copy(
@@ -353,16 +378,7 @@ internal class AppUiRuntime(
                 }
             }
 
-            if (prepared.isAuthenticated && !authSessionCoordinator.snapshot().accessToken.isNullOrBlank()) {
-                authSessionCoordinator.attempt()?.let { startupAttempt ->
-                    try {
-                        authSessionCoordinator.retryAfterUnauthorized(startupAttempt)
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Throwable) {
-                        // Keep the encrypted session. Normal authenticated calls retry refresh later.
-                    }
-                }
+            if (uiState.isAuthenticated && authSessionCoordinator.attempt() != null) {
                 startAppNotificationPolling()
                 syncFcmTokenIfAvailable()
                 launchBackendRefresh(BackendRefreshTrigger.Initial)

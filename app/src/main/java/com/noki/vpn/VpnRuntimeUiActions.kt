@@ -3,7 +3,6 @@ package com.noki.vpn
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
-import com.noki.vpn.data.PlanCode
 import com.noki.vpn.data.RuntimeProfilePolicy
 import com.noki.vpn.data.StoredSettings
 import com.noki.vpn.data.VpnConnectionState
@@ -186,7 +185,7 @@ internal fun AppUiRuntime.startVpn() {
         uiState = VpnStartStateReducer.notAuthenticatedState(uiState)
         return
     }
-    if (isFreeTrafficLimitReached(uiState)) {
+    if (VpnStartStateReducer.freeTrafficLimitReached(uiState)) {
         uiState = withFreeTrafficLimitNotice(
             VpnStartStateReducer.freeTrafficLimitState(uiState),
             forceDialog = true,
@@ -251,7 +250,7 @@ internal fun AppUiRuntime.withFreeTrafficLimitNotice(
     forceDialog: Boolean = false,
 ): AppUiState {
     var state = newState
-    val limitReached = isFreeTrafficLimitReached(state)
+    val limitReached = VpnStartStateReducer.freeTrafficLimitReached(state)
     val notice = connectionUiCoordinator.limitNotice(limitReached, forceDialog, state.dialog != null)
     if (!limitReached) return state
 
@@ -284,20 +283,4 @@ internal fun AppUiRuntime.withFreeTrafficLimitNotice(
         dialog = AppDialog.FreeTrafficLimitReached,
         inlineMessage = null,
     )
-}
-
-internal fun AppUiRuntime.isFreeTrafficLimitReached(state: AppUiState): Boolean {
-    if (!state.isAuthenticated) return false
-    val profile = state.userProfile
-    val rawPlanCode = profile.selectedPlanCodeRaw.lowercase(Locale.ROOT)
-    val isFreePlan = profile.selectedPlanCode == PlanCode.FREE ||
-        rawPlanCode == PlanCode.FREE.code ||
-        rawPlanCode.startsWith("${PlanCode.FREE.code}-")
-    if (!isFreePlan) return false
-
-    val isLimitedByStatus = profile.subscriptionStatus.equals("limited", ignoreCase = true)
-    val isLimitedByTraffic = profile.trafficLimitGb?.let { limit ->
-        limit > 0.0 && (profile.trafficUsedGb ?: 0.0) >= limit
-    } ?: false
-    return isLimitedByStatus || isLimitedByTraffic
 }

@@ -250,6 +250,17 @@ fun AdvancedSettingsScreen(
                 )
 
                 Spacer(modifier = Modifier.height(metrics.dp(25f)))
+                AdvancedToggleCard(
+                    enabled = state.advancedSettings.youtubeNoAdsEnabled,
+                    title = tr(language, "YouTube без рекламы", "YouTube without ads"),
+                    backdrop = surfaceBackdrop,
+                    liveGlassEnabled = liveGlassEnabled,
+                    modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
+                        .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp)),
+                    onEnabledChanged = viewModel::setYoutubeNoAdsEnabled,
+                )
+
+                Spacer(modifier = Modifier.height(metrics.dp(25f)))
 
                 AdvancedText(
                     text = tr(language, "Умные правила для сайтов", "Smart site rules"),

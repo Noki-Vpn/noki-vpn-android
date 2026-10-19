@@ -15,6 +15,57 @@ class SettingsPersistenceCodecsTest {
     private val settingsCodec = StoredSettingsCodec { defaults }
 
     @Test
+    fun `YouTube choice preserves the historical storage key without runtime credentials`() {
+        assertFalse(settingsCodec.decode(null).advancedSettings.youtubeNoAdsEnabled)
+        assertFalse(settingsCodec.decode("{}").advancedSettings.youtubeNoAdsEnabled)
+        assertTrue(settingsCodec.decode("""{"youtubeDirectDpiEnabled":true}""").advancedSettings.youtubeNoAdsEnabled)
+        val saved = defaults.copy(
+            advancedSettings = defaults.advancedSettings.copy(youtubeNoAdsEnabled = true))
+        val encoded = settingsCodec.encode(saved)
+        assertEquals(saved, settingsCodec.decode(encoded))
+        assertTrue(org.json.JSONObject(encoded).getBoolean("youtubeDirectDpiEnabled"))
+        assertFalse(org.json.JSONObject(encoded).has("youtubeNoAdsEnabled"))
+    }
+
+    @Test
+    fun `malformed stored YouTube credentials clear runtime while preserving auth and user choice`() {
+        val saved = defaults.copy(
+            profile = defaults.profile.copy(endpointCode = "direct-tls", host = "vpn.example.test", security = "tls",
+                serverName = "cdn.example.test", uuid = "22222222-2222-4222-8222-222222222222"),
+            isAuthenticated = true, backendAccessToken = "access", backendRefreshToken = "refresh",
+            userProfile = defaults.userProfile.copy(username = "retained-user"),
+            endpointOptions = listOf(VpnEndpointOption(code = "direct-tls")),
+            advancedSettings = defaults.advancedSettings.copy(ruRelayEnabled = false, youtubeNoAdsEnabled = true),
+        )
+        val damagedPayloads = listOf(org.json.JSONObject().put("uuid", "obsolete-shared-secret"), "invalid").map { legacy ->
+            org.json.JSONObject(settingsCodec.encode(saved)).put("youtubeCascade", legacy).toString()
+        }
+        for (raw in damagedPayloads) {
+            val restored = settingsCodec.decode(raw)
+            assertEquals(saved.copy(profile = RuntimeProfilePolicy.profileAfterServerSelection(saved.profile)), restored)
+            assertTrue(restored.isAuthenticated)
+            assertTrue(restored.advancedSettings.youtubeNoAdsEnabled)
+            assertEquals("access", restored.backendAccessToken)
+            assertEquals("refresh", restored.backendRefreshToken)
+            assertEquals("", restored.profile.uuid)
+            assertFalse(org.json.JSONObject(settingsCodec.encode(restored)).has("youtubeCascade"))
+            assertFalse(RuntimeProfilePolicy.isCachedProfileUsable(restored))
+        }
+        assertEquals(defaults, settingsCodec.decode(settingsCodec.encode(defaults)))
+    }
+
+    @Test
+    fun `YouTube admission does not prevent cached primary VPN startup`() {
+        val profile = VlessProfile(host = "vpn.example.test", endpointCode = "direct-tls", security = "tls",
+            serverName = "cdn.example.test", uuid = "22222222-2222-4222-8222-222222222222")
+        val settings = defaults.copy(profile = profile, endpointOptions = listOf(VpnEndpointOption(code = profile.endpointCode)),
+            advancedSettings = AdvancedSettings(ruRelayEnabled = false, youtubeNoAdsEnabled = true))
+        assertTrue(RuntimeProfilePolicy.isCachedProfileUsable(settings))
+        assertTrue(RuntimeProfilePolicy.isCachedProfileUsable(settings.copy(
+            advancedSettings = settings.advancedSettings.copy(youtubeNoAdsEnabled = false))))
+    }
+
+    @Test
     fun `pending credentials survive process storage while legacy accounts default complete`() {
         val pending = defaults.copy(
             isAuthenticated = true,

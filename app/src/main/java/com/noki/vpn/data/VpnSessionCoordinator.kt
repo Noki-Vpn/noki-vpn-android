@@ -251,18 +251,19 @@ class VpnSessionCoordinator(
             registerDevice(token, safeDeviceKey, deviceId.ifBlank { null })
         }
 
-        val challenge = try {
-            backendStep("device_challenge") { sessionApi.createDeviceChallenge(token, currentDevice.id) }
-        } catch (error: BackendException) {
-            if (error.statusCode !in RECOVERABLE_DEVICE_STATUS_CODES) throw error
-            currentDevice = registerDevice(token, safeDeviceKey, null)
-            backendStep("device_challenge") { sessionApi.createDeviceChallenge(token, currentDevice.id) }
-        }
-        deviceId = currentDevice.id
-        accessRole = currentDevice.accessRole.ifBlank { accessRole }
+        val session = DeviceIdentity.withChallengeTransaction {
+            val challenge = try {
+                backendStep("device_challenge") { sessionApi.createDeviceChallenge(token, currentDevice.id) }
+            } catch (error: BackendException) {
+                if (error.statusCode !in RECOVERABLE_DEVICE_STATUS_CODES) throw error
+                currentDevice = registerDevice(token, safeDeviceKey, null)
+                backendStep("device_challenge") { sessionApi.createDeviceChallenge(token, currentDevice.id) }
+            }
+            deviceId = currentDevice.id
+            accessRole = currentDevice.accessRole.ifBlank { accessRole }
 
-        val signature = backendStep("challenge_sign") { challengeSigner(challenge.nonce) }
-        val session = backendStep("session_create") { sessionApi.createVpnSession(
+            val signature = backendStep("challenge_sign") { challengeSigner(challenge.nonce) }
+            backendStep("session_create") { sessionApi.createVpnSession(
                 token = token,
                 deviceId = deviceId,
                 deviceKey = currentDevice.deviceKey,
@@ -274,7 +275,8 @@ class VpnSessionCoordinator(
                 profileCode = profileCode,
                 nodeId = sessionSelection.nodeId.takeUnless { settings.advancedSettings.multiHop.enabled },
                 multiHop = settings.advancedSettings.multiHop.takeIf { it.enabled },
-        ) }
+            ) }
+        }
         if (!session.canConnect) {
             throw BackendException("vpn_access_denied", 403)
         }

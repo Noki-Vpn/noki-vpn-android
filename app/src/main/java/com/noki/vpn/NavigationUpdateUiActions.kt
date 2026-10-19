@@ -41,17 +41,21 @@ internal fun AppUiRuntime.setPendingVpnStartMode(mode: VpnRuntimeMode) {
 
 internal fun requireStartupFlow(state: AppUiState, previous: AppUiState = state): AppUiState {
     if (!state.isReady || state.currentDestination == AppDestination.SPLASH) return state
-    if (state.installOnboardingStep == InstallOnboardingStep.COMPLETE ||
-        state.installOnboardingStep == InstallOnboardingStep.APPEARANCE
-    ) {
-        val authenticated = AuthStepReducer.requireCredentialsSetup(state, previous)
-        return if (state.installOnboardingStep == InstallOnboardingStep.APPEARANCE &&
-            authenticated.isAuthenticated && !authenticated.userProfile.credentialsSetupRequired
-        ) authenticated.copy(screenStack = listOf(AppDestination.HOME), dialog = null) else authenticated
+    val authenticated = AuthStepReducer.requireCredentialsSetup(state, previous)
+    if (!authenticated.isAuthenticated) {
+        return if (AppDestination.ONBOARDING in authenticated.screenStack) {
+            authenticated.copy(screenStack = listOf(AppDestination.LOGIN), dialog = null)
+        } else authenticated
     }
-    val selectingApps = state.installOnboardingStep == InstallOnboardingStep.ROUTING &&
-        state.screenStack == listOf(AppDestination.ONBOARDING, AppDestination.APP_FILTER)
-    return if (selectingApps) state else state.copy(
+    if (authenticated.userProfile.credentialsSetupRequired ||
+        authenticated.installOnboardingStep == InstallOnboardingStep.COMPLETE
+    ) return authenticated
+    if (authenticated.installOnboardingStep == InstallOnboardingStep.APPEARANCE) {
+        return authenticated.copy(screenStack = listOf(AppDestination.HOME), dialog = null)
+    }
+    val selectingApps = authenticated.installOnboardingStep == InstallOnboardingStep.ROUTING &&
+        authenticated.screenStack == listOf(AppDestination.ONBOARDING, AppDestination.APP_FILTER)
+    return if (selectingApps) authenticated else authenticated.copy(
         screenStack = listOf(AppDestination.ONBOARDING),
         dialog = null,
     )
@@ -66,7 +70,7 @@ internal fun AppUiRuntime.advanceInstallOnboarding() {
     val canAdvance = if (uiState.installOnboardingStep == InstallOnboardingStep.APPEARANCE) {
         showsInstallAppearanceDialog(uiState)
     } else uiState.currentDestination == AppDestination.ONBOARDING
-    if (!uiState.isReady || !canAdvance) return
+    if (!uiState.isReady || !uiState.isAuthenticated || uiState.userProfile.credentialsSetupRequired || !canAdvance) return
     val next = when (uiState.installOnboardingStep) {
         InstallOnboardingStep.CONSENT -> InstallOnboardingStep.ROUTING
         InstallOnboardingStep.ROUTING -> InstallOnboardingStep.APPEARANCE
@@ -96,8 +100,9 @@ private fun AppUiRuntime.saveInstallOnboardingStep(step: InstallOnboardingStep) 
 }
 
 internal fun AppUiRuntime.goBack() {
-    if (uiState.installOnboardingStep == InstallOnboardingStep.CONSENT ||
-        uiState.installOnboardingStep == InstallOnboardingStep.ROUTING
+    if (uiState.isAuthenticated && !uiState.userProfile.credentialsSetupRequired &&
+        (uiState.installOnboardingStep == InstallOnboardingStep.CONSENT ||
+            uiState.installOnboardingStep == InstallOnboardingStep.ROUTING)
     ) {
         if (uiState.currentDestination == AppDestination.APP_FILTER) {
             uiState = uiState.copy(screenStack = listOf(AppDestination.ONBOARDING), dialog = null)
@@ -227,7 +232,7 @@ private fun AppUiRuntime.navigate(
     if (destination == AppDestination.SECURITY) {
         refreshAndroidUpdateStatus()
     }
-    if (isCurrentDeviceInvited() && destination == AppDestination.DEVICES) {
+    if (isCurrentDeviceInvited() && destination in setOf(AppDestination.DEVICES, AppDestination.EXTRA_DEVICES)) {
         uiState = uiState.copy(dialog = AppDialog.AccessDenied, inlineMessage = null)
         return
     }

@@ -12,11 +12,54 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BackendMultiHopContractTest {
+    private fun youtubeCascade(): JSONObject = JSONObject()
+        .put("host", "cascade.example.test").put("port", 443)
+        .put("uuid", "11111111-1111-4111-8111-111111111111").put("server_name", "cdn.example.test")
+        .put("public_key", java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 7 }))
+        .put("short_id", "0123456789abcdef").put("fingerprint", "chrome").put("flow", "xtls-rprx-vision")
+
+    @Test
+    fun `direct and multihop ignore obsolete YouTube session credentials`() {
+        for (multihop in listOf(true, false)) {
+            val payload = fixture().put("youtube_cascade", youtubeCascade())
+            if (!multihop) {
+                payload.put("route_mode", "direct")
+                payload.remove("multihop")
+            }
+            val session = BackendVpnSessionJsonParser.parse(payload)
+            for (candidate in session.endpointCandidates) {
+                assertEquals(session.vpnSecret, EndpointSelector.profileFromCandidate(session, candidate).uuid)
+            }
+            assertEquals(session, BackendVpnSessionJsonParser.parse(payload.apply { remove("youtube_cascade") }))
+        }
+    }
+
+    @Test
+    fun `malformed obsolete YouTube credentials do not reject the primary session`() {
+        val mutations: List<(JSONObject) -> Unit> = listOf(
+            { it.remove("host") }, { it.remove("uuid") }, { it.remove("server_name") },
+            { it.remove("public_key") }, { it.remove("short_id") },
+            { it.put("host", "cascade.example.test/path") }, { it.put("host", "999.1.2.3") },
+            { it.put("server_name", "cdn.example.test:443") }, { it.put("uuid", "1-1-1-1-1") },
+            { it.put("port", 0) }, { it.put("port", 65536) }, { it.put("port", "443") },
+            { it.put("public_key", "invalid") }, { it.put("short_id", "xyz") },
+            { it.put("fingerprint", "") }, { it.put("flow", "invalid") },
+        )
+        for (mutate in mutations) {
+            val cascade = youtubeCascade().also(mutate)
+            assertEquals(BackendVpnSessionJsonParser.parse(fixture()),
+                BackendVpnSessionJsonParser.parse(fixture().put("youtube_cascade", cascade)))
+        }
+        assertEquals(BackendVpnSessionJsonParser.parse(fixture()),
+            BackendVpnSessionJsonParser.parse(fixture().put("youtube_cascade", "invalid")))
+    }
+
     private fun fixture(): JSONObject {
         val path = generateSequence(File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
             .map { File(it, "contracts/multihop_session_v2.json") }

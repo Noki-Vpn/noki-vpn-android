@@ -149,6 +149,8 @@ class MainViewModel(
 
     fun showCreateIncyDevice() = runtime.showCreateIncyDevice()
 
+    fun requestDeviceTrafficPoolChange(deviceId: String, isIncy: Boolean = false) = runtime.requestDeviceTrafficPoolChange(deviceId, isIncy)
+
     fun updateIncyDeviceName(value: String) = runtime.updateIncyDeviceName(value)
 
     fun createIncyDevice() = runtime.createIncyDevice()
@@ -254,6 +256,8 @@ class MainViewModel(
     fun setMultiHop(settings: MultiHopSettings) = runtime.setMultiHop(settings)
 
     fun setRuRelayEnabled(enabled: Boolean) = runtime.setRuRelayEnabled(enabled)
+
+    fun setYoutubeNoAdsEnabled(enabled: Boolean) = runtime.setYoutubeNoAdsEnabled(enabled)
 
     fun toggleBiometric(enabled: Boolean) = runtime.toggleBiometric(enabled)
 

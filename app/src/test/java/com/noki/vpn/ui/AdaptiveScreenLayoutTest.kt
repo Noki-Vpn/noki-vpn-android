@@ -744,20 +744,113 @@ class AdaptiveScreenLayoutTest {
             compose.onNodeWithText("Переименовать").assertDoesNotExist()
             val heading = compose.onNodeWithText("Текущее устройство").fetchSemanticsNode().boundsInRoot
             val card = compose.onNode(hasText("Google Pixel 6") and hasClickAction()).fetchSemanticsNode().boundsInRoot
-            val removeOthers = compose.onNode(
-                hasText("Удалить все устройства кроме текущего") and hasClickAction(),
-            ).fetchSemanticsNode().boundsInRoot
-            val otherDevices = compose.onNodeWithText("Другие устройства").fetchSemanticsNode().boundsInRoot
             assertTrue("Current-device heading must be outside and above the card", heading.bottom < card.top)
-            assertEquals(
-                "Current-device content uses equal gaps",
-                card.top - heading.bottom, removeOthers.top - card.bottom, 2f,
-            )
-            assertTrue(
-                "Other devices needs a separate group gap",
-                otherDevices.top - removeOthers.bottom >= removeOthers.height * 0.40f,
-            )
+            compose.onNodeWithText("Основные устройства").assertDoesNotExist()
+            compose.onNodeWithText("В доп. устройства").assertDoesNotExist()
+            assertEquals(1, compose.onAllNodes(hasText("Noki устройства")).fetchSemanticsNodes().size)
+            compose.onNodeWithText("Доп. устройства").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Удалить все устройства кроме текущего").performScrollTo().assertIsDisplayed()
             saveImage("devices-wide")
+        }
+    }
+
+    @Test
+    fun currentDeviceModalOffersPoolTransfer() {
+        val viewModel = layoutViewModel()
+        val runtime = org.robolectric.util.ReflectionHelpers.getField<com.noki.vpn.AppUiRuntime>(viewModel, "runtime")
+        runtime.uiState = russianState().copy(
+            devices = listOf(DeviceSession("current", "Phone", "Android", true, true)),
+            dialog = com.noki.vpn.AppDialog.RenameDevice("current"),
+        )
+        render {
+            DevicesScreen(
+                state = viewModel.uiState,
+                viewModel = viewModel, sharedBackdrop = rememberPrismalGlassLayer(),
+                showBackground = false, liveGlassEnabled = false,
+            )
+        }.use {
+            compose.onNode(hasText("В доп. устройства") and hasClickAction()).assertIsDisplayed().performClick()
+            compose.onNodeWithText("Перенести устройство?").assertIsDisplayed()
+            assertEquals(com.noki.vpn.AppDialog.MoveDevice("current", "shared"), viewModel.uiState.dialog)
+            assertEquals("primary", viewModel.uiState.devices.single().trafficPool)
+            compose.onNodeWithText("Отмена").performClick()
+            compose.onNodeWithText("Сохранить").assertIsDisplayed()
+            assertEquals(com.noki.vpn.AppDialog.RenameDevice("current"), viewModel.uiState.dialog)
+            compose.onNodeWithText("В доп. устройства").performClick()
+            compose.onNodeWithText("Перенести").performClick()
+            val failed = viewModel.uiState.dialog as com.noki.vpn.AppDialog.MoveDevice
+            assertFalse(failed.isLoading)
+            assertTrue(!failed.error.isNullOrBlank())
+            compose.onNodeWithText(failed.error!!).assertIsDisplayed()
+            assertEquals("primary", viewModel.uiState.devices.single().trafficPool)
+            saveImage("current-device-modal")
+        }
+    }
+
+    @Test
+    fun incyMoveUsesConfirmationAndCancelRestoresItsManagementDialog() {
+        val viewModel = layoutViewModel()
+        val runtime = org.robolectric.util.ReflectionHelpers.getField<com.noki.vpn.AppUiRuntime>(viewModel, "runtime")
+        runtime.uiState = russianState().let { it.copy(incyDevices = it.incyDevices.copy(
+            devices = listOf(com.noki.vpn.data.BackendIncyDevice("incy", "Laptop", trafficPool = "shared")),
+            selectedDeviceId = "incy", nameInput = "Laptop", isManageDialogVisible = true,
+        )) }
+        render {
+            DevicesScreen(viewModel.uiState, viewModel, sharedBackdrop = rememberPrismalGlassLayer(),
+                showBackground = false, liveGlassEnabled = false)
+        }.use {
+            compose.onNodeWithText("В основные устройства").performClick()
+            compose.onNodeWithText("Перенести устройство?").assertIsDisplayed()
+            assertEquals(com.noki.vpn.AppDialog.MoveDevice("incy", "primary", isIncy = true), viewModel.uiState.dialog)
+            compose.onNodeWithText("Отмена").performClick()
+            compose.onNodeWithText("В основные устройства").assertIsDisplayed()
+            assertEquals(null, viewModel.uiState.dialog)
+            assertEquals("shared", viewModel.uiState.incyDevices.devices.single().trafficPool)
+        }
+    }
+
+    @Test
+    fun moveConfirmationDisablesBothActionsDuringRequest() {
+        render {
+            DevicesConfirmDialog("Перенести устройство?", "Phone", "Перенос…", "Отмена", null, false, 1f,
+                {}, {}, isLoading = true)
+        }.use {
+            compose.onNodeWithText("Перенос…").assertIsNotEnabled()
+            compose.onNodeWithText("Отмена").assertIsNotEnabled()
+        }
+    }
+
+    @Test
+    fun additionalDevicesShowSharedTrafficAndNoCreationActions() {
+        val viewModel = layoutViewModel()
+        val state = russianState().let { it.copy(
+            devices = listOf(
+                DeviceSession("current", "Shared phone", "Android", true, true, trafficPool = "shared"),
+                DeviceSession("primary", "Primary phone", "Android", false, true),
+            ),
+            incyDevices = it.incyDevices.copy(devices = listOf(
+                com.noki.vpn.data.BackendIncyDevice("shared-incy", "Shared INCY", trafficPool = "shared"),
+            )),
+            userProfile = it.userProfile.copy(sharedTrafficUsedGb = 1.0, sharedTrafficLimitGb = 2.0,
+                sharedPeriodEnd = "2026-11-01T00:00:00+03:00", sharedFreeOnly = true),
+        ) }
+        render {
+            DevicesScreen(state, viewModel, showAdditional = true,
+                sharedBackdrop = rememberPrismalGlassLayer(), showBackground = false, liveGlassEnabled = false)
+        }.use {
+            compose.onNodeWithText("Устройств: 2").assertIsDisplayed()
+            compose.onNodeWithText("Общий трафик").assertIsDisplayed()
+            compose.onNodeWithText("1 ГБ / 2 ГБ").assertIsDisplayed()
+            compose.onNodeWithText("Квота обновится", substring = true).assertDoesNotExist()
+            compose.onNodeWithText("На все доп. устройства", substring = true).assertDoesNotExist()
+            compose.onNodeWithText("До обновления квоты", substring = true).assertDoesNotExist()
+            compose.onNodeWithText("Noki устройства").assertIsDisplayed()
+            compose.onNodeWithText("Primary phone").assertDoesNotExist()
+            compose.onNodeWithText("Shared phone").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Shared INCY").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Добавить устройство").assertDoesNotExist()
+            compose.onNodeWithText("Создать код для подключения устройства").assertDoesNotExist()
+            saveImage("additional-devices")
         }
     }
 
@@ -790,12 +883,13 @@ class AdaptiveScreenLayoutTest {
     @Test
     fun deviceActionsHaveEqualBoundsAndRenameRemainsClickable() {
         var renamed = false
+        var moved = false
         render {
             DeleteDeviceDialog(
                 device = DeviceSession("fixture", "Noki — тестовое устройство", "Android", false, false),
                 language = AppLanguage.RU, scale = 470f / 370f,
                 backdrop = null, liveGlassEnabled = false,
-                onDismiss = {}, onFullAccessChanged = { _, _ -> },
+                onDismiss = {}, onFullAccessChanged = { _, _ -> }, onMove = { moved = true },
                 onRename = { renamed = true }, onConfirm = {},
             )
         }.use {
@@ -808,6 +902,8 @@ class AdaptiveScreenLayoutTest {
             assertEquals(deleteBounds.left, renameBounds.left, 1f)
             assertTrue("Device actions need a distinct gap", deleteBounds.top - renameBounds.bottom >= renameBounds.height * 0.30f)
             saveImage("device-dialog-wide")
+            compose.onNode(hasText("В доп. устройства") and hasClickAction()).performClick()
+            assertTrue(moved)
             rename.performClick()
             assertTrue(renamed)
         }

@@ -126,7 +126,7 @@ object AppErrorMapper {
                         tr(language, "Такой username уже занят, попробуйте другой", "This username is taken, try another")
 
                     else ->
-                        tr(language, "Пользователь с таким e-mail или username уже существует", "A user with this email or username already exists")
+                        tr(language, "Не удалось завершить регистрацию: конфликт данных. Повторите попытку", "Registration could not be completed: conflicting data. Please try again")
                 }
                 422 -> readableRegistrationValidationError(language, error.message)
                 else -> readableNetworkError(language, error)
@@ -299,6 +299,13 @@ object AppErrorMapper {
             else -> readableNetworkError(language, error)
         }
     }
+
+    fun readableDeviceNameError(language: AppLanguage, error: Throwable): String =
+        if (error is BackendException && error.statusCode == 403) {
+            tr(language, "Попробуйте другое имя", "Try another name")
+        } else {
+            readableNetworkError(language, error)
+        }
 
     fun readableNetworkError(
         language: AppLanguage,

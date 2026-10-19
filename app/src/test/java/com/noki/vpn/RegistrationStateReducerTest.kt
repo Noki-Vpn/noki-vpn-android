@@ -18,6 +18,10 @@ class RegistrationStateReducerTest {
             "This username is taken, try another",
             AppErrorMapper.readableRegistrationError(AppLanguage.EN, BackendException("Username already exists", 409)),
         )
+        assertEquals(
+            "Registration could not be completed: conflicting data. Please try again",
+            AppErrorMapper.readableRegistrationError(AppLanguage.EN, BackendException("Device registration conflict", 409)),
+        )
     }
 
     @Test
@@ -205,12 +209,27 @@ class RegistrationStateReducerTest {
         assertEquals("Network error", updated.registrationForm.error)
     }
 
+    @Test
+    fun usernameConflictAtCompletionReturnsToUsernameStep() {
+        val state = AppUiState(
+            authStep = AuthStep.REGISTRATION_PASSWORD,
+            registrationForm = validForm().copy(isLoading = true),
+        )
+
+        val updated = RegistrationStateReducer.registrationFailed(state, "Username is taken", usernameConflict = true)
+
+        assertEquals(AuthStep.REGISTRATION_PROFILE, updated.authStep)
+        assertEquals(state.registrationForm.username, updated.registrationForm.username)
+        assertEquals("Username is taken", updated.registrationForm.error)
+        assertEquals(false, updated.registrationForm.isLoading)
+    }
+
     private fun validForm(): RegistrationFormState =
         RegistrationFormState(
-            username = "ykino",
-            email = "ykino@example.com",
+            username = "user1",
+            email = "user1@example.com",
             verificationCode = "1234",
-            password = "00000000",
-            passwordRepeat = "00000000",
+            password = "example1",
+            passwordRepeat = "example1",
         )
 }

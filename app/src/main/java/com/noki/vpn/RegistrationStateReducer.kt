@@ -206,8 +206,10 @@ object RegistrationStateReducer {
     fun registrationFailed(
         current: AppUiState,
         error: String,
+        usernameConflict: Boolean = false,
     ): AppUiState {
         return current.copy(
+            authStep = if (usernameConflict) AuthStep.REGISTRATION_PROFILE else current.authStep,
             registrationForm = current.registrationForm.copy(
                 isLoading = false,
                 error = error,

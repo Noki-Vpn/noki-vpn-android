@@ -124,28 +124,29 @@ internal class RuWireGuardConnectionCoordinator(
                 )
             }
         }
-        val keyProof = api.createDeviceChallenge(token, device)
-        val key = api.registerRuWireGuardKey(
-            token, device, deviceKey, keyProof.nonce,
-            DeviceIdentity.signChallenge(keyProof.nonce), pair.publicKeyBase64(),
-        )
-        val sessionProof = api.createDeviceChallenge(token, device)
-        val request = RuWireGuardSessionRequest(
-            deviceId = device,
-            deviceKey = deviceKey,
-            deviceNonce = sessionProof.nonce,
-            deviceSignature = DeviceIdentity.signChallenge(sessionProof.nonce),
-            requestId = UUID.randomUUID().toString(),
-            publicKeyId = key.id,
-            exitNodeId = exit.id,
-            entryNodeId = entryId,
-            routeVersion = catalog.routeVersion,
-            relaySelection = RuRelaySelection.Auto,
-            relayRttSamples = relayRttSamples,
-        )
+        val key = DeviceIdentity.withChallengeTransaction {
+            val keyProof = api.createDeviceChallenge(token, device)
+            api.registerRuWireGuardKey(token, device, deviceKey, keyProof.nonce,
+                DeviceIdentity.signChallenge(keyProof.nonce), pair.publicKeyBase64())
+        }
         var response: BackendRuWireGuardSession? = null
         try {
-            val initialResponse = api.createRuWireGuardSession(token, request)
+            val initialResponse = DeviceIdentity.withChallengeTransaction {
+                val sessionProof = api.createDeviceChallenge(token, device)
+                api.createRuWireGuardSession(token, RuWireGuardSessionRequest(
+                    deviceId = device,
+                    deviceKey = deviceKey,
+                    deviceNonce = sessionProof.nonce,
+                    deviceSignature = DeviceIdentity.signChallenge(sessionProof.nonce),
+                    requestId = UUID.randomUUID().toString(),
+                    publicKeyId = key.id,
+                    exitNodeId = exit.id,
+                    entryNodeId = entryId,
+                    routeVersion = catalog.routeVersion,
+                    relaySelection = RuRelaySelection.Auto,
+                    relayRttSamples = relayRttSamples,
+                ))
+            }
             response = initialResponse
             val initialIdentity = initialResponse.identity
             repository.stageRuWireGuardRevoke(PendingRuWireGuardRevoke(

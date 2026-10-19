@@ -75,6 +75,14 @@ object BootstrapStateMapper {
                 trafficLimitGb = bootstrap.subscription.trafficLimitGb,
                 subscriptionExpiresAt = bootstrap.subscription.expiresAt,
                 subscriptionStatus = bootstrap.subscription.status,
+                primaryDeviceLimit = bootstrap.subscription.primaryDeviceLimit,
+                sharedTrafficUsedGb = bootstrap.subscription.sharedTrafficUsedGb,
+                sharedTrafficLimitGb = bootstrap.subscription.sharedTrafficLimitGb,
+                sharedPeriodStart = bootstrap.subscription.sharedPeriodStart,
+                sharedPeriodEnd = bootstrap.subscription.sharedPeriodEnd,
+                sharedFreeOnly = bootstrap.subscription.sharedFreeOnly,
+                trialTrafficRemainingGb = bootstrap.subscription.trialTrafficRemainingGb,
+                freeLocationsOnly = bootstrap.subscription.freeLocationsOnly,
             ),
             devices = mapDevices(
                 devices = bootstrap.devices,
@@ -132,6 +140,7 @@ object BootstrapStateMapper {
                 isOnline = isCurrent || device.isActive,
                 isActive = device.isActive,
                 accessRole = device.accessRole,
+                trafficPool = device.trafficPool,
             )
         }
     }

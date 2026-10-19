@@ -28,7 +28,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.noki.vpn.AppUiState
 import com.noki.vpn.data.AppLanguage
-import com.noki.vpn.data.PlanCode
 
 @Composable
 internal fun AdditionalDeviceInfo(
@@ -53,8 +52,8 @@ internal fun AdditionalDeviceInfo(
         DevicesText(
             text = tr(
                 language,
-                "Если лимит закончится, удалить устройство можно в этом разделе",
-                "If the limit is reached, remove a device in this section",
+                "Когда места в тарифе закончатся, новые устройства попадут в доп. устройства",
+                "When the plan is full, new devices are added to additional devices",
             ),
             fontSize = 11f,
             lineHeight = 12.5f,
@@ -213,18 +212,17 @@ internal fun DevicesText(
     )
 }
 
+internal fun primaryDeviceCount(state: AppUiState): Int =
+    state.devices.count { it.isActive && it.trafficPool != "shared" } +
+        state.incyDevices.devices.count { it.trafficPool != "shared" }
+
 internal fun deviceLimit(state: AppUiState): Int {
-    return state.plans.firstOrNull { plan ->
+    return state.userProfile.primaryDeviceLimit ?: state.plans.firstOrNull { plan ->
         plan.code.equals(state.userProfile.selectedPlanCodeRaw, ignoreCase = true) ||
             plan.tier.equals(state.userProfile.selectedPlanCodeRaw, ignoreCase = true) ||
             state.userProfile.selectedPlanCodeRaw.startsWith(plan.tier, ignoreCase = true)
     }?.devices
-        ?: when (state.userProfile.selectedPlanCode) {
-            PlanCode.FREE -> 1
-            PlanCode.PLUS -> 3
-            PlanCode.PRO -> 8
-            PlanCode.PREMIUM -> 12
-        }
+        ?: 1
 }
 
 internal fun additionalDeviceTitle(remainingDevices: Int, language: AppLanguage): String {

@@ -1421,6 +1421,31 @@ class AppVpnServiceCommandTest {
     }
 
     @Test
+    fun rejectedYouTubeRuntimeRestoresPrimaryOnTheSameTunnel() = runBlocking {
+        val fixture = Fixture(this, probeFallback = true, workingEndpoint = "tcp1")
+        fixture.startPrepared()
+        val settings = checkNotNull(fixture.orchestrator.currentSettings()).let { current -> current.copy(
+            isAuthenticated = true, backendDeviceId = "66666666-6666-4666-8666-666666666666", backendDeviceKey = "device-key",
+            advancedSettings = current.advancedSettings.copy(youtubeNoAdsEnabled = true)) }
+        fixture.saveSettings(settings)
+        fixture.installYoutubeConfig(YoutubeConnectionConfig.WireGuard(BackendRuWireGuardConfig(
+            "203.0.113.7:51820", java.util.Base64.getEncoder().encodeToString(ByteArray(32) { 7 }),
+            "10.88.0.2/32", listOf("1.1.1.1"), 1280, listOf("0.0.0.0/0")), ByteArray(32) { 9 }))
+        val tunnel = fixture.orchestrator.currentTunnel()
+        fixture.rejectYoutubeRuntime = true
+
+        assertTrue(fixture.replaceConnected(rollbackOnFailure = true, youtubeUpdate = true))
+
+        assertEquals(tunnel, fixture.orchestrator.currentTunnel())
+        assertEquals(VpnConnectionState.CONNECTED, fixture.orchestrator.currentState())
+        assertTrue(fixture.runtimeRunning)
+        assertTrue(fixture.startedConfigs[1].has("endpoints"))
+        assertFalse(fixture.startedConfigs.last().has("endpoints"))
+        assertTrue(fixture.savedSettings().advancedSettings.youtubeNoAdsEnabled)
+        assertTrue(fixture.savedSettings().isAuthenticated)
+    }
+
+    @Test
     fun cancelledFailedClosedReadinessStopsRuntimeAndRetainsBlockedTunnel() = runBlocking {
         val fixture = Fixture(this, probeFallback = true, workingEndpoint = "tcp1")
         fixture.enableKillSwitch()
@@ -1714,6 +1739,8 @@ class AppVpnServiceCommandTest {
     ) {
         val service = Robolectric.buildService(AppVpnService::class.java).get()
         val startedEndpoints = mutableListOf<String>()
+        val startedConfigs = mutableListOf<JSONObject>()
+        var rejectYoutubeRuntime = false
         var runtimeRunning = false
         var runtimeStops = 0
         var runtimeRebinds = 0
@@ -1747,7 +1774,10 @@ class AppVpnServiceCommandTest {
             core = object : VpnCoreRuntime {
                 override fun start(config: String, tunFd: Int): Boolean {
                     check(probeFallback)
-                    val outbound = JSONObject(config).getJSONArray("outbounds").getJSONObject(0)
+                    val parsed = JSONObject(config)
+                    startedConfigs += parsed
+                    if (rejectYoutubeRuntime && parsed.has("endpoints")) return false
+                    val outbound = parsed.getJSONArray("outbounds").getJSONObject(0)
                     startedEndpoints += if (outbound.getString("type") == "hysteria2") "hy2"
                         else outbound.getString("server").substringBefore('.')
                     runtimeRunning = true
@@ -1994,14 +2024,25 @@ class AppVpnServiceCommandTest {
             ) }
         }
 
-        suspend fun replaceConnected(rollbackOnFailure: Boolean = false, canActivate: () -> Boolean = { true }): Boolean = suspendCoroutineUninterceptedOrReturn { continuation ->
+        fun installYoutubeConfig(config: YoutubeConnectionConfig) {
+            val connection = AppVpnService::class.java.declaredMethods.single { it.name == "getYoutubeConnection" }
+                .apply { isAccessible = true }.invoke(service) as YoutubeConnection
+            val settings = checkNotNull(orchestrator.currentSettings())
+            val target = YoutubeConnection::class.java.getDeclaredMethod("targetFor", StoredSettings::class.java,
+                com.noki.vpn.data.VlessProfile::class.java).apply { isAccessible = true }.invoke(connection, settings, settings.profile)
+            for ((name, value) in listOf("configuration" to config, "validUntil" to System.currentTimeMillis() + 120_000L,
+                "target" to target)) YoutubeConnection::class.java.getDeclaredField(name).apply { isAccessible = true }.set(connection, value)
+        }
+
+        suspend fun replaceConnected(rollbackOnFailure: Boolean = false, youtubeUpdate: Boolean = false,
+                                     canActivate: () -> Boolean = { true }): Boolean = suspendCoroutineUninterceptedOrReturn { continuation ->
             val settings = checkNotNull(orchestrator.currentSettings())
             try {
                 AppVpnService::class.java.declaredMethods.single { it.name == "replaceCoreOnExistingTunnel" }
                     .apply { isAccessible = true }.invoke(
                         service, SettingsRepository(service), settings, settings, settings,
                         EndpointRankingPolicy.NetworkKind.CELLULAR, orchestrator.currentTunnel(),
-                        orchestrator.beginTransition(), null, false, rollbackOnFailure, null, canActivate, continuation,
+                        orchestrator.beginTransition(), null, false, rollbackOnFailure, null, canActivate, youtubeUpdate, continuation,
                     )
             } catch (error: java.lang.reflect.InvocationTargetException) {
                 throw error.targetException

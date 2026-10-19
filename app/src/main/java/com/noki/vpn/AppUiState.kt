@@ -55,6 +55,7 @@ enum class AppDestination {
     SUPPORT,
     PERSONALIZATION,
     DEVICES,
+    EXTRA_DEVICES,
 }
 
 enum class AuthStep {
@@ -110,6 +111,13 @@ sealed interface AppDialog {
     ) : AppDialog
     data class RemoveDevice(val deviceId: String) : AppDialog
     data class RenameDevice(val deviceId: String) : AppDialog
+    data class MoveDevice(
+        val deviceId: String,
+        val trafficPool: String,
+        val isIncy: Boolean = false,
+        val isLoading: Boolean = false,
+        val error: String? = null,
+    ) : AppDialog
 }
 
 data class IncyDevicesUiState(

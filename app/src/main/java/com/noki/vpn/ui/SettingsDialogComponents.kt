@@ -255,6 +255,7 @@ internal fun SettingsCompactInputDialog(
     maxLength: Int = 64,
     error: String? = null,
     isLoading: Boolean = false,
+    extraContent: (@Composable () -> Unit)? = null,
 ) {
     Box(
         modifier = modifier
@@ -308,6 +309,8 @@ internal fun SettingsCompactInputDialog(
                     maxLines = 2,
                 )
             }
+
+            extraContent?.invoke()
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
