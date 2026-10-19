@@ -98,9 +98,42 @@ class SettingsPersistenceCodecsTest {
         assertEquals(VpnProtocol.REALITY, restored.copy(ruRelayEnabled = false).effectiveProtocol)
         val disabled = settings.copy(advancedSettings = settings.advancedSettings.copy(ruRelayEnabled = false))
         assertFalse(settingsCodec.decode(settingsCodec.encode(disabled)).advancedSettings.ruRelayEnabled)
-        val damaged = settingsCodec.decode("""{"protocol":"WIREGUARD","ruRelayEnabled":false}""")
+        val damaged = settingsCodec.decode("""{"protocol":"WIREGUARD","ruRelayEnabled":false,"ruRelayDefaultsVersion":1}""")
         assertFalse(damaged.advancedSettings.ruRelayEnabled)
         assertEquals(VpnProtocol.AUTO, damaged.advancedSettings.effectiveProtocol)
+    }
+
+    @Test
+    fun `upgrade enables RU relay once without resetting account or routing preferences`() {
+        val saved = defaults.copy(
+            isAuthenticated = true, backendAccessToken = "access", backendRefreshToken = "refresh",
+            backendDeviceId = "device-a", ruRelaySelectionRevision = 17L,
+            profile = defaults.profile.copy(endpointCode = "direct-tls", host = "vpn.example.test",
+                security = "tls", uuid = "22222222-2222-4222-8222-222222222222"),
+            selectedPackages = setOf("example.app"),
+            advancedSettings = defaults.advancedSettings.copy(ruRelayEnabled = false,
+                protocol = VpnProtocol.REALITY, youtubeNoAdsEnabled = true,
+                bypassDomains = listOf("domain:example.test")),
+        )
+        val legacy = org.json.JSONObject(settingsCodec.encode(saved)).apply {
+            remove("ruRelayDefaultsVersion")
+        }.toString()
+        val migrated = settingsCodec.decode(legacy)
+        val expected = if (BuildConfig.RU_RELAY_DEFAULT_ENABLED) saved.copy(
+            advancedSettings = saved.advancedSettings.copy(ruRelayEnabled = true),
+            profile = RuntimeProfilePolicy.profileAfterServerSelection(saved.profile),
+            ruRelaySelectionRevision = 18L,
+        ) else saved
+
+        assertEquals(expected, migrated)
+        val persisted = settingsCodec.encode(migrated)
+        assertEquals(1, org.json.JSONObject(persisted).getInt("ruRelayDefaultsVersion"))
+        assertEquals(migrated, settingsCodec.decode(persisted))
+
+        val disabled = migrated.copy(advancedSettings = migrated.advancedSettings.copy(ruRelayEnabled = false))
+        assertEquals(disabled, settingsCodec.decode(settingsCodec.encode(disabled)))
+        assertEquals(disabled, settingsCodec.decode(org.json.JSONObject(settingsCodec.encode(disabled))
+            .put("ruRelayDefaultsVersion", 2).toString()))
     }
 
     @Test
