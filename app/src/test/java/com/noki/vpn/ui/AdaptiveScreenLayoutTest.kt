@@ -260,6 +260,29 @@ class AdaptiveScreenLayoutTest {
     }
 
     @Test
+    fun homeRuRouteAppearsInTheServerCardAndProtocolStaysAuto() {
+        val viewModel = layoutViewModel()
+        for (glass in com.noki.vpn.data.GlassMode.entries) {
+            val state = russianState().copy(
+                advancedSettings = com.noki.vpn.data.AdvancedSettings(ruRelayEnabled = true),
+                connectionState = com.noki.vpn.data.VpnConnectionState.CONNECTED,
+                personalizationSettings = russianState().personalizationSettings.copy(glassMode = glass),
+                userProfile = com.noki.vpn.data.UserProfile(selectedServerCode = "exit", actualCountryCode = "NL"),
+                ruForeignNodes = listOf(com.noki.vpn.data.RuForeignNode("exit", "Нидерланды1", "NL")),
+            )
+            render {
+                HomeScreen(state, viewModel, {}, {}, rememberPrismalGlassLayer(),
+                    liveGlassEnabled = false, showBackground = false, showBottomNavigation = false)
+            }.use {
+                compose.onNodeWithText("RU-реле → Нидерланды1").assertIsDisplayed()
+                compose.onNodeWithText("Auto").assertIsDisplayed()
+                compose.onNodeWithText("WireGuard · RU-реле").assertDoesNotExist()
+                saveImage("home-ru-route-${glass.name.lowercase()}")
+            }
+        }
+    }
+
+    @Test
     fun tallHomeKeepsControlsAboveNavigation() = renderHome().use {
         val status = compose.onNodeWithText("Не подключено").fetchSemanticsNode().boundsInRoot
         val root = compose.onRoot().fetchSemanticsNode().boundsInRoot

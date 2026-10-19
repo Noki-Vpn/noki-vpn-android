@@ -13,9 +13,7 @@ internal fun protocolCardLabel(
     state: AppUiState,
     autoEndpointSelection: Boolean,
 ): String {
-    if (state.advancedSettings.ruRelayEnabled) return tr(
-        state.personalizationSettings.language, "WireGuard · RU-реле", "WireGuard · RU relay",
-    )
+    if (state.advancedSettings.ruRelayEnabled) return "Auto"
     if (!autoEndpointSelection) return selectedEndpointLabel(state)
     val endpointLabel = resolvedEndpointLabel(state) ?: profileEndpointLabel(state)
     return endpointLabel?.let { "Auto ($it)" } ?: "Auto"

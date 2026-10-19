@@ -35,12 +35,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import com.noki.vpn.data.AppLanguage
+import com.noki.vpn.AppUiState
+import com.noki.vpn.data.HopSelection
 import com.noki.vpn.data.ServerLocation
 import com.noki.vpn.data.ServerSelectionMode
 import com.noki.vpn.data.UserProfile
+import com.noki.vpn.data.VpnConnectionState
+import com.noki.vpn.data.usesRuForeignNodeCatalog
 import com.noki.vpn.R
 import com.styropyr0.prismal.sources.PrismalGlassLayer
 import kotlin.math.max
+import java.util.Locale
 
 internal fun homeSelectedLocation(
     locations: List<ServerLocation>,
@@ -68,6 +73,44 @@ internal fun homeSelectedLocation(
             byCode(profile.selectedCountryCode)
                 ?: byCode(profile.selectedServerCode)
     }
+}
+
+internal fun homeServerSubtitle(state: AppUiState): String? {
+    val language = state.personalizationSettings.language
+    val ruRelay = state.advancedSettings.ruRelayEnabled
+    val usesRuCatalog = usesRuForeignNodeCatalog(ruRelay, state.ruForeignNodes)
+    val selectedLocation = homeSelectedLocation(state.locations, state.userProfile)
+    val unavailable = tr(language, "Сервер недоступен", "Server unavailable")
+    fun countryName(code: String?): String? = code?.takeIf { it.isNotBlank() }
+        ?.let { Locale("", it).getDisplayCountry(Locale(language.tag)) }
+    fun nodeName(id: String?): String? = if (usesRuCatalog) {
+        state.ruForeignNodes.firstOrNull { it.id == id }?.name
+    } else state.locations.flatMap { it.servers }.firstOrNull { it.id == id }?.name
+    fun hopLabel(selection: HopSelection?): String = when (selection?.kind) {
+        ServerSelectionMode.COUNTRY -> state.locations.firstOrNull {
+            it.countryCode.equals(selection.countryCode, true)
+        }?.country ?: selection.countryCode.orEmpty()
+        ServerSelectionMode.SERVER -> nodeName(selection.nodeId) ?: unavailable
+        else -> tr(language, "Не выбран", "Not selected")
+    }
+    val multiHop = state.advancedSettings.multiHop
+    val destination = when {
+        ruRelay && state.connectionState == VpnConnectionState.CONNECTED ->
+            state.ruForeignNodes.firstOrNull { it.id == state.userProfile.selectedServerCode }?.name ?: unavailable
+        multiHop.enabled -> hopLabel(multiHop.exit)
+        state.userProfile.serverSelectionMode == ServerSelectionMode.AUTO ->
+            if (ruRelay) tr(language, "Автовыбор", "Automatic") else selectedLocation?.country
+        state.userProfile.serverSelectionMode == ServerSelectionMode.SERVER ->
+            if (ruRelay) nodeName(state.userProfile.selectedNodeId) ?: unavailable
+            else selectedLocation?.servers?.firstOrNull {
+                it.id == state.userProfile.selectedNodeId ||
+                    it.locationCode.equals(state.userProfile.selectedServerCode, true)
+            }?.name
+        ruRelay -> countryName(state.userProfile.selectedCountryCode) ?: unavailable
+        else -> null
+    }
+    val route = if (multiHop.enabled) "${hopLabel(multiHop.entry)} → $destination" else destination
+    return if (ruRelay) "${tr(language, "RU-реле", "RU relay")} → $route" else route
 }
 
 @Composable

@@ -3,6 +3,8 @@ package com.noki.vpn.ui
 import com.noki.vpn.AppUiState
 import com.noki.vpn.data.AdvancedSettings
 import com.noki.vpn.data.AppLanguage
+import com.noki.vpn.data.HopSelection
+import com.noki.vpn.data.MultiHopSettings
 import com.noki.vpn.data.PersonalizationSettings
 import com.noki.vpn.data.RuForeignNode
 import com.noki.vpn.data.ServerLocation
@@ -43,16 +45,60 @@ class HomeTextPolicyTest {
     }
 
     @Test
-    fun `RU protocol label identifies the relay in either language and endpoint mode`() {
+    fun `RU protocol label stays Auto in either language and endpoint mode`() {
         for (language in AppLanguage.entries) {
             val state = AppUiState(
                 advancedSettings = AdvancedSettings(ruRelayEnabled = true),
                 personalizationSettings = PersonalizationSettings(language = language),
             )
-            val expected = if (language == AppLanguage.RU) "WireGuard · RU-реле" else "WireGuard · RU relay"
-            assertEquals(expected, protocolCardLabel(state, autoEndpointSelection = true))
-            assertEquals(expected, protocolCardLabel(state, autoEndpointSelection = false))
+            assertEquals("Auto", protocolCardLabel(state, autoEndpointSelection = true))
+            assertEquals("Auto", protocolCardLabel(state, autoEndpointSelection = false))
         }
+    }
+
+    @Test
+    fun ruServerCardShowsSelectionBeforeConnectionAndOnlyConfirmedExitWhileConnected() {
+        val state = AppUiState(
+            advancedSettings = AdvancedSettings(ruRelayEnabled = true),
+            personalizationSettings = PersonalizationSettings(language = AppLanguage.RU),
+            ruForeignNodes = listOf(RuForeignNode("lv", "Латвия1", "LV"), RuForeignNode("nl", "Нидерланды1", "NL")),
+            userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.SERVER, selectedNodeId = "lv",
+                selectedCountryCode = "LV", selectedServerCode = "nl", actualCountryCode = "NL"),
+        )
+        assertEquals("RU-реле → Латвия1", homeServerSubtitle(state))
+        assertEquals("RU-реле → Латвия", homeServerSubtitle(state.copy(userProfile = state.userProfile.copy(
+            serverSelectionMode = ServerSelectionMode.COUNTRY))))
+        assertEquals("RU-реле → Автовыбор", homeServerSubtitle(state.copy(userProfile = state.userProfile.copy(
+            serverSelectionMode = ServerSelectionMode.AUTO))))
+        for (mode in ServerSelectionMode.entries) {
+            val connected = state.copy(connectionState = VpnConnectionState.CONNECTED,
+                userProfile = state.userProfile.copy(serverSelectionMode = mode))
+            assertEquals("RU-реле → Нидерланды1", homeServerSubtitle(connected))
+            assertEquals("RU-реле → Сервер недоступен", homeServerSubtitle(connected.copy(
+                userProfile = connected.userProfile.copy(selectedServerCode = "missing"))))
+        }
+        assertEquals("RU relay → Латвия1", homeServerSubtitle(state.copy(
+            personalizationSettings = PersonalizationSettings(language = AppLanguage.EN))))
+    }
+
+    @Test
+    fun ruServerCardKeepsTheSelectedMultiHopChainAndUsesTheConfirmedExit() {
+        val state = AppUiState(
+            advancedSettings = AdvancedSettings(ruRelayEnabled = true, multiHop = MultiHopSettings(
+                enabled = true, entry = HopSelection(ServerSelectionMode.SERVER, nodeId = "entry"),
+                exit = HopSelection(ServerSelectionMode.SERVER, nodeId = "exit"))),
+            personalizationSettings = PersonalizationSettings(language = AppLanguage.RU),
+            ruForeignNodes = listOf(RuForeignNode("entry", "Латвия1", "LV"), RuForeignNode("exit", "Нидерланды1", "NL")),
+            userProfile = UserProfile(selectedServerCode = "exit"),
+        )
+        assertEquals("RU-реле → Латвия1 → Нидерланды1", homeServerSubtitle(state))
+        assertEquals("RU-реле → Латвия1 → Нидерланды1", homeServerSubtitle(state.copy(
+            connectionState = VpnConnectionState.CONNECTED)))
+        val direct = state.copy(advancedSettings = state.advancedSettings.copy(ruRelayEnabled = false),
+            locations = listOf(location().copy(servers = listOf(
+                VpnServer("entry", "Латвия1", "LV", "lv", "lv.example", 443, true),
+                VpnServer("exit", "Нидерланды1", "NL", "nl", "nl.example", 443, true)))))
+        assertEquals("Латвия1 → Нидерланды1", homeServerSubtitle(direct))
     }
 
     @Test

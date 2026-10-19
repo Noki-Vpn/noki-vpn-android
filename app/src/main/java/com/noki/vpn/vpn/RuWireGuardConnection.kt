@@ -43,8 +43,7 @@ import java.util.concurrent.TimeUnit
 internal data class PreparedRuWireGuardConnection(
     val session: BackendRuWireGuardSession.Ready,
     val privateKey: ByteArray,
-    val exitNodeId: String,
-    val exitNodeName: String,
+    val exitNode: RuForeignNode,
 )
 
 /** The control plane admits the exact RU/entry/exit route before Android opens a TUN. */
@@ -155,7 +154,7 @@ internal class RuWireGuardConnectionCoordinator(
             response = api.activateRuWireGuardSession(token, device, deviceKey, initialIdentity)
             val ready = awaitRuWireGuardReady(checkNotNull(response),
                 poll = { api.pollRuWireGuardSession(token, device, deviceKey, initialIdentity) })
-            return PreparedRuWireGuardConnection(ready, pair.privateKey, exit.id, exit.name)
+            return PreparedRuWireGuardConnection(ready, pair.privateKey, exit)
         } catch (error: Throwable) {
             response?.identity?.let { identity ->
                 identity.revokeToken?.let { revokeToken ->

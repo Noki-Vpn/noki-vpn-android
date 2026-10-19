@@ -12,6 +12,27 @@ import org.junit.Test
 
 class VpnSettingsTransactionPolicyTest {
     @Test
+    fun confirmedRuExitUpdatesRuntimeMetadataWithoutChangingTheDesiredSelection() {
+        val baseline = DefaultStoredSettingsFactory.create().let { it.copy(
+            advancedSettings = it.advancedSettings.copy(ruRelayEnabled = true),
+            userProfile = it.userProfile.copy(serverSelectionMode = com.noki.vpn.data.ServerSelectionMode.AUTO,
+                selectedCountryCode = "LV", selectedServerCode = "", actualCountryCode = ""),
+        ) }
+        val candidate = baseline.copy(userProfile = baseline.userProfile.copy(
+            selectedServerCode = "confirmed-exit", actualCountryCode = "NL"))
+        val latest = baseline.copy(selectedPackages = setOf("latest.user.edit"))
+        val committed = VpnSettingsTransactionPolicy.commitRuntimeCandidate(
+            baseline, baseline, candidate, VpnSettingsTransactionPolicy.Result.Accepted, latest)
+
+        assertTrue(committed.acceptedForActivation)
+        assertEquals("confirmed-exit", committed.persisted.userProfile.selectedServerCode)
+        assertEquals("NL", committed.persisted.userProfile.actualCountryCode)
+        assertEquals("LV", committed.persisted.userProfile.selectedCountryCode)
+        assertEquals(baseline.userProfile.serverSelectionMode, committed.persisted.userProfile.serverSelectionMode)
+        assertEquals(latest.selectedPackages, committed.persisted.selectedPackages)
+    }
+
+    @Test
     fun ruModeAndExitSelectionMakeAnInFlightCandidateStale() {
         val baseline = DefaultStoredSettingsFactory.create().let {
             it.copy(advancedSettings = it.advancedSettings.copy(ruRelayEnabled = false))

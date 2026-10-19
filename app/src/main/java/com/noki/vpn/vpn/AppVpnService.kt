@@ -618,28 +618,36 @@ class AppVpnService : VpnService() {
                         failStart(repository, "ru_wireguard_exit_probe_failed")
                         return@withLifecycleLock
                     }
-                    if (VpnSettingsTransactionPolicy.candidateBecameStale(baseline, repository.load())) {
+                    val commit = commitSettingsTransaction(
+                        preparationBaseline = baseline,
+                        candidate = settings.copy(userProfile = settings.userProfile.copy(
+                            selectedServerCode = prepared.exitNode.id,
+                            actualCountryCode = prepared.exitNode.countryCode,
+                        )),
+                        result = VpnSettingsTransactionPolicy.Result.Accepted,
+                    )
+                    if (!commit.acceptedForActivation) {
                         failStart(repository, "selection_changed")
                         return@withLifecycleLock
                     }
+                    val connectedSettings = commit.runtime
                     currentRuntimeMode = VpnRuntimeMode.ACCOUNT
                     ruSession = prepared.session
                     activeEndpointNetworkKind = underlay?.kind ?: EndpointRankingPolicy.NetworkKind.OTHER
-                    activeSettings = settings
                     notificationServerLabel = VpnServiceLogContext.serverLabel(
-                        settings.userProfile.selectedCountryCode, prepared.exitNodeName,
-                        settings.personalizationSettings.language,
+                        prepared.exitNode.countryCode, prepared.exitNode.name,
+                        connectedSettings.personalizationSettings.language,
                     )
                     connectedAtMillis = System.currentTimeMillis()
                     val owner = connectionOrchestrator.activateConnected(
                         generationId = generationId,
                         coreId = ++runtimeCoreSequence,
                         tunnel = established,
-                        settings = settings,
+                        settings = connectedSettings,
                         underlay = underlay,
                     ) ?: return@withLifecycleLock
                     activated = true
-                    statsCoordinator.recordInitialLatency(settings, owner, readiness)
+                    statsCoordinator.recordInitialLatency(connectedSettings, owner, readiness)
                     broadcastState(VpnConnectionState.CONNECTED)
                     runCatching { repository.clearProvisionalRuWireGuardRevoke(
                         prepared.session.identity.sessionId,
@@ -649,7 +657,7 @@ class AppVpnService : VpnService() {
                             message = "ru_wireguard_handoff_clear_failed", errorType = error.javaClass.simpleName) }
                     startForeground(NOTIFICATION_ID, createActiveNotification())
                     repository.recordAppLog("vpn", message = "ru_wireguard_connected",
-                        details = "exit_node=${prepared.exitNodeId}", connectionSuccess = true)
+                        details = "exit_node=${prepared.exitNode.id}", connectionSuccess = true)
                 } finally {
                     if (!activated) {
                         connectionOrchestrator.stopCore()

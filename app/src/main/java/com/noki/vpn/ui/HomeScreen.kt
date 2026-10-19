@@ -83,31 +83,13 @@ fun HomeScreen(
             val ruRelayEnabled = state.advancedSettings.ruRelayEnabled
             val usesRuCatalog = usesRuForeignNodeCatalog(ruRelayEnabled, state.ruForeignNodes)
             val selectedForeignNode = state.ruForeignNodes.firstOrNull { it.id == state.userProfile.selectedNodeId }
-            val ruCountryCode = if (state.userProfile.serverSelectionMode == ServerSelectionMode.AUTO) {
+            val ruCountryCode = if (state.connectionState == VpnConnectionState.CONNECTED ||
+                state.userProfile.serverSelectionMode == ServerSelectionMode.AUTO) {
                 state.userProfile.actualCountryCode
             } else selectedForeignNode?.countryCode ?: state.userProfile.selectedCountryCode
             val ruCountry = ruCountryCode.takeIf { it.isNotBlank() }
                 ?.let { Locale("", it).getDisplayCountry(Locale(language.tag)) }
             val multiHop = state.advancedSettings.multiHop
-            fun hopLabel(selection: com.noki.vpn.data.HopSelection?): String = when (selection?.kind) {
-                ServerSelectionMode.COUNTRY -> state.locations.firstOrNull {
-                    it.countryCode.equals(selection.countryCode, true)
-                }?.country ?: selection.countryCode.orEmpty()
-                ServerSelectionMode.SERVER -> (if (usesRuCatalog) state.ruForeignNodes
-                    .firstOrNull { it.id == selection.nodeId }?.name else state.locations.flatMap { it.servers }
-                    .firstOrNull { it.id == selection.nodeId }?.name)
-                    ?: tr(language, "Сервер недоступен", "Server unavailable")
-                else -> tr(language, "Не выбран", "Not selected")
-            }
-            val multiHopLabel = "${hopLabel(multiHop.entry)} → ${hopLabel(multiHop.exit)}"
-            val selectedServer = if (state.userProfile.serverSelectionMode == ServerSelectionMode.SERVER) {
-                selectedLocation?.servers?.firstOrNull { server ->
-                    server.id == state.userProfile.selectedNodeId ||
-                        server.locationCode.equals(state.userProfile.selectedServerCode, ignoreCase = true)
-                }
-            } else {
-                null
-            }
             val isConnected = state.connectionState == VpnConnectionState.CONNECTED ||
                 state.connectionState == VpnConnectionState.CONNECTING
             val deviceTraffic = rememberDeviceTrafficSnapshot(
@@ -290,11 +272,7 @@ fun HomeScreen(
                         tr(language, "Автовыбор", "Automatic")
                     } else (if (usesRuCatalog) ruCountry else selectedLocation?.country)
                         ?: tr(language, "Нет сервера", "No server"),
-                    subtitle = if (multiHop.enabled) multiHopLabel else if (state.userProfile.serverSelectionMode == ServerSelectionMode.AUTO) {
-                        if (usesRuCatalog) ruCountry else selectedLocation?.country
-                    } else if (state.userProfile.serverSelectionMode == ServerSelectionMode.SERVER) {
-                        if (usesRuCatalog) selectedForeignNode?.name else selectedServer?.name
-                    } else null,
+                    subtitle = homeServerSubtitle(state),
                     countryCode = if (usesRuCatalog) ruCountryCode.takeIf { it.isNotBlank() } else null,
                 )
             }
