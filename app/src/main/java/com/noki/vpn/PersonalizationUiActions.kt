@@ -59,6 +59,14 @@ internal fun AppUiRuntime.setGlassMode(mode: GlassMode) {
     )
 }
 
+internal fun AppUiRuntime.setVpnStatusNotificationEnabled(enabled: Boolean) {
+    applyAndPersist(
+        uiState.copy(
+            personalizationSettings = uiState.personalizationSettings.copy(vpnStatusNotificationEnabled = enabled),
+        ),
+    )
+}
+
 internal fun AppUiRuntime.beginAvatarCrop(uri: Uri?) {
     if (!uiState.isAuthenticated || avatarMutationJob != null) return
     if (denyAvatarEditIfInvited()) return

@@ -39,7 +39,8 @@ object AppNotificationPoller {
                 .filter { it.id !in seenIds }
             for (notification in fresh) {
                 val accepted = repository.acceptAppNotification(notification, session) {
-                    if (AppBroadcastNotifier.show(context, notification)) {
+                    if (AppBroadcastNotifier.show(context, notification,
+                            userId = session.userProfile.backendUserId, deviceId = session.backendDeviceId)) {
                         repository.markAppNotificationsSeen(listOf(notification.id))
                     }
                 }

@@ -8,6 +8,18 @@ import org.junit.Test
 
 class VpnNotificationControllerTest {
     @Test
+    fun `hidden status keeps only the required notice and restoring shows current details`() {
+        for ((title, text) in listOf(
+            "Соединен" to "Latvia 2   ↓ 12 / ↑ 3 Мбит/с",
+            "Подключение" to "France 2",
+            "Переподключение" to "Ожидание сети",
+        )) {
+            assertEquals("Noki VPN" to "Служба VPN", VpnNotificationContract.content(title, text, false))
+            assertEquals(title to text, VpnNotificationContract.content(title, text, true))
+        }
+    }
+
+    @Test
     fun `notification keeps the connected server name in every selection mode`() {
         val defaults = DefaultStoredSettingsFactory.create()
         ServerSelectionMode.entries.forEach { mode ->

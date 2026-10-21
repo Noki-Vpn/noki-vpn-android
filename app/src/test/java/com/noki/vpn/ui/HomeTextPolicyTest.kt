@@ -2,6 +2,7 @@ package com.noki.vpn.ui
 
 import com.noki.vpn.AppUiState
 import com.noki.vpn.data.AdvancedSettings
+import com.noki.vpn.data.EndpointGroupPolicy
 import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.HopSelection
 import com.noki.vpn.data.MultiHopSettings
@@ -10,6 +11,8 @@ import com.noki.vpn.data.RuForeignNode
 import com.noki.vpn.data.ServerLocation
 import com.noki.vpn.data.ServerSelectionMode
 import com.noki.vpn.data.UserProfile
+import com.noki.vpn.data.VlessProfile
+import com.noki.vpn.data.VpnEndpointOption
 import com.noki.vpn.data.VpnServer
 import com.noki.vpn.data.VpnConnectionState
 import org.junit.Assert.assertEquals
@@ -18,6 +21,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeTextPolicyTest {
+    @Test
+    fun autoProtocolLabelFollowsRuntimeFallbackInsteadOfPreviousManualChoice() {
+        val nv = VpnEndpointOption(code = "nv", host = "nv.example.com", label = "NokiNV / Auto",
+            proxyType = "nokinv", transport = "nokinv")
+        val hy = VpnEndpointOption(code = "hy", host = "hy.example.com", label = "Hysteria2 / UDP",
+            proxyType = "hysteria", transport = "hysteria")
+        val state = AppUiState(
+            endpointOptions = listOf(nv, hy),
+            advancedSettings = AdvancedSettings(ruRelayEnabled = false,
+                manualEndpointGroupKey = EndpointGroupPolicy.groupKey(nv)),
+            profile = VlessProfile(endpointCode = hy.code, proxyType = hy.proxyType,
+                transport = hy.transport, security = hy.security),
+        )
+        assertEquals("Auto (Hysteria2 / UDP)", protocolCardLabel(state, autoEndpointSelection = true))
+        assertEquals("NokiNV / Auto", protocolCardLabel(state, autoEndpointSelection = false))
+        assertEquals("Auto (NokiNV / Auto)", protocolCardLabel(state.copy(
+            profile = state.profile.copy(endpointCode = "")), autoEndpointSelection = true))
+    }
+
     @Test
     fun multiHopCountryMenuGroupsRealNodesAndExcludesPeerBeforeGrouping() {
         val first = VpnServer("lv-1", "Latvia 1", "LV", "lv1", "probe.example", 443, true, latencyMs = 25)
@@ -68,7 +90,7 @@ class HomeTextPolicyTest {
         assertEquals("RU-реле → Латвия1", homeServerSubtitle(state))
         assertEquals("RU-реле → Латвия", homeServerSubtitle(state.copy(userProfile = state.userProfile.copy(
             serverSelectionMode = ServerSelectionMode.COUNTRY))))
-        assertEquals("RU-реле → Автовыбор", homeServerSubtitle(state.copy(userProfile = state.userProfile.copy(
+        assertEquals("RU-реле", homeServerSubtitle(state.copy(userProfile = state.userProfile.copy(
             serverSelectionMode = ServerSelectionMode.AUTO))))
         for (mode in ServerSelectionMode.entries) {
             val connected = state.copy(connectionState = VpnConnectionState.CONNECTED,
@@ -79,6 +101,18 @@ class HomeTextPolicyTest {
         }
         assertEquals("RU relay → Латвия1", homeServerSubtitle(state.copy(
             personalizationSettings = PersonalizationSettings(language = AppLanguage.EN))))
+    }
+
+    @Test
+    fun autoSelectionHidesThePreviousDestinationUntilConnected() {
+        val state = AppUiState(locations = listOf(location()),
+            userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.AUTO,
+                selectedServerCode = "lv", actualCountryCode = "LV", selectedCountryCode = "LV"))
+        for (connection in listOf(VpnConnectionState.DISCONNECTED, VpnConnectionState.CONNECTING, VpnConnectionState.FAILED)) {
+            assertNull(homeServerSubtitle(state.copy(connectionState = connection)))
+        }
+        assertEquals(state.locations.single().country,
+            homeServerSubtitle(state.copy(connectionState = VpnConnectionState.CONNECTED)))
     }
 
     @Test
@@ -193,7 +227,7 @@ class HomeTextPolicyTest {
             currentMetrics(state, traffic),
         )
         assertEquals(
-            HomeMetricsSnapshot(download = "2.5", upload = "1", latency = "87", sessionBytes = 1_048_576L),
+            HomeMetricsSnapshot(download = "2.5", upload = "1", latency = "39", sessionBytes = 1_048_576L),
             currentMetrics(state.copy(connectionState = VpnConnectionState.CONNECTED, connectionLatencyMs = 87), traffic),
         )
         for (mode in ServerSelectionMode.entries) {
@@ -202,44 +236,72 @@ class HomeTextPolicyTest {
                 connectionLatencyMs = 87,
                 userProfile = state.userProfile.copy(serverSelectionMode = mode, selectedNodeId = node.id),
             )
-            assertEquals("87", currentMetrics(connected, traffic).latency)
-            assertEquals("87", currentMetrics(connected.copy(locations = listOf(server.copy(
+            assertEquals("39", currentMetrics(connected, traffic).latency)
+            assertNull(currentMetrics(connected.copy(locations = listOf(server.copy(
                 servers = listOf(node.copy(latencyMs = null)),
             ))), traffic).latency)
-            assertEquals("87", currentMetrics(connected.copy(userProfile = connected.userProfile.copy(
+            assertNull(currentMetrics(connected.copy(userProfile = connected.userProfile.copy(
                 selectedServerCode = "missing",
             )), traffic).latency)
-            assertNull(currentMetrics(connected.copy(connectionLatencyMs = null), traffic).latency)
+            assertEquals("39", currentMetrics(connected.copy(connectionLatencyMs = null), traffic).latency)
         }
         val manual = state.copy(userProfile = state.userProfile.copy(
             serverSelectionMode = ServerSelectionMode.SERVER, selectedNodeId = node.id,
         ))
         assertEquals("39", currentMetrics(manual, traffic).latency)
         assertEquals("39", currentMetrics(manual.copy(connectionState = VpnConnectionState.DISCONNECTED), traffic).latency)
-        val relay = manual.copy(advancedSettings = manual.advancedSettings.copy(ruRelayEnabled = true),
-            userProfile = manual.userProfile.copy(selectedServerCode = "stale-xray-profile"))
-        for (connection in VpnConnectionState.entries) {
-            assertEquals(if (connection == VpnConnectionState.CONNECTED) null else "39",
-                currentMetrics(relay.copy(connectionState = connection), traffic).latency)
-        }
     }
 
     @Test
-    fun `connected RU metrics use the tunnel sample without direct or catalog fallback`() {
+    fun `connected RU metrics match the exact exit row in the server sheet`() {
         val direct = location(latencyMs = 5)
         val foreign = RuForeignNode("exit", "Latvia", "LV", latencyMs = 12)
+        val other = foreign.copy(id = "other", name = "Other", latencyMs = 3)
         val state = AppUiState(
             advancedSettings = AdvancedSettings(ruRelayEnabled = true),
             connectionState = VpnConnectionState.CONNECTED,
             connectionLatencyMs = 87,
             locations = listOf(direct),
-            ruForeignNodes = listOf(foreign),
+            ruForeignNodes = listOf(other, foreign),
+            userProfile = UserProfile(selectedServerCode = foreign.id, selectedNodeId = other.id),
         )
         for (mode in ServerSelectionMode.entries) {
             val connected = state.copy(userProfile = state.userProfile.copy(serverSelectionMode = mode))
-            assertEquals("87", currentMetrics(connected, HomeDeviceTrafficSnapshot()).latency)
-            assertEquals("87", currentMetrics(connected.copy(locations = emptyList()), HomeDeviceTrafficSnapshot()).latency)
-            assertNull(currentMetrics(connected.copy(connectionLatencyMs = null), HomeDeviceTrafficSnapshot()).latency)
+            val sheet = serverMenuLocations(connected.locations, connected.ruForeignNodes, true)
+            val row = sheet.flatMap { it.foreignNodes }.single { it.id == foreign.id }
+            assertEquals(row.latencyMs.toString(), currentMetrics(connected, HomeDeviceTrafficSnapshot()).latency)
+            assertEquals("12", currentMetrics(connected.copy(locations = emptyList(), connectionLatencyMs = null),
+                HomeDeviceTrafficSnapshot()).latency)
+            assertNull(currentMetrics(connected.copy(ruForeignNodes = listOf(other)), HomeDeviceTrafficSnapshot()).latency)
+            val refreshed = com.noki.vpn.BackendSyncCoordinator.withCachedClientLatencies(connected,
+                mapOf(com.noki.vpn.data.clientLatencyTargetKey(foreign) to 52,
+                    com.noki.vpn.data.clientLatencyTargetKey(other) to 2))
+            assertEquals("52", currentMetrics(refreshed, HomeDeviceTrafficSnapshot()).latency)
+        }
+        assertNull(currentMetrics(state.copy(connectionState = VpnConnectionState.DISCONNECTED,
+            ruForeignNodes = emptyList()), HomeDeviceTrafficSnapshot()).latency)
+    }
+
+    @Test
+    fun `connected direct metrics use active endpoint node instead of the first country server`() {
+        val first = VpnServer("first", "First", "LV", "shared", "first.example", 443, true, latencyMs = 3)
+        val active = first.copy(id = "active", name = "Active", host = "active.example", latencyMs = 41)
+        val state = AppUiState(
+            advancedSettings = AdvancedSettings(ruRelayEnabled = false),
+            connectionState = VpnConnectionState.CONNECTED,
+            connectionLatencyMs = 999,
+            profile = com.noki.vpn.data.VlessProfile(endpointCode = "endpoint"),
+            endpointOptions = listOf(com.noki.vpn.data.VpnEndpointOption(code = "endpoint", nodeId = active.id)),
+            locations = listOf(location(code = "shared", latencyMs = 3).copy(servers = listOf(first, active))),
+            userProfile = UserProfile(selectedServerCode = "shared", selectedNodeId = first.id),
+        )
+        for (mode in ServerSelectionMode.entries) {
+            val connected = state.copy(userProfile = state.userProfile.copy(serverSelectionMode = mode))
+            val row = serverMenuLocations(connected.locations).flatMap { it.servers }.single { it.id == active.id }
+            assertEquals(row.latencyMs.toString(), currentMetrics(connected, HomeDeviceTrafficSnapshot()).latency)
+            assertNull(currentMetrics(connected.copy(locations = listOf(state.locations.single().copy(
+                servers = listOf(first)))), HomeDeviceTrafficSnapshot()).latency)
+            assertNull(currentMetrics(connected.copy(endpointOptions = emptyList()), HomeDeviceTrafficSnapshot()).latency)
         }
     }
 

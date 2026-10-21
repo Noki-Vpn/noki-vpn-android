@@ -419,17 +419,39 @@ internal fun currentMetrics(
 ): HomeMetricsSnapshot {
     val isConnected = state.connectionState == VpnConnectionState.CONNECTED
     val selectedLocation = homeSelectedLocation(state.locations, state.userProfile)
-    if (!isConnected && (selectedLocation == null || !selectedLocation.isOnline)) {
+    val ruRelay = state.advancedSettings.ruRelayEnabled
+    if (!isConnected && !ruRelay && (selectedLocation == null || !selectedLocation.isOnline)) {
         return HomeMetricsSnapshot(download = null, upload = null, latency = null, sessionBytes = null)
     }
 
     val servers = state.locations.flatMap { it.servers }
     val serverLatency = when {
-        isConnected -> state.connectionLatencyMs
-        state.advancedSettings.ruRelayEnabled ->
-            if (state.userProfile.serverSelectionMode == com.noki.vpn.data.ServerSelectionMode.SERVER) {
-                servers.firstOrNull { it.id == state.userProfile.selectedNodeId }?.latencyMs
-            } else selectedLocation?.latencyMs
+        ruRelay -> {
+            val exitId = when {
+                isConnected -> state.userProfile.selectedServerCode
+                state.advancedSettings.multiHop.enabled -> state.advancedSettings.multiHop.exit?.nodeId
+                state.userProfile.serverSelectionMode == com.noki.vpn.data.ServerSelectionMode.SERVER ->
+                    state.userProfile.selectedNodeId
+                else -> null
+            }
+            if (exitId != null) state.ruForeignNodes.firstOrNull { it.id == exitId }?.latencyMs
+            else if (state.ruForeignNodes.isNotEmpty() &&
+                state.userProfile.serverSelectionMode == com.noki.vpn.data.ServerSelectionMode.COUNTRY) {
+                serverMenuLocations(state.locations, state.ruForeignNodes, true).firstOrNull {
+                    it.countryCode.equals(state.userProfile.selectedCountryCode, true)
+                }?.latencyMs
+            } else null
+        }
+        isConnected -> {
+            val nodeId = state.profile.multiHop?.exitNodeId
+                ?: state.endpointOptions.firstOrNull { it.code == state.profile.endpointCode }?.nodeId
+            if (nodeId != null) servers.firstOrNull { it.id == nodeId }?.latencyMs
+            else servers.singleOrNull {
+                it.locationCode.equals(state.userProfile.selectedServerCode, true)
+            }?.latencyMs ?: selectedLocation?.takeIf {
+                it.servers.isEmpty() && it.code.equals(state.userProfile.selectedServerCode, true)
+            }?.latencyMs
+        }
         state.userProfile.serverSelectionMode == com.noki.vpn.data.ServerSelectionMode.SERVER ->
             servers.firstOrNull { it.id == state.userProfile.selectedNodeId }?.latencyMs
         else -> selectedLocation?.latencyMs
@@ -437,7 +459,7 @@ internal fun currentMetrics(
     return HomeMetricsSnapshot(
         download = deviceTraffic.downloadMbps.takeIf { isConnected },
         upload = deviceTraffic.uploadMbps.takeIf { isConnected },
-        latency = serverLatency?.toString(),
+        latency = serverLatency?.takeIf { it > 0 }?.toString(),
         sessionBytes = deviceTraffic.sessionBytes.takeIf { isConnected },
     )
 }

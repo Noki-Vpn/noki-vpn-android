@@ -87,10 +87,11 @@ class EndpointProbeRunner(
         }
         ensureCurrent()
         val advancedSettings: AdvancedSettings = settings.advancedSettings
-        if (advancedSettings.multiHop.enabled) return emptyList()
+        if (advancedSettings.multiHop.enabled || advancedSettings.gamingModeEnabled) return emptyList()
         if (advancedSettings.endpointSelectionMode != EndpointSelectionMode.AUTO) return emptyList()
         val matchingProtocol = session.endpointCandidates
-            .filter { EndpointSelector.matchesProtocol(it, advancedSettings.protocol) }
+            .filter { EndpointSelector.matchesProtocol(it, advancedSettings.effectiveProtocol) }
+            .filter(EndpointTransportPolicy::isDirectCandidate)
         val codes = matchingProtocol
             .filter { !it.canaryOnly }
             .filter(EndpointSecurityPolicy::isAllowedCandidate)
@@ -272,7 +273,7 @@ class EndpointProbeRunner(
         // The slot belongs to the blocking call, even after its awaiting coroutine is cancelled.
         private val nativeProbeDispatcher = Dispatchers.IO.limitedParallelism(2)
 
-        internal suspend fun awaitNativeProbe(measure: () -> Long, cancel: () -> Unit): Long =
+        internal suspend fun <T> awaitNativeProbe(measure: () -> T, cancel: () -> Unit): T =
             suspendCancellableCoroutine { continuation ->
                 continuation.invokeOnCancellation { cancel() }
                 nativeProbeDispatcher.dispatch(EmptyCoroutineContext) {

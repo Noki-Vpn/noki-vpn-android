@@ -27,6 +27,7 @@ import org.json.JSONObject
 internal object GeositeAsset {
     private const val NAME = "geosite.dat"
     const val MAX_BYTES = 32 * 1024 * 1024
+    private var validatedDigest: String? = null
 
     fun file(context: Context): File = File(context.noBackupFilesDir, NAME)
 
@@ -65,11 +66,18 @@ internal object GeositeAsset {
         }
     }
 
-    fun isValid(bytes: ByteArray): Boolean = runCatching { resolveDomains(bytes, emptySet()); true }.getOrDefault(false)
+    @Synchronized
+    fun isValid(bytes: ByteArray): Boolean = runCatching {
+        if (sha256(bytes) != validatedDigest) resolveDomains(bytes, emptySet())
+        true
+    }.getOrDefault(false)
 
     /** Decode Xray GeoSiteList bytes into native inline fields, retaining attribute conjunction. */
+    @Synchronized
     fun resolveDomains(bytes: ByteArray, selectors: Set<String>): Map<String, JSONObject> {
         require(bytes.size in 1024..MAX_BYTES) { "geosite_size_invalid" }
+        val digest = sha256(bytes)
+        val validated = digest == validatedDigest
         val requested = selectors.associateWith { selector ->
             require(selector.startsWith("geosite:") && DomainRulePolicy.normalize(selector) == selector) { "geosite_selector_invalid" }
             selector.substringAfter(':').split('@').also { parts -> require(parts.all(String::isNotBlank)) { "geosite_selector_invalid" } }
@@ -89,6 +97,8 @@ internal object GeositeAsset {
             val code = requireNotNull(siteCode) { "geosite_code_invalid" }
             require(code.isNotBlank() && seen.add(code)) { "geosite_code_invalid" }
             val wanted = requested.filterValues { it.first() == code }
+            // Unchanged bytes have already passed full validation, including unselected domains.
+            if (validated && wanted.isEmpty()) continue
             for ((nestedField, nestedWire, domainRange) in fields(bytes, range.first, range.last + 1)) {
                 if (nestedField != 2) continue
                 require(nestedWire == 2) { "geosite_domain_invalid" }
@@ -133,8 +143,9 @@ internal object GeositeAsset {
                 }
             }
         }
-        require(russianDomains > 0) { "geosite_category_ru_empty" }
+        require(validated || russianDomains > 0) { "geosite_category_ru_empty" }
         require(requested.values.all { it.first() in seen }) { "geosite_tag_unknown" }
+        validatedDigest = digest
         return selected.mapValues { (_, fields) -> JSONObject().apply { fields.forEach { (key, values) -> put(key, JSONArray(values)) } } }
     }
 

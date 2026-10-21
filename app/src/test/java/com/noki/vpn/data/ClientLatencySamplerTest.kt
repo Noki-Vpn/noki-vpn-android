@@ -16,6 +16,49 @@ import kotlin.system.measureTimeMillis
 
 class ClientLatencySamplerTest {
     @Test
+    fun numericAddressBypassesEvenAnExhaustedDnsQueue() {
+        val started = CountDownLatch(DeviceLatency.MAX_CONCURRENT_DNS_LOOKUPS)
+        val release = CountDownLatch(1)
+        val callers = Executors.newFixedThreadPool(DeviceLatency.MAX_CONCURRENT_DNS_LOOKUPS)
+        try {
+            val blocked = (1..DeviceLatency.MAX_CONCURRENT_DNS_LOOKUPS).map { index ->
+                callers.submit<InetAddress?> {
+                    DeviceLatency.resolveAddress("blocked-$index.example", 1_000) {
+                        started.countDown()
+                        check(release.await(2, TimeUnit.SECONDS))
+                        arrayOf(InetAddress.getLoopbackAddress())
+                    }
+                }
+            }
+            assertTrue(started.await(1, TimeUnit.SECONDS))
+            val address = DeviceLatency.resolveAddress("104.252.30.180", 50) {
+                error("A numeric address must never enter the DNS executor")
+            }
+            assertEquals("104.252.30.180", address?.hostAddress)
+            release.countDown()
+            blocked.forEach { it.get(1, TimeUnit.SECONDS) }
+        } finally {
+            release.countDown()
+            callers.shutdownNow()
+        }
+    }
+
+    @Test
+    fun startupRankingUsesOneSampleAndKeepsTheUiMedianUnchanged() = runBlocking {
+        val calls = AtomicInteger()
+        fun sampler(attempts: Int = 3) = ClientLatencySampler(
+            tcpConnect = { _, _, _ -> calls.incrementAndGet(); 25 },
+            icmpPing = { _, _, _ -> error("TCP was reachable") },
+            tcpAttempts = attempts,
+        )
+        sampler(1).measure(listOf(location()))
+        assertEquals(1, calls.get())
+        calls.set(0)
+        sampler().measure(listOf(location()))
+        assertEquals(3, calls.get())
+    }
+
+    @Test
     fun relayPingUsesOnlyFullRelayPathsAndNeverFallsBackToDirectOrIcmp() = runBlocking {
         val node = RuForeignNode("node", "Overlay", "LV")
         val key = clientLatencyTargetKey(node)

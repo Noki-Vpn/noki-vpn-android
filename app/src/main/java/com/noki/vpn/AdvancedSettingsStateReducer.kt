@@ -5,6 +5,7 @@ import com.noki.vpn.data.DomainRulePolicy
 import com.noki.vpn.data.EndpointGroupPolicy
 import com.noki.vpn.data.EndpointSelectionMode
 import com.noki.vpn.data.EndpointSecurityPolicy
+import com.noki.vpn.data.EndpointTransportPolicy
 import com.noki.vpn.data.RuntimeProfilePolicy
 import com.noki.vpn.data.MultiHopSettings
 import com.noki.vpn.data.ServerSelectionMode
@@ -13,7 +14,9 @@ import com.noki.vpn.data.VpnProtocol
 
 object AdvancedSettingsStateReducer {
     fun setYoutubeNoAdsEnabled(current: AppUiState, enabled: Boolean): AppUiState =
-        current.copy(advancedSettings = current.advancedSettings.copy(youtubeNoAdsEnabled = enabled))
+        current.copy(advancedSettings = RuntimeProfilePolicy.normalizeAdvancedSettings(
+            current.advancedSettings.copy(youtubeNoAdsEnabled = enabled), current.userProfile,
+        ))
 
     fun setRuRelayEnabled(
         current: AppUiState,
@@ -22,6 +25,7 @@ object AdvancedSettingsStateReducer {
         val advanced = current.advancedSettings
         val nextAdvanced = advanced.copy(
             ruRelayEnabled = enabled,
+            gamingModeEnabled = advanced.gamingModeEnabled && !enabled,
         )
         return current.copy(
             advancedSettings = nextAdvanced,
@@ -37,6 +41,19 @@ object AdvancedSettingsStateReducer {
         return current.copy(
             advancedSettings = nextAdvanced,
             profile = if (nextAdvanced == current.advancedSettings) current.profile
+                else RuntimeProfilePolicy.profileAfterServerSelection(current.profile),
+        )
+    }
+
+    fun setGamingModeEnabled(current: AppUiState, enabled: Boolean): AppUiState {
+        val advanced = current.advancedSettings
+        val nextAdvanced = advanced.copy(
+            gamingModeEnabled = enabled,
+            ruRelayEnabled = advanced.ruRelayEnabled && !enabled,
+        )
+        return current.copy(
+            advancedSettings = nextAdvanced,
+            profile = if (nextAdvanced == advanced) current.profile
                 else RuntimeProfilePolicy.profileAfterServerSelection(current.profile),
         )
     }
@@ -93,7 +110,9 @@ object AdvancedSettingsStateReducer {
         protocol: VpnProtocol,
     ): AppUiState {
         return current.copy(
-            advancedSettings = current.advancedSettings.copy(protocol = protocol),
+            advancedSettings = current.advancedSettings.copy(protocol = protocol,
+                endpointSelectionMode = if (protocol == VpnProtocol.AUTO) EndpointSelectionMode.AUTO else EndpointSelectionMode.MANUAL,
+                manualEndpointCode = "", manualEndpointGroupKey = ""),
             profile = RuntimeProfilePolicy.profileAfterProtocolChange(current.profile, protocol),
         )
     }
@@ -110,11 +129,12 @@ object AdvancedSettingsStateReducer {
                 manualEndpointGroupKey = "",
             )
         } else {
-            val options = current.endpointOptions.filter { !it.canaryOnly && EndpointSecurityPolicy.isAllowedOption(it) }
+            val options = current.endpointOptions.filter { !it.canaryOnly && EndpointSecurityPolicy.isAllowedOption(it) &&
+                EndpointTransportPolicy.isDirectOption(it) }
             val selected = options.firstOrNull { it.code == current.profile.endpointCode }
                 ?: options.firstOrNull()
             current.advancedSettings.copy(
-                protocol = VpnProtocol.fromBackendCode(selected?.security),
+                protocol = VpnProtocol.fromBackendCode(selected?.security, selected?.proxyType),
                 endpointSelectionMode = EndpointSelectionMode.MANUAL,
                 manualEndpointCode = selected?.code.orEmpty(),
                 manualEndpointGroupKey = selected?.let(EndpointGroupPolicy::groupKey).orEmpty(),
@@ -122,7 +142,7 @@ object AdvancedSettingsStateReducer {
         }
         return current.copy(
             advancedSettings = nextAdvanced,
-            profile = current.profile.copy(uuid = ""),
+            profile = RuntimeProfilePolicy.profileAfterServerSelection(current.profile),
         )
     }
 
@@ -132,7 +152,7 @@ object AdvancedSettingsStateReducer {
     ): AppUiState {
         return current.copy(
             advancedSettings = current.advancedSettings.copy(
-                protocol = VpnProtocol.fromBackendCode(option.security),
+                protocol = VpnProtocol.fromBackendCode(option.security, option.proxyType),
                 endpointSelectionMode = EndpointSelectionMode.MANUAL,
                 manualEndpointCode = option.code,
                 manualEndpointGroupKey = EndpointGroupPolicy.groupKey(option),

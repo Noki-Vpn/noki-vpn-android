@@ -407,6 +407,7 @@ private class RecordingConnectedSidecars(
 private class RecordingVpnCoreRuntime(
     private val events: MutableList<String>,
 ) : VpnCoreRuntime {
+    override fun nokiNvCarrier(): String = ""
     override fun rebindWireGuard(): Boolean = true
 
     override fun start(config: String, tunFd: Int): Boolean {
@@ -430,6 +431,7 @@ private class BlockingFirstCancellationVpnCoreRuntime(
     private val entered: CountDownLatch,
     private val release: CountDownLatch,
 ) : VpnCoreRuntime {
+    override fun nokiNvCarrier(): String = ""
     override fun rebindWireGuard(): Boolean = true
 
     private val cancellationCalls = AtomicInteger(0)

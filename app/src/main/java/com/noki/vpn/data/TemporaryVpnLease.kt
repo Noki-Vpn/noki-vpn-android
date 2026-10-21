@@ -170,6 +170,7 @@ object TemporaryVpnLeasePolicy {
             profile = lease.profile,
             advancedSettings = AdvancedSettings(),
             selectedLocationCode = lease.locationCode,
+            directOnly = false,
         )
     }
 }

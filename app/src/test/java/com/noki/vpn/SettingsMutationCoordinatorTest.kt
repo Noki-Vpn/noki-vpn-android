@@ -23,6 +23,39 @@ import org.junit.Test
 
 class SettingsMutationCoordinatorTest {
     @Test
+    fun gamingIntentClearsCachedProfilesAndInvalidatesPreparationEvenAfterTogglingBack() {
+        val baseline = authenticatedSettings().copy(
+            profile = VlessProfile(endpointCode = "old", uuid = "old"),
+            endpointOptions = listOf(VpnEndpointOption(code = "old")),
+        )
+        val coordinator = SettingsMutationCoordinator(InMemoryAtomicStoredSettingsStore(baseline))
+        val enabled = coordinator.persistUiFields(AdvancedSettingsStateReducer.setGamingModeEnabled(stateFrom(baseline), true))
+        assertEquals("", enabled.profile.endpointCode)
+        assertEquals(emptyList<VpnEndpointOption>(), enabled.endpointOptions)
+        assertEquals(true, VpnSettingsTransactionPolicy.candidateBecameStale(baseline, enabled))
+        val disabled = coordinator.persistUiFields(AdvancedSettingsStateReducer.setGamingModeEnabled(stateFrom(enabled), false))
+        assertEquals(baseline.advancedSettings, disabled.advancedSettings)
+        assertEquals(baseline.ruRelaySelectionRevision + 2L, disabled.ruRelaySelectionRevision)
+        assertEquals(true, VpnSettingsTransactionPolicy.candidateBecameStale(baseline, disabled))
+    }
+
+    @Test
+    fun countryNodeAndAutoChangesKeepTheExplicitTransportChoice() {
+        val advanced = AdvancedSettings(protocol = VpnProtocol.NOKINV,
+            endpointSelectionMode = EndpointSelectionMode.MANUAL, manualEndpointCode = "lv-nokinv",
+            manualEndpointGroupKey = "lv-2|tls|nokinv||100")
+        val store = InMemoryAtomicStoredSettingsStore(authenticatedSettings().copy(advancedSettings = advanced))
+        val coordinator = SettingsMutationCoordinator(store)
+        for (mode in com.noki.vpn.data.ServerSelectionMode.entries) {
+            val saved = coordinator.persistServerSelection("PL", mode, "pl-1")
+            assertEquals(VpnProtocol.NOKINV, saved.advancedSettings.protocol)
+            assertEquals(EndpointSelectionMode.MANUAL, saved.advancedSettings.endpointSelectionMode)
+            assertEquals("tls|nokinv|", saved.advancedSettings.manualEndpointGroupKey)
+            assertEquals("", saved.advancedSettings.manualEndpointCode)
+        }
+    }
+
+    @Test
     fun ruOffOnOffInvalidatesAnInFlightCandidateDespiteMatchingFinalSelector() {
         val baseline = authenticatedSettings()
         val store = InMemoryAtomicStoredSettingsStore(baseline)

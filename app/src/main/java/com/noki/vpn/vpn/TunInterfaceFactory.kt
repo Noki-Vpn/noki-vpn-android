@@ -46,7 +46,8 @@ internal class AndroidTunInterfaceFactory(
             .addRoute("0.0.0.0", 0)
         // The RU IPIP path carries IPv4 only. Leave IPv6 blocked by Android;
         // advertising it makes browsers reach a dead path after TCP accept.
-        config.dns.forEach(builder::addDnsServer)
+        // A public DNS address here can trigger a browser's same-provider DoH upgrade.
+        builder.addDnsServer(VpnTunnelPolicy.DNS_SERVER)
         return establishWithRules(builder, settings, underlay)
     }
 

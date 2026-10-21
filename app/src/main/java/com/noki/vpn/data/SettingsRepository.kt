@@ -13,6 +13,9 @@ import java.security.MessageDigest
 import java.time.Instant
 import java.util.Locale
 
+internal const val SETTINGS_PREFERENCES_NAME = "noki_settings"
+internal const val SETTINGS_ENCRYPTED_KEY = "settings_json_encrypted_v2"
+
 internal object SettingsAtomicUpdate {
     fun <T, R> transform(
         lock: Any,
@@ -41,7 +44,7 @@ private data class AuthSettingsTransition(
 
 class SettingsRepository(private val context: Context) : VpnSessionStore, EndpointHealthEventStore,
     AtomicAuthSettingsStore, TemporaryVpnLeaseStore, PendingLogoutRevocationStore {
-    private val preferences = context.getSharedPreferences("noki_settings", Context.MODE_PRIVATE)
+    private val preferences = context.getSharedPreferences(SETTINGS_PREFERENCES_NAME, Context.MODE_PRIVATE)
     private val settingsCodec = StoredSettingsCodec(::defaultSettings)
     private val cipher = SettingsCipher()
     private val markersStore = SettingsMarkersStore(preferences, ::appVersionCode)
@@ -51,6 +54,10 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
     fun saveInstallOnboardingStep(step: InstallOnboardingStep) = markersStore.saveInstallOnboardingStep(step)
 
     fun clearVpnRuntimeState() = markersStore.clearVpnRuntimeState()
+
+    fun claimFreeTrialNotification(userId: String) = markersStore.claimFreeTrialNotification(userId)
+
+    fun claimFreeTrialDialog(userId: String) = markersStore.claimFreeTrialDialog(userId)
 
     override fun loadTemporaryVpnLease(): TemporaryVpnLease? = synchronized(TEMPORARY_VPN_LEASE_LOCK) {
         preferences.getString(KEY_TEMPORARY_VPN_LEASE_ENCRYPTED, null)
@@ -716,7 +723,7 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
             val pending = (loadPendingLogoutRevocationsLocked() + listOfNotNull(refreshToken)).distinct()
             val editor = preferences.edit()
                 .putString(
-                    KEY_ENCRYPTED_SETTINGS,
+                    SETTINGS_ENCRYPTED_KEY,
                     cipher.encrypt(settingsCodec.encode(transition.settings)),
                 )
                 .remove(KEY_SETTINGS)
@@ -737,7 +744,12 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
     }
 
     private fun loadSettingsLocked(): StoredSettings =
-        settingsCodec.decode(loadSettingsJson())
+        settingsCodec.decode(loadSettingsJson()) { migrated ->
+            check(preferences.edit()
+                .putString(SETTINGS_ENCRYPTED_KEY, cipher.encrypt(settingsCodec.encode(migrated)))
+                .remove(KEY_SETTINGS)
+                .commit()) { "settings_migration_persist_failed" }
+        }
 
     private fun saveSettingsLocked(settings: StoredSettings) {
         val previous = loadSettingsLocked()
@@ -745,7 +757,7 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
             if (!AppDiagnosticLogPolicy.shouldUploadAutomatically(settings.advancedSettings) ||
                 !previous.hasSameAuthSessionAs(settings)
             ) clearAutomaticTelemetry(this)
-            putString(KEY_ENCRYPTED_SETTINGS, cipher.encrypt(settingsCodec.encode(settings)))
+            putString(SETTINGS_ENCRYPTED_KEY, cipher.encrypt(settingsCodec.encode(settings)))
             remove(KEY_SETTINGS)
         }
     }
@@ -778,7 +790,7 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
 
     @Suppress("DEPRECATION")
     private fun defaultSettings(): StoredSettings {
-        val hasStoredSettings = preferences.contains(KEY_ENCRYPTED_SETTINGS) ||
+        val hasStoredSettings = preferences.contains(SETTINGS_ENCRYPTED_KEY) ||
             preferences.contains(KEY_SETTINGS)
         val isFreshInstall = !hasStoredSettings && runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0)
@@ -800,13 +812,13 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
     }
 
     private fun loadSettingsJson(): String? {
-        preferences.getString(KEY_ENCRYPTED_SETTINGS, null)?.let { encrypted ->
+        preferences.getString(SETTINGS_ENCRYPTED_KEY, null)?.let { encrypted ->
             cipher.decrypt(encrypted)?.let { return it }
         }
         return preferences.getString(KEY_SETTINGS, null)?.also { legacy ->
             if (legacy.isNotBlank()) {
                 preferences.edit {
-                    putString(KEY_ENCRYPTED_SETTINGS, cipher.encrypt(legacy))
+                    putString(SETTINGS_ENCRYPTED_KEY, cipher.encrypt(legacy))
                     remove(KEY_SETTINGS)
                 }
             }
@@ -970,7 +982,6 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
         val RU_WIREGUARD_REVOKE_LOCK = Any()
         val PENDING_LOGOUT_REVOCATION_LOCK = Any()
         val APP_NOTIFICATION_HISTORY_LOCK = Any()
-        const val KEY_ENCRYPTED_SETTINGS = "settings_json_encrypted_v2"
         const val KEY_SETTINGS = "settings_json"
         const val KEY_DAILY_STATS_ENCRYPTED = "daily_stats_json_encrypted_v1"
         const val KEY_DAILY_STATS = "daily_stats_json"

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -94,6 +95,10 @@ internal fun homeServerSubtitle(state: AppUiState): String? {
         else -> tr(language, "Не выбран", "Not selected")
     }
     val multiHop = state.advancedSettings.multiHop
+    if (!multiHop.enabled && state.userProfile.serverSelectionMode == ServerSelectionMode.AUTO &&
+        state.connectionState != VpnConnectionState.CONNECTED) {
+        return if (ruRelay) tr(language, "RU-реле", "RU relay") else null
+    }
     val destination = when {
         ruRelay && state.connectionState == VpnConnectionState.CONNECTED ->
             state.ruForeignNodes.firstOrNull { it.id == state.userProfile.selectedServerCode }?.name ?: unavailable
@@ -217,6 +222,7 @@ internal fun HomeLocationCard(
     country: String,
     subtitle: String? = null,
     countryCode: String? = null,
+    automatic: Boolean = false,
 ) {
     val headerHeight = designDp(NokiUiKitPolicy.homeLocationHeightDp, scale)
     val selectedLocation = locations.firstOrNull { it.code.equals(selectedServerCode, true) }
@@ -241,7 +247,9 @@ internal fun HomeLocationCard(
             horizontalArrangement = Arrangement.spacedBy(designDp(20f, scale)),
         ) {
             val flagCode = countryCode ?: selectedLocation?.countryCode
-            if (flagCode != null) {
+            if (automatic) {
+                AutomaticServerMarker(scale, NokiUiKitPolicy.homeLocationFlagSizeDp)
+            } else if (flagCode != null) {
                 CountryFlagMarker(
                     countryCode = flagCode,
                     scale = scale,

@@ -10,6 +10,8 @@ internal interface VpnCoreRuntime {
     fun cancelMeasureDelay()
 
     fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult
+
+    fun nokiNvCarrier(): String
 }
 
 internal data class VpnProbeResult(

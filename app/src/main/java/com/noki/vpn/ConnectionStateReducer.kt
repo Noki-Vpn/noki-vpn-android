@@ -100,14 +100,16 @@ internal object ConnectionStateReducer {
             VpnConnectionState.DISCONNECTED,
             VpnConnectionState.FAILED -> null
         }
+        val updateRequired = rawReason == "client_update_required"
         val nextState = current.copy(
             connectionState = state,
             connectionLatencyMs = latencyMs?.takeIf { state == VpnConnectionState.CONNECTED && it > 0 },
             connectedAtMillis = nextConnectedAtMillis,
-            connectionReason = if (state == VpnConnectionState.DISCONNECTED) "" else {
+            connectionReason = if (state == VpnConnectionState.DISCONNECTED || updateRequired) "" else {
                 AppErrorMapper.localizeConnectionReason(language, rawReason)
             },
-            inlineMessage = inlineMessage(language, state, rawReason),
+            inlineMessage = if (updateRequired) null else inlineMessage(language, state, rawReason),
+            androidUpdate = if (updateRequired) current.androidUpdate.copy(isRequired = true) else current.androidUpdate,
             dailyStats = dailyStats,
         )
         return Transition.Normal(

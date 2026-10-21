@@ -186,14 +186,15 @@ object EndpointRankingPolicy {
         networkKind: NetworkKind,
     ): List<String> {
         return when (networkKind) {
-            NetworkKind.WIFI -> listOf(CLASS_REALITY_TCP, CLASS_REALITY_XHTTP_STREAM, CLASS_REALITY_XHTTP_PACKET, CLASS_TLS_TCP, CLASS_HYSTERIA)
-            NetworkKind.CELLULAR -> listOf(CLASS_REALITY_XHTTP_STREAM, CLASS_REALITY_XHTTP_PACKET, CLASS_REALITY_TCP, CLASS_TLS_TCP, CLASS_HYSTERIA)
+            NetworkKind.WIFI -> listOf(CLASS_REALITY_TCP, CLASS_REALITY_XHTTP_STREAM, CLASS_REALITY_XHTTP_PACKET, CLASS_TLS_TCP, CLASS_HYSTERIA, CLASS_NOKINV)
+            NetworkKind.CELLULAR -> listOf(CLASS_REALITY_XHTTP_STREAM, CLASS_REALITY_XHTTP_PACKET, CLASS_REALITY_TCP, CLASS_TLS_TCP, CLASS_HYSTERIA, CLASS_NOKINV)
             NetworkKind.OTHER -> listOf(
                 CLASS_REALITY_XHTTP_STREAM,
                 CLASS_REALITY_XHTTP_PACKET,
                 CLASS_REALITY_TCP,
                 CLASS_TLS_TCP,
                 CLASS_HYSTERIA,
+                CLASS_NOKINV,
             )
         }
     }
@@ -203,6 +204,7 @@ object EndpointRankingPolicy {
         val transport = candidate.normalizedTransport()
         val mode = candidate.normalizedTransportMode()
         return when {
+            candidate.proxyType.equals("nokinv", ignoreCase = true) -> CLASS_NOKINV
             security == "reality" && transport == "tcp" -> CLASS_REALITY_TCP
             security == "reality" && transport == "xhttp" && mode == "stream-up" -> CLASS_REALITY_XHTTP_STREAM
             security == "reality" && transport == "xhttp" && mode == "packet-up" -> CLASS_REALITY_XHTTP_PACKET
@@ -226,7 +228,7 @@ object EndpointRankingPolicy {
             .filter(EndpointSecurityPolicy::isAllowedCandidate)
             .filter { candidate ->
                 val state = health[candidate.code]
-                ignoreCooldown || state == null || state.cooldownUntilMillis <= nowMillis
+                candidate.proxyType.equals("nokinv", true) || ignoreCooldown || state == null || state.cooldownUntilMillis <= nowMillis
             }
     }
 
@@ -236,7 +238,8 @@ object EndpointRankingPolicy {
         networkKind: NetworkKind,
     ): Comparator<BackendEndpointCandidate> {
         val classOrder = preferredClasses(networkKind)
-        return compareByDescending<BackendEndpointCandidate> { effectiveScore(health[it.code], nowMillis) }
+        return compareBy<BackendEndpointCandidate> { if (classify(it) == CLASS_NOKINV) 0 else 1 }
+            .thenByDescending { effectiveScore(health[it.code], nowMillis) }
             .thenBy { freshLatency(health[it.code], nowMillis) ?: Long.MAX_VALUE }
             .thenBy { classOrder.indexOf(classify(it)) }
             .thenBy { it.priority }
@@ -289,6 +292,7 @@ object EndpointRankingPolicy {
     private const val CLASS_REALITY_XHTTP_PACKET = "reality-xhttp-packet"
     private const val CLASS_TLS_TCP = "tls-tcp"
     private const val CLASS_HYSTERIA = "hysteria"
+    private const val CLASS_NOKINV = "nokinv"
     private const val CLASS_OTHER = "other"
 }
 

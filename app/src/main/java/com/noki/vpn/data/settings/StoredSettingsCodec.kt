@@ -6,31 +6,32 @@ import org.json.JSONObject
 internal class StoredSettingsCodec(
     private val defaults: () -> StoredSettings,
 ) {
-    fun decode(raw: String?): StoredSettings {
+    fun decode(raw: String?, persistMigration: ((StoredSettings) -> Unit)? = null): StoredSettings {
         if (raw.isNullOrBlank()) return defaults()
         val json = runCatching { JSONObject(raw) }.getOrElse { return defaults() }
-        return runCatching {
+        val migrated = runCatching {
             val decoded = decode(json).let { settings ->
-                if (json.optInt("ruRelayDefaultsVersion") >= 1 ||
-                    !defaults().advancedSettings.ruRelayEnabled || settings.advancedSettings.ruRelayEnabled
-                ) settings else settings.copy(
-                    advancedSettings = settings.advancedSettings.copy(ruRelayEnabled = true),
+                if (json.optInt("ruRelayDefaultsVersion") >= 2) settings else settings.copy(
+                    advancedSettings = settings.advancedSettings.copy(ruRelayEnabled = false),
                     profile = RuntimeProfilePolicy.profileAfterServerSelection(settings.profile),
                     ruRelaySelectionRevision = settings.ruRelaySelectionRevision + 1L,
                 )
             }
-            val stored = if (json.has("youtubeCascade") && !json.isNull("youtubeCascade")) decoded.copy(
+            val permitted = decoded.copy(advancedSettings = RuntimeProfilePolicy.normalizeAdvancedSettings(decoded.advancedSettings, decoded.userProfile))
+            val stored = if (json.has("youtubeCascade") && !json.isNull("youtubeCascade")) permitted.copy(
                 profile = RuntimeProfilePolicy.profileAfterServerSelection(decoded.profile),
-            ) else decoded
+            ) else permitted
             if (json.optInt("russianDirectDefaultsVersion") >= 1) stored else stored.copy(selectedPackages = DefaultStoredSettingsFactory.updatedDefaultPackages(
                 stored.selectedPackages, stored.filterMode,
             ))
-        }.getOrElse { defaults() }
+        }.getOrElse { return defaults() }
+        if (json.optInt("ruRelayDefaultsVersion") < 2) persistMigration?.invoke(migrated)
+        return migrated
     }
 
     fun encode(settings: StoredSettings): String = JSONObject()
         .put("russianDirectDefaultsVersion", 1)
-        .put("ruRelayDefaultsVersion", 1)
+        .put("ruRelayDefaultsVersion", 2)
         .put("remark", settings.profile.remark)
         .put("endpointCode", settings.profile.endpointCode)
         .put("proxyType", settings.profile.proxyType)
@@ -39,6 +40,8 @@ internal class StoredSettingsCodec(
         .put("host", settings.profile.host)
         .put("port", settings.profile.port)
         .put("uuid", settings.profile.uuid)
+        .put("nokinvToken", settings.profile.nokinvToken)
+        .put("nokinvCredentialGeneration", settings.profile.nokinvCredentialGeneration)
         .put("flow", settings.profile.flow)
         .put("security", settings.profile.security)
         .put("fingerprint", settings.profile.fingerprint)
@@ -92,10 +95,12 @@ internal class StoredSettingsCodec(
         .put("accentPalette", settings.personalizationSettings.accentPalette.key)
         .put("homeLayoutVariant", settings.personalizationSettings.homeLayoutVariant.name)
         .put("glassMode", settings.personalizationSettings.glassMode.name)
+        .put("vpnStatusNotificationEnabled", settings.personalizationSettings.vpnStatusNotificationEnabled)
         .put("biometricEnabled", settings.securitySettings.biometricEnabled)
         .put("loginAlertsEnabled", settings.securitySettings.loginAlertsEnabled)
         .put("protectNewDevices", settings.securitySettings.protectNewDevices)
         .put("protocol", settings.advancedSettings.protocol.name)
+        .put("gamingModeEnabled", settings.advancedSettings.gamingModeEnabled)
         .put("ruRelayEnabled", settings.advancedSettings.ruRelayEnabled)
         .put("ruRelaySelectionRevision", settings.ruRelaySelectionRevision)
         .put("endpointSelectionMode", settings.advancedSettings.endpointSelectionMode.name)
@@ -105,7 +110,7 @@ internal class StoredSettingsCodec(
         .put("errorLogsEnabled", settings.advancedSettings.errorLogsEnabled)
         .put("anonymousLogsEnabled", settings.advancedSettings.anonymousLogsEnabled)
         .put("anonymousLogConsentVersion", 1)
-        .put("youtubeDirectDpiEnabled", settings.advancedSettings.youtubeNoAdsEnabled)
+        .put("youtubeDirectDpiEnabled", RuntimeProfilePolicy.normalizeAdvancedSettings(settings.advancedSettings, settings.userProfile).youtubeNoAdsEnabled)
         .put("multiHopSettings", encodeMultiHopSettings(settings.advancedSettings.multiHop))
         .put("killSwitchEnabled", settings.advancedSettings.killSwitchEnabled)
         .put("alwaysOnDomains", JSONArray(settings.advancedSettings.alwaysOnDomains))
@@ -132,6 +137,8 @@ internal class StoredSettingsCodec(
             host = json.optString("host"),
             port = json.optString("port", "443"),
             uuid = json.optString("uuid"),
+            nokinvToken = json.optString("nokinvToken", ""),
+            nokinvCredentialGeneration = json.optInt("nokinvCredentialGeneration", 0),
             flow = json.optString("flow"),
             security = json.optString("security", "reality"),
             fingerprint = json.optString("fingerprint", "chrome"),
@@ -194,6 +201,7 @@ internal class StoredSettingsCodec(
             subscriptionStatus = json.optString("subscriptionStatus", "active"),
         ),
         personalizationSettings = PersonalizationSettings(
+            vpnStatusNotificationEnabled = json.optBoolean("vpnStatusNotificationEnabled", true),
             language = AppLanguage.fromTag(json.optString("language")),
             accentPalette = AccentPalette.fromKey(json.optString("accentPalette")),
             homeLayoutVariant = runCatching {
@@ -217,6 +225,7 @@ internal class StoredSettingsCodec(
             protectNewDevices = json.optBoolean("protectNewDevices", true),
         ),
         advancedSettings = AdvancedSettings(
+            gamingModeEnabled = json.optBoolean("gamingModeEnabled", false),
             protocol = runCatching {
                 VpnProtocol.valueOf(json.optString("protocol", VpnProtocol.AUTO.name))
             }.getOrElse { VpnProtocol.AUTO }.takeUnless { it == VpnProtocol.WIREGUARD } ?: VpnProtocol.AUTO,

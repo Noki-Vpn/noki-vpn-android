@@ -267,6 +267,8 @@ data class BackendVpnSession(
     val endpointCandidates: List<BackendEndpointCandidate>,
     val connectIp: String? = null,
     val multiHop: BackendMultiHopSession? = null,
+    val nokinvToken: String = "",
+    val nokinvCredentialGeneration: Int = 0,
 )
 
 data class BackendMultiHopSession(

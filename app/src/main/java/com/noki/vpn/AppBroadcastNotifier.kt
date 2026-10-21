@@ -16,11 +16,23 @@ import com.noki.vpn.data.BackendAppNotification
 object AppBroadcastNotifier {
     private const val CHANNEL_ID = "noki_app_broadcasts_high_v1"
     private const val NOTIFICATION_ID = 52_000
+    private data class VisibleSupportChat(val owner: Any, val userId: String)
+    @Volatile private var visibleSupportChat: VisibleSupportChat? = null
+
+    @Synchronized
+    fun setSupportChatVisibility(owner: Any, userId: String, visible: Boolean) {
+        if (visible && userId.isNotBlank()) visibleSupportChat = VisibleSupportChat(owner, userId)
+        else if (visibleSupportChat?.owner === owner) visibleSupportChat = null
+    }
 
     fun show(
         context: Context,
         notification: BackendAppNotification,
+        userId: String? = null,
+        deviceId: String? = null,
     ): Boolean {
+        if (notification.action == MainActivity.APP_NOTIFICATION_ACTION_OPEN_SUPPORT_CHAT &&
+            !userId.isNullOrBlank() && visibleSupportChat?.userId == userId) return true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val granted = ContextCompat.checkSelfPermission(
                 context,
@@ -54,7 +66,7 @@ object AppBroadcastNotifier {
                 putExtra(MainActivity.EXTRA_APP_NOTIFICATION_ACTION, action?.wireValue)
                 putExtra(
                     MainActivity.EXTRA_APP_NOTIFICATION_ACTION_NONCE,
-                    action?.let { AppNotificationActionNonceStore.issue(context) },
+                    action?.let { AppNotificationActionNonceStore.issue(context, action = it, userId = userId, deviceId = deviceId) },
                 )
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,

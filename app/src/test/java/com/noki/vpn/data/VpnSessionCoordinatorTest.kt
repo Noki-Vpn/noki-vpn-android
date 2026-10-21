@@ -14,11 +14,88 @@ import org.robolectric.annotation.Config
 @Config(sdk = [28])
 class VpnSessionCoordinatorTest {
     @Test
-    fun `hidden saved server falls back to visible auto node`() = runBlocking {
+    fun `session admission still rejects a denied account without access preflight`() = runBlocking {
+        val api = FakeVpnSessionApi(sessionError = BackendException("subscription_inactive", 403))
+        val coordinator = VpnSessionCoordinator(
+            context = RuntimeEnvironment.getApplication(), repository = FakeVpnSessionStore(), backendApi = api,
+            challengeSigner = { "signature" },
+            startupTcpPrecheck = { error("Denied sessions cannot probe transports") },
+        )
+        val settings = DefaultStoredSettingsFactory.create().copy(
+            backendDeviceId = "device-id", backendDeviceKey = "device-key",
+            advancedSettings = AdvancedSettings(ruRelayEnabled = false),
+            userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.SERVER, selectedNodeId = "node-de-2"),
+        )
+        val error = runCatching { coordinator.prepare("token", settings) }.exceptionOrNull()
+        assertTrue(error is BackendException && error.statusCode == 403)
+        assertEquals(0, api.accessRequests)
+        assertEquals(1, api.requests.size)
+    }
+
+    @Test
+    fun `single eligible node starts without waiting for catalog latency`() = runBlocking {
         val api = FakeVpnSessionApi()
         val coordinator = VpnSessionCoordinator(
             context = RuntimeEnvironment.getApplication(), repository = FakeVpnSessionStore(), backendApi = api,
             deviceNameProvider = { "Phone" }, challengeSigner = { "signature" }, startupTcpPrecheck = { true },
+            measureClientLatencies = { error("A single eligible node needs no latency ranking") },
+        )
+        val settings = DefaultStoredSettingsFactory.create().copy(
+            backendDeviceId = "device-id", backendDeviceKey = "device-key",
+            advancedSettings = AdvancedSettings(ruRelayEnabled = false),
+            userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.SERVER, selectedNodeId = "node-de-2"),
+        )
+        coordinator.prepare("token", settings)
+        assertEquals("node-de-2", api.nodeId)
+        assertNull(api.countryCode)
+        assertEquals(0, api.catalogRequests)
+        assertEquals(0, api.accessRequests)
+        assertEquals(1, api.requests.size)
+    }
+
+    @Test
+    fun `latency ranking measures only permitted country candidates`() = runBlocking {
+        val api = FakeVpnSessionApi(extraServers = listOf(
+            VpnServer("fast", "Fast", "DE", "de-2", "fast.example", 443, true),
+            VpnServer("excluded", "Excluded", "DE", "de-2", "excluded.example", 443, true),
+            VpnServer("offline", "Offline", "DE", "de-2", "offline.example", 443, false),
+            VpnServer("disabled", "Disabled", "DE", "de-2", "disabled.example", 443, true, weight = 0),
+        ))
+        val measured = mutableListOf<String>()
+        val coordinator = VpnSessionCoordinator(
+            context = RuntimeEnvironment.getApplication(), repository = FakeVpnSessionStore(), backendApi = api,
+            deviceNameProvider = { "Phone" }, challengeSigner = { "signature" }, startupTcpPrecheck = { true },
+            measureClientLatencies = { locations ->
+                val servers = locations.flatMap { it.servers }
+                measured += servers.map { it.id }
+                servers.associate { checkNotNull(clientLatencyTargetKey(it)) to if (it.id == "fast") 10 else 200 }
+            },
+        )
+        val settings = DefaultStoredSettingsFactory.create().copy(
+            backendDeviceId = "device-id", backendDeviceKey = "device-key",
+            advancedSettings = AdvancedSettings(ruRelayEnabled = false),
+            userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.COUNTRY, selectedCountryCode = "DE"),
+        )
+        coordinator.prepare("token", settings, sessionSelection = VpnSessionSelection(
+            countryCode = "DE", excludedNodeIds = setOf("excluded"),
+        ))
+        assertEquals(setOf("node-de-2", "fast"), measured.toSet())
+        assertEquals("fast", api.requestedNodeIds.first())
+        assertEquals(0, api.accessRequests)
+    }
+
+    @Test
+    fun `hidden saved server falls back to visible auto node`() = runBlocking {
+        val api = FakeVpnSessionApi()
+        val measured = mutableListOf<String>()
+        val coordinator = VpnSessionCoordinator(
+            context = RuntimeEnvironment.getApplication(), repository = FakeVpnSessionStore(), backendApi = api,
+            deviceNameProvider = { "Phone" }, challengeSigner = { "signature" }, startupTcpPrecheck = { true },
+            measureClientLatencies = { locations ->
+                val servers = locations.flatMap { it.servers }
+                measured += servers.map { it.id }
+                servers.associate { checkNotNull(clientLatencyTargetKey(it)) to if (it.id == "node-lv2") 10 else 200 }
+            },
         )
         val settings = DefaultStoredSettingsFactory.create().copy(
             backendDeviceId = "device-id", backendDeviceKey = "device-key",
@@ -26,7 +103,8 @@ class VpnSessionCoordinatorTest {
             userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.SERVER, selectedNodeId = "hidden-node"),
         )
         val result = coordinator.prepare("token", settings)
-        assertTrue(api.nodeId in setOf("node-de-2", "node-lv2"))
+        assertEquals(setOf("node-de-2", "node-lv2"), measured.toSet())
+        assertEquals(listOf("hidden-node", "node-lv2"), api.requestedNodeIds)
         assertEquals(ServerSelectionMode.AUTO, result.settings.userProfile.serverSelectionMode)
         assertEquals("", result.settings.userProfile.selectedNodeId)
     }
@@ -116,35 +194,66 @@ class VpnSessionCoordinatorTest {
     @Test
     fun `manual catalog requests all protocols without changing selected settings`() = runBlocking {
         val candidates = listOf(
-            tcpCandidate("reality").copy(security = "reality", publicKey = "public", shortId = "abcd"),
-            tcpCandidate("tls").copy(security = "tls"),
-            tcpCandidate("hy2").copy(proxyType = "hysteria", transport = "hysteria", security = "tls"),
+            tcpCandidate("reality").copy(transport = "xhttp", transportMode = "stream-up", flow = null),
+            tcpCandidate("nokinv").copy(proxyType = "nokinv", transport = "nokinv", security = "tls",
+                publicKey = null, shortId = null, flow = null),
+            hysteriaCandidate("hy2"),
         )
         val api = FakeVpnSessionApi(candidates = candidates)
         val coordinator = VpnSessionCoordinator(
             context = RuntimeEnvironment.getApplication(), repository = FakeVpnSessionStore(), backendApi = api,
             deviceNameProvider = { "Phone" }, challengeSigner = { "signature" }, startupTcpPrecheck = { true },
         )
-        for (protocol in listOf(VpnProtocol.REALITY, VpnProtocol.TLS)) {
+        for (protocol in listOf(VpnProtocol.REALITY, VpnProtocol.TLS, VpnProtocol.NOKINV)) {
             val settings = DefaultStoredSettingsFactory.create().copy(
                 backendDeviceId = "device-id", backendDeviceKey = "device-key",
-                advancedSettings = AdvancedSettings(protocol = protocol, endpointSelectionMode = EndpointSelectionMode.MANUAL),
+                advancedSettings = AdvancedSettings(protocol = protocol, endpointSelectionMode = EndpointSelectionMode.MANUAL,
+                    manualEndpointCode = "another-node", manualEndpointGroupKey = "lv-other|tls|nokinv||100"),
             )
             val result = coordinator.endpointOptions("token", settings)
             assertEquals("auto", api.requestedProfileCode)
-            assertEquals(setOf("reality", "tls", "hy2"), result.endpointOptions.map { it.code }.toSet())
+            assertEquals(setOf("reality", "nokinv", "hy2"), result.endpointOptions.map { it.code }.toSet())
             assertEquals(protocol, settings.advancedSettings.protocol)
         }
+    }
+
+    @Test
+    fun `recovery excludes NokiNV while retaining saved Auto selection`() = runBlocking {
+        val candidates = listOf(
+            tcpCandidate("nokinv").copy(proxyType = "nokinv", transport = "nokinv", security = "tls",
+                publicKey = null, shortId = null, flow = null),
+            hysteriaCandidate("hy2"),
+        ).map { it.copy(nodeId = "node-de-2", locationCode = "de-2", locationName = "Germany") }
+        val api = FakeVpnSessionApi(candidates = candidates)
+        val coordinator = VpnSessionCoordinator(
+            context = RuntimeEnvironment.getApplication(), repository = FakeVpnSessionStore(), backendApi = api,
+            challengeSigner = { "signature" }, startupTcpPrecheck = { error("Hy2 must not probe TCP") },
+        )
+        val settings = DefaultStoredSettingsFactory.create().copy(
+            backendDeviceId = "device-id", backendDeviceKey = "device-key",
+            advancedSettings = AdvancedSettings(protocol = VpnProtocol.AUTO),
+            userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.SERVER, selectedNodeId = "node-de-2"),
+        )
+
+        val result = coordinator.prepare("token", settings,
+            sessionSelection = VpnSessionSelection(countryCode = "DE", nodeId = "node-de-2", excludeNokiNv = true))
+
+        assertEquals("hy2", result.settings.profile.endpointCode)
+        assertEquals("hysteria", result.settings.profile.proxyType)
+        assertTrue(VpnProfileValidator.isUsable(result.settings))
+        assertEquals(settings.advancedSettings, result.settings.advancedSettings)
+        assertEquals("auto", api.requestedProfileCode)
+        assertEquals(1, api.requests.size)
     }
 
     @Test
     fun `failed TCP selection reports filters and empty profile before validation`() = runBlocking {
         val events = mutableListOf<String>()
         val candidates = listOf(
-            tcpCandidate("eligible"),
-            tcpCandidate("no-host").copy(entryHost = ""),
-            tcpCandidate("insecure").copy(allowInsecure = true),
-            tcpCandidate("canary").copy(canaryOnly = true),
+            tcpCandidate("eligible").copy(transport = "xhttp", transportMode = "stream-up", flow = null),
+            tcpCandidate("no-host").copy(transport = "xhttp", transportMode = "stream-up", flow = null, entryHost = ""),
+            tcpCandidate("insecure").copy(transport = "xhttp", transportMode = "stream-up", flow = null, allowInsecure = true),
+            tcpCandidate("canary").copy(transport = "xhttp", transportMode = "stream-up", flow = null, canaryOnly = true),
         )
         val coordinator = VpnSessionCoordinator(
             context = RuntimeEnvironment.getApplication(),
@@ -193,7 +302,8 @@ class VpnSessionCoordinatorTest {
 
     @Test
     fun `validator exposes reason without changing boolean contract`() {
-        val profile = VlessProfile(host = "node.example", port = "443", security = "tls", serverName = "node.example", uuid = "e912e725-2dc7-4b44-85d2-7fbc31a48b5e")
+        val profile = VlessProfile(host = "node.example", port = "443", proxyType = "hysteria", transport = "hysteria",
+            security = "tls", serverName = "node.example", uuid = "e912e725-2dc7-4b44-85d2-7fbc31a48b5e")
         val settings = DefaultStoredSettingsFactory.create().copy(
             profile = profile,
             advancedSettings = AdvancedSettings(protocol = VpnProtocol.TLS),
@@ -340,6 +450,7 @@ class VpnSessionCoordinatorTest {
         private val sessionError: BackendException? = null,
         private val candidates: List<BackendEndpointCandidate> = emptyList(),
         private val pairSession: BackendVpnSession? = null,
+        private val extraServers: List<VpnServer> = emptyList(),
     ) : VpnSessionApi {
         override suspend fun createRuWireGuardSession(
             token: String,
@@ -352,7 +463,8 @@ class VpnSessionCoordinatorTest {
                 catalogRequests++
                 BackendLocation(location, location, country, null, null, "node.example", country, true,
                     null, null, null, null, null,
-                    servers = listOf(VpnServer("node-$location", country, country, location, "node.example", null, true)))
+                    servers = listOf(VpnServer("node-$location", country, country, location, "node.example", null, true)) +
+                        extraServers.filter { it.locationCode == location })
             }
         var countryCode: String? = null
         var locationCode: String? = null
@@ -360,6 +472,7 @@ class VpnSessionCoordinatorTest {
         var requestedProfileCode: String? = null
         var multiHopRequest: MultiHopSettings? = null
         val requests = mutableListOf<Pair<String?, String?>>()
+        val requestedNodeIds = mutableListOf<String?>()
 
         override suspend fun vpnAccess(
             token: String,
@@ -401,17 +514,21 @@ class VpnSessionCoordinatorTest {
             this.countryCode = countryCode
             this.locationCode = locationCode
             this.nodeId = nodeId
+            requestedNodeIds += nodeId
             requestedProfileCode = profileCode
             multiHopRequest = multiHop
             requests += countryCode to locationCode
             sessionError?.let { throw it }
             pairSession?.let { return it }
+            if (nodeId != null && nodeId !in setOf("node-de-2", "node-lv2") && extraServers.none { it.id == nodeId }) {
+                throw BackendException("Server not found", 404)
+            }
             if (rejectCountryRequest && countryCode != null && locationCode == null) {
                 throw BackendException("Location not found", 503)
             }
             return BackendVpnSession(
                 canConnect = true,
-                profileCode = "tls",
+                profileCode = "reality",
                 locationCode = "de-2",
                 locationName = "Germany",
                 endpointCode = "de-endpoint",
@@ -419,20 +536,20 @@ class VpnSessionCoordinatorTest {
                 entryPort = 443,
                 serverName = "de.example.com",
                 proxyType = "vless",
-                transport = "tcp",
-                transportMode = null,
-                security = "tls",
+                transport = "xhttp",
+                transportMode = "stream-up",
+                security = "reality",
                 fingerprint = null,
                 requestHost = null,
-                path = null,
+                path = "/noki",
                 alpn = null,
                 allowInsecure = false,
                 enableMux = false,
                 randomUserAgent = false,
-                publicKey = null,
-                shortId = null,
+                publicKey = "public",
+                shortId = "abcd",
                 vpnUsername = "owner",
-                vpnSecret = "secret",
+                vpnSecret = "00000000-0000-4000-8000-000000000001",
                 flow = null,
                 planCode = null,
                 endpointCandidates = candidates.filter { profileCode == "auto" || it.security == profileCode },

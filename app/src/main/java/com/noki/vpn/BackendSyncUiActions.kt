@@ -5,6 +5,7 @@ import com.noki.vpn.data.AuthRefreshRejectedException
 import com.noki.vpn.data.ServerLocation
 import com.noki.vpn.data.MultiHopSettings
 import com.noki.vpn.data.RuForeignNode
+import com.noki.vpn.data.VpnConnectionState
 import com.noki.vpn.data.clientLatencyTargetKey
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -24,7 +25,11 @@ internal fun AppUiRuntime.applyAndPersist(newState: AppUiState) {
 }
 
 internal fun AppUiRuntime.applyAndPersist(newState: AppUiState, effect: SettingsEffect) {
-    val stateToApply = withFreeTrafficLimitNotice(newState)
+    val permitted = AdvancedSettingsStateReducer.setYoutubeNoAdsEnabled(newState, newState.advancedSettings.youtubeNoAdsEnabled)
+    val disableYoutube = uiState.advancedSettings.youtubeNoAdsEnabled &&
+        !permitted.advancedSettings.youtubeNoAdsEnabled && permitted.userProfile.isFreePlan
+    val stateToApply = withFreeTrafficLimitNotice(permitted)
+    val prepareChanged = uiState.userProfile != stateToApply.userProfile || uiState.advancedSettings != stateToApply.advancedSettings
     uiState = stateToApply
     val result = settingsMutationCoordinator.persistUiFields(stateToApply, effect)
     when (result.effect) {
@@ -32,6 +37,9 @@ internal fun AppUiRuntime.applyAndPersist(newState: AppUiState, effect: Settings
         SettingsEffect.ApplyRuntimeSettings -> vpnCommands.applyRuntimeSettings()
         SettingsEffect.StartAutomaticLogUpload -> maybeUploadLogsAutomatically()
     }
+    if (disableYoutube && (stateToApply.connectionState == VpnConnectionState.CONNECTED ||
+        stateToApply.connectionState == VpnConnectionState.CONNECTING)) vpnCommands.restart()
+    if (prepareChanged || !stateToApply.isAuthenticated) prepareVpnInAdvance()
 }
 
 internal fun AppUiRuntime.persistBackendState(state: AppUiState) {
@@ -158,7 +166,11 @@ internal fun AppUiRuntime.applyBackendSyncResult(
     )
     when (trigger) {
         BackendRefreshTrigger.Stats -> {
-            uiState = merged.copy(dailyStats = repository.loadDailyStats())
+            val statsState = merged.copy(dailyStats = repository.loadDailyStats())
+            if (statsState.userProfile.isFreePlan && statsState.advancedSettings.youtubeNoAdsEnabled) {
+                persistBackendState(statsState)
+                applyAndPersist(statsState)
+            } else uiState = withFreeTrafficLimitNotice(statsState)
             maybeUploadLogsAutomatically()
             if (hasMissingClientLatency(merged.locations)) {
                 refreshClientLatenciesAsync(merged.locations)
@@ -187,6 +199,7 @@ internal fun AppUiRuntime.startBackendPostSyncSideEffects(
 ) {
     startAppNotificationPolling()
     syncFcmTokenIfAvailable()
+    prepareVpnInAdvance()
     maybeUploadLogsAutomatically()
     if (refreshClientLatency || hasMissingClientLatency(state.locations)) {
         refreshClientLatenciesAsync(state.locations)

@@ -30,6 +30,24 @@ class GeositeAssetTest {
     }
 
     @Test
+    fun verifiedDigestDoesNotTrustChangedBytesOrShareMutableRules() {
+        val bytes = asset("CATEGORY-RU" to listOf(domain(2, "original.example")))
+        assertTrue(GeositeAsset.isValid(bytes))
+        val selectors = setOf("geosite:category-ru")
+        GeositeAsset.resolveDomains(bytes, selectors).getValue("geosite:category-ru")
+            .getJSONArray("domain_suffix").put("injected.example")
+        val again = GeositeAsset.resolveDomains(bytes, selectors).getValue("geosite:category-ru")
+        assertEquals(1, again.getJSONArray("domain_suffix").length())
+        assertFalse(GeositeAsset.isValid(asset("CATEGORY-RU" to listOf(domain(4, "bad.example")))))
+        assertThrows(IllegalArgumentException::class.java) {
+            GeositeAsset.resolveDomains(bytes, setOf("geosite:missing"))
+        }
+        val updated = asset("CATEGORY-RU" to listOf(domain(2, "updated.example")))
+        assertEquals("updated.example", GeositeAsset.resolveDomains(updated, selectors)
+            .getValue("geosite:category-ru").getJSONArray("domain_suffix").getString(0))
+    }
+
+    @Test
     fun everyProtobufDomainTypeResolvesToItsNativeMeaning() {
         val bytes = asset("CATEGORY-RU" to listOf(
             domain(0, "keyword"), domain(1, "^Case[.]"), domain(2, "suffix.example"), domain(3, "exact.example"),

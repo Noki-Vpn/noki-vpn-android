@@ -4,28 +4,29 @@ import java.util.Locale
 
 object EndpointGroupPolicy {
     fun groupKey(option: VpnEndpointOption): String {
-        if (option.endpointGroupKey.isNotBlank()) return option.endpointGroupKey
         return groupKey(
-            locationCode = option.locationCode,
             security = option.security,
             transport = normalizeTransport(option.transport),
             transportMode = normalizeTransportMode(option.transport, option.transportMode),
-            priority = option.priority,
         )
     }
 
     fun groupKey(candidate: BackendEndpointCandidate): String =
         groupKey(
-            locationCode = candidate.locationCode,
             security = candidate.security,
             transport = candidate.normalizedTransport(),
             transportMode = candidate.normalizedTransportMode(),
-            priority = candidate.priority,
         )
+
+    fun groupKey(profile: VlessProfile): String = groupKey(
+        profile.security, normalizeTransport(profile.transport),
+        normalizeTransportMode(profile.transport, profile.transportMode),
+    )
 
     fun manualOptions(options: List<VpnEndpointOption>): List<VpnEndpointOption> {
         val grouped = linkedMapOf<String, MutableList<VpnEndpointOption>>()
-        options.filter { !it.canaryOnly && EndpointSecurityPolicy.isAllowedOption(it) }.forEach { option ->
+        options.filter { !it.canaryOnly && EndpointSecurityPolicy.isAllowedOption(it) &&
+            EndpointTransportPolicy.isDirectOption(it) }.forEach { option ->
             grouped.getOrPut(groupKey(option)) { mutableListOf() }.add(option)
         }
         return grouped.map { (key, group) ->
@@ -45,7 +46,7 @@ object EndpointGroupPolicy {
         endpointOptions: List<VpnEndpointOption>,
         profile: VlessProfile,
     ): String {
-        settings.manualEndpointGroupKey.trim().takeIf { it.isNotBlank() }?.let { return it }
+        settings.manualEndpointGroupKey.trim().takeIf { it.isNotBlank() }?.let { return normalizedGroupKey(it) }
         val code = settings.manualEndpointCode.ifBlank { profile.endpointCode }
         return endpointOptions.firstOrNull { it.code == code }?.let(::groupKey).orEmpty()
     }
@@ -55,7 +56,7 @@ object EndpointGroupPolicy {
         endpointCode: String,
         endpointOptions: List<VpnEndpointOption>,
     ): AdvancedSettings {
-        if (settings.endpointSelectionMode != EndpointSelectionMode.MANUAL) return settings
+        if (settings.gamingModeEnabled || settings.endpointSelectionMode != EndpointSelectionMode.MANUAL) return settings
         val groupKey = endpointOptions.firstOrNull { it.code == endpointCode }?.let(::groupKey)
             ?: settings.manualEndpointGroupKey
         return settings.copy(
@@ -68,14 +69,13 @@ object EndpointGroupPolicy {
         candidates: List<BackendEndpointCandidate>,
         settings: AdvancedSettings,
     ): List<BackendEndpointCandidate> {
-        val targetGroup = settings.manualEndpointGroupKey.trim().ifBlank {
+        val targetGroup = normalizedGroupKey(settings.manualEndpointGroupKey).ifBlank {
             candidates.firstOrNull { it.code == settings.manualEndpointCode.trim() }
                 ?.let(::groupKey)
                 .orEmpty()
         }
         if (targetGroup.isNotBlank()) {
-            val grouped = candidates.filter { groupKey(it) == targetGroup }
-            if (grouped.isNotEmpty()) return grouped
+            return candidates.filter { groupKey(it) == targetGroup }
         }
         val legacyCode = settings.manualEndpointCode.trim()
         return candidates.firstOrNull { it.code == legacyCode }?.let(::listOf) ?: candidates
@@ -99,20 +99,29 @@ object EndpointGroupPolicy {
     }
 
     private fun groupKey(
-        locationCode: String,
         security: String,
         transport: String,
         transportMode: String,
-        priority: Int,
     ): String = listOf(
-        locationCode.lowercase(Locale.ROOT).ifBlank { "all" },
         security.lowercase(Locale.ROOT).ifBlank { "tls" },
         transport.lowercase(Locale.ROOT).ifBlank { "tcp" },
         transportMode.lowercase(Locale.ROOT),
-        priority.toString(),
     ).joinToString("|")
 
+    private fun normalizedGroupKey(raw: String): String {
+        val parts = raw.trim().split('|')
+        // Saved selections before 1.9.5 also included location and priority.
+        val transport = when (parts.size) {
+            5 -> parts.subList(1, 4)
+            3 -> parts
+            else -> return ""
+        }
+        return groupKey(transport[0], normalizeTransport(transport[1]),
+            normalizeTransportMode(transport[1], transport[2]))
+    }
+
     fun displayLabelFor(option: VpnEndpointOption): String {
+        if (option.proxyType == "nokinv") return "NokiNV / Auto"
         if (option.proxyType.equals("hysteria", ignoreCase = true) || normalizeTransport(option.transport) == "hysteria") {
             return "Hysteria2 / UDP"
         }

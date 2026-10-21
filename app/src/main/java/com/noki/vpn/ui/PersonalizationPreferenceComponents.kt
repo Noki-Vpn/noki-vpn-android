@@ -176,9 +176,10 @@ internal fun glassModeForFullGlassEnabled(enabled: Boolean): GlassMode =
     if (enabled) GlassMode.FULL else GlassMode.SIMPLE
 
 @Composable
-internal fun PersonalizationGlassModeRow(
-    glassMode: GlassMode,
-    onGlassModeChanged: (GlassMode) -> Unit,
+internal fun PersonalizationToggleRow(
+    title: String,
+    selected: Boolean,
+    onSelectedChange: (Boolean) -> Unit,
     backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
@@ -197,7 +198,7 @@ internal fun PersonalizationGlassModeRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             PersonalizationText(
-                text = "Full Glass",
+                text = title,
                 fontSize = 18f,
                 lineHeight = 21.6f,
                 fontWeight = FontWeight.Normal,
@@ -205,8 +206,8 @@ internal fun PersonalizationGlassModeRow(
             )
             NokiLiquidToggle(
                 sizeFactor = metrics.contentScale,
-                selected = fullGlassEnabled(glassMode),
-                onSelectedChange = { onGlassModeChanged(glassModeForFullGlassEnabled(it)) },
+                selected = selected,
+                onSelectedChange = onSelectedChange,
                 backdrop = backdrop,
                 liveGlassEnabled = liveGlassEnabled,
                 modifier = Modifier.padding(start = metrics.dp(14f)),

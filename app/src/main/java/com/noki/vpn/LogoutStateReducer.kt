@@ -33,6 +33,7 @@ object LogoutStateReducer {
             isAndroidUpdateAvailable = false,
             androidUpdate = AndroidUpdateUiState(
                 currentVersionName = current.androidUpdate.currentVersionName,
+                isRequired = current.androidUpdate.requiresUpdate,
             ),
             isUploadingAvatar = false,
             avatarUploadMessage = null,

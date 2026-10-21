@@ -19,6 +19,38 @@ import org.junit.Test
 
 class AdvancedSettingsStateReducerTest {
     @Test
+    fun gamingOverridesRuAndManualChoiceWithoutReplacingItAndKeepsMultiHop() {
+        val saved = AdvancedSettings(protocol = VpnProtocol.REALITY, ruRelayEnabled = true,
+            endpointSelectionMode = EndpointSelectionMode.MANUAL, manualEndpointCode = "xhttp",
+            manualEndpointGroupKey = "reality|xhttp|stream-up", multiHop = MultiHopSettings(enabled = true))
+        val current = AppUiState(advancedSettings = saved,
+            profile = VlessProfile(endpointCode = "old", uuid = "old"))
+        val gaming = AdvancedSettingsStateReducer.setGamingModeEnabled(current, true)
+        assertEquals(VpnProtocol.NOKINV, gaming.advancedSettings.effectiveProtocol)
+        assertEquals(saved.copy(gamingModeEnabled = true, ruRelayEnabled = false), gaming.advancedSettings)
+        assertEquals("", gaming.profile.endpointCode)
+        val direct = AdvancedSettingsStateReducer.setMultiHop(gaming, MultiHopSettings())
+        assertEquals(VpnProtocol.NOKINV, direct.advancedSettings.effectiveProtocol)
+        val restored = AdvancedSettingsStateReducer.setGamingModeEnabled(direct, false)
+        assertEquals(saved.copy(ruRelayEnabled = false, multiHop = MultiHopSettings()), restored.advancedSettings)
+        assertEquals(VpnProtocol.REALITY, restored.advancedSettings.effectiveProtocol)
+        val ru = AdvancedSettingsStateReducer.setRuRelayEnabled(gaming, true)
+        assertEquals(false, ru.advancedSettings.gamingModeEnabled)
+        assertEquals(VpnProtocol.WIREGUARD, ru.advancedSettings.effectiveProtocol)
+    }
+
+    @Test
+    fun youtubeCannotBeEnabledOnFreeIncludingTheTrialButRemainsAvailableOnPaidPlans() {
+        val current = AppUiState(advancedSettings = AdvancedSettings(youtubeNoAdsEnabled = true))
+        for (raw in listOf("free", "free-plus", "free_monthly")) {
+            val free = current.copy(userProfile = UserProfile(selectedPlanCodeRaw = raw, trialTrafficRemainingGb = 3.0))
+            assertEquals(false, AdvancedSettingsStateReducer.setYoutubeNoAdsEnabled(free, true).advancedSettings.youtubeNoAdsEnabled)
+        }
+        val paid = current.copy(userProfile = UserProfile(selectedPlanCodeRaw = "plus-monthly", selectedPlanTier = "plus"))
+        assertEquals(true, AdvancedSettingsStateReducer.setYoutubeNoAdsEnabled(paid, true).advancedSettings.youtubeNoAdsEnabled)
+    }
+
+    @Test
     fun ruRelayToggleKeepsExplicitMultiHopAndInvalidatesBothPreviousRuntimes() {
         val manual = MultiHopSettings(enabled = true,
             entry = HopSelection(ServerSelectionMode.SERVER, nodeId = "foreign-entry"),
@@ -207,11 +239,11 @@ class AdvancedSettingsStateReducerTest {
     @Test
     fun autoEndpointSelectionSwitchesBetweenAutoAndManualState() {
         val current = AppUiState(
-            profile = VlessProfile(endpointCode = "tcp-a", uuid = "runtime-user"),
+            profile = VlessProfile(endpointCode = "xhttp-a", uuid = "runtime-user"),
             advancedSettings = AdvancedSettings(endpointSelectionMode = EndpointSelectionMode.AUTO),
             endpointOptions = listOf(
-                endpointOption("tcp-a", security = "reality", transport = "tcp", mode = null),
-                endpointOption("tls-a", security = "tls", transport = "tcp", mode = null),
+                endpointOption("xhttp-a", security = "reality", transport = "xhttp", mode = "stream-up"),
+                endpointOption("hy-a", security = "tls", transport = "hysteria", mode = null).copy(proxyType = "hysteria"),
             ),
         )
 
@@ -220,8 +252,8 @@ class AdvancedSettingsStateReducerTest {
 
         assertEquals(EndpointSelectionMode.MANUAL, manual.advancedSettings.endpointSelectionMode)
         assertEquals(VpnProtocol.REALITY, manual.advancedSettings.protocol)
-        assertEquals("tcp-a", manual.advancedSettings.manualEndpointCode)
-        assertEquals("lv1|reality|tcp||100", manual.advancedSettings.manualEndpointGroupKey)
+        assertEquals("xhttp-a", manual.advancedSettings.manualEndpointCode)
+        assertEquals("reality|xhttp|stream-up", manual.advancedSettings.manualEndpointGroupKey)
         assertEquals("", manual.profile.uuid)
         assertEquals(EndpointSelectionMode.AUTO, auto.advancedSettings.endpointSelectionMode)
         assertEquals(VpnProtocol.AUTO, auto.advancedSettings.protocol)
@@ -231,7 +263,7 @@ class AdvancedSettingsStateReducerTest {
 
     @Test
     fun switchingOffAutoDoesNotSelectARetiredCachedEndpoint() {
-        val supported = endpointOption("vision", "reality", "tcp", null)
+        val supported = endpointOption("xhttp", "reality", "xhttp", "stream-up")
         val retired = supported.copy(code = "packet", transport = "xhttp", transportMode = "packet-up")
         val current = AppUiState(profile = VlessProfile(endpointCode = retired.code),
             endpointOptions = listOf(retired, supported))
@@ -246,15 +278,15 @@ class AdvancedSettingsStateReducerTest {
             profile = VlessProfile(endpointCode = "old", uuid = "runtime-user"),
             advancedSettings = AdvancedSettings(endpointSelectionMode = EndpointSelectionMode.AUTO),
         )
-        val option = endpointOption("tls-a", security = "tls", transport = "tcp", mode = null)
+        val option = endpointOption("hy-a", security = "tls", transport = "hysteria", mode = null).copy(proxyType = "hysteria")
 
         val selected = AdvancedSettingsStateReducer.selectManualEndpoint(current, option)
 
         assertEquals(EndpointSelectionMode.MANUAL, selected.advancedSettings.endpointSelectionMode)
         assertEquals(VpnProtocol.TLS, selected.advancedSettings.protocol)
-        assertEquals("tls-a", selected.advancedSettings.manualEndpointCode)
-        assertEquals("lv1|tls|tcp||100", selected.advancedSettings.manualEndpointGroupKey)
-        assertEquals("tls-a", selected.profile.endpointCode)
+        assertEquals("hy-a", selected.advancedSettings.manualEndpointCode)
+        assertEquals("tls|hysteria|", selected.advancedSettings.manualEndpointGroupKey)
+        assertEquals("hy-a", selected.profile.endpointCode)
         assertEquals("", selected.profile.uuid)
     }
 

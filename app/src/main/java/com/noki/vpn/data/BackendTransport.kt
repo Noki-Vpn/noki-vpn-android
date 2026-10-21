@@ -20,10 +20,14 @@ internal class BackendTransport(
 ) {
     private val origin = baseUrl.trimEnd('/').toHttpUrl()
 
-    suspend fun jsonObject(request: Request): JSONObject = execute(controlPlaneClient, request) { response ->
+    suspend fun jsonObject(request: Request): JSONObject = execute(controlPlaneClient, request, ::decodeJsonObject)
+
+    suspend fun streamingJsonObject(request: Request): JSONObject = execute(streamingClient, request, ::decodeJsonObject)
+
+    private fun decodeJsonObject(response: Response): JSONObject {
         val raw = response.body.readLimitedText()
         if (!response.isSuccessful) throw backendError(response, raw)
-        if (raw.isBlank()) JSONObject() else JSONObject(raw)
+        return if (raw.isBlank()) JSONObject() else JSONObject(raw)
     }
 
     suspend fun jsonArray(request: Request): JSONArray = execute(controlPlaneClient, request) { response ->

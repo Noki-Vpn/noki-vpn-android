@@ -52,6 +52,7 @@ internal fun AppUiRuntime.selectServer(code: String, mode: ServerSelectionMode =
     )
     val next = uiState.copy(
         userProfile = persisted.userProfile,
+        advancedSettings = persisted.advancedSettings,
         profile = persisted.profile,
         endpointOptions = persisted.endpointOptions,
         endpointOptionsCountryCode = null,
@@ -62,6 +63,7 @@ internal fun AppUiRuntime.selectServer(code: String, mode: ServerSelectionMode =
         ),
     )
     uiState = next
+    prepareVpnInAdvance()
     when (preChangeConnectionState) {
         VpnConnectionState.CONNECTED,
         VpnConnectionState.CONNECTING,

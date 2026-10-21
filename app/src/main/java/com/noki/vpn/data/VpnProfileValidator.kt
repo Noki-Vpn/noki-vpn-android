@@ -14,6 +14,7 @@ object VpnProfileValidator {
             advancedSettings = settings.advancedSettings,
             selectedLocationCode = settings.userProfile.selectedServerCode,
             endpointOptions = settings.endpointOptions,
+            directOnly = true,
         )
     }
 
@@ -22,13 +23,15 @@ object VpnProfileValidator {
         advancedSettings: AdvancedSettings,
         selectedLocationCode: String = "",
         endpointOptions: List<VpnEndpointOption> = emptyList(),
-    ): Boolean = rejectionReason(profile, advancedSettings, selectedLocationCode, endpointOptions) == null
+        directOnly: Boolean = true,
+    ): Boolean = rejectionReason(profile, advancedSettings, selectedLocationCode, endpointOptions, directOnly) == null
 
     private fun rejectionReason(
         profile: VlessProfile,
         advancedSettings: AdvancedSettings,
         selectedLocationCode: String,
         endpointOptions: List<VpnEndpointOption>,
+        directOnly: Boolean,
     ): String? {
         if (advancedSettings.ruRelayEnabled) {
             return "ru_relay_requires_wireguard_coordinator"
@@ -45,9 +48,12 @@ object VpnProfileValidator {
         } else if (multiHop != null) return "multihop_runtime_unexpected"
         val expectedSecurity = advancedSettings.effectiveProtocol.name.lowercase(Locale.ROOT)
         val normalizedSecurity = profile.security.lowercase(Locale.ROOT)
-        if (expectedSecurity != "auto" && normalizedSecurity != expectedSecurity) return "protocol_mismatch"
+        val nokinv = profile.proxyType == "nokinv"
+        if (if (expectedSecurity == "nokinv") !nokinv else (nokinv && expectedSecurity != "auto") ||
+            (expectedSecurity != "auto" && normalizedSecurity != expectedSecurity)) return "protocol_mismatch"
 
-        if (!advancedSettings.multiHop.enabled && advancedSettings.endpointSelectionMode == EndpointSelectionMode.MANUAL) {
+        if (!advancedSettings.multiHop.enabled && !advancedSettings.gamingModeEnabled &&
+            advancedSettings.endpointSelectionMode == EndpointSelectionMode.MANUAL) {
             val manualGroupKey = EndpointGroupPolicy.resolveManualGroupKey(
                 settings = advancedSettings,
                 endpointOptions = endpointOptions,
@@ -56,7 +62,8 @@ object VpnProfileValidator {
             if (manualGroupKey.isNotBlank()) {
                 val profileGroupKey = endpointOptions.firstOrNull { it.code == profile.endpointCode }
                     ?.let(EndpointGroupPolicy::groupKey)
-                if (profileGroupKey != null && profileGroupKey != manualGroupKey) return "manual_group_mismatch"
+                    ?: EndpointGroupPolicy.groupKey(profile)
+                if (profileGroupKey != manualGroupKey) return "manual_group_mismatch"
             } else {
                 val manualCode = advancedSettings.manualEndpointCode.trim()
                 if (manualCode.isNotBlank() && profile.endpointCode != manualCode) return "manual_endpoint_mismatch"
@@ -75,7 +82,15 @@ object VpnProfileValidator {
 
         if (profile.host.isBlank()) return "missing_host"
         if (profile.port.isBlank()) return "missing_port"
-        if (runCatching { UUID.fromString(profile.uuid) }.isFailure) return "invalid_credential"
+        if (directOnly && !advancedSettings.multiHop.enabled && !EndpointTransportPolicy.isDirectProfile(profile)) {
+            return "direct_transport_unsupported"
+        }
+        if (nokinv) {
+            val token = profile.nokinvToken
+            val decoded = runCatching { java.util.Base64.getUrlDecoder().decode(token) }.getOrNull()
+            if (decoded?.size != 32 || java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(decoded) != token ||
+                profile.nokinvCredentialGeneration < 1) return "invalid_credential"
+        } else if (runCatching { UUID.fromString(profile.uuid) }.isFailure) return "invalid_credential"
         return if (EndpointSecurityPolicy.isAllowedProfile(profile)) null else "security_policy_rejected"
     }
 }

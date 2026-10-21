@@ -85,33 +85,18 @@ internal fun AppUiRuntime.setYoutubeNoAdsEnabled(enabled: Boolean) {
 }
 
 internal fun AppUiRuntime.setMultiHop(settings: MultiHopSettings) {
-    val next = AdvancedSettingsStateReducer.setMultiHop(uiState, settings)
-    if (next == uiState) return
-    endpointOptionsRefreshJob?.cancel()
-    endpointOptionsRefreshJob = null
-    endpointOptionsRefreshCountryCode = null
-    val previousLatencyJob = clientLatencyRefreshJob
-    previousLatencyJob?.cancel()
-    clientLatencyRefreshJob = null
-    clientLatencyRefreshTarget = null
-    clientLatencyRefreshNetworkSignature = null
-    clientLatencyByTarget = emptyMap()
-    val persisted = settingsMutationCoordinator.persistUiFields(next)
-    uiState = withFreeTrafficLimitNotice(BackendSyncCoordinator.withCachedClientLatencies(next.copy(
-        profile = persisted.profile,
-        endpointOptions = persisted.endpointOptions,
-    ), emptyMap()))
-    refreshClientLatenciesAsync(uiState.locations)
-    if (uiState.connectionState == VpnConnectionState.CONNECTED ||
-        uiState.connectionState == VpnConnectionState.CONNECTING
-    ) scope.launch {
-        previousLatencyJob?.join()
-        if (uiState.advancedSettings.multiHop == settings) vpnCommands.restart()
-    }
+    applyRouteSelection(AdvancedSettingsStateReducer.setMultiHop(uiState, settings))
 }
 
 internal fun AppUiRuntime.setRuRelayEnabled(enabled: Boolean) {
-    val next = AdvancedSettingsStateReducer.setRuRelayEnabled(uiState, enabled)
+    applyRouteSelection(AdvancedSettingsStateReducer.setRuRelayEnabled(uiState, enabled))
+}
+
+internal fun AppUiRuntime.setGamingModeEnabled(enabled: Boolean) {
+    applyRouteSelection(AdvancedSettingsStateReducer.setGamingModeEnabled(uiState, enabled))
+}
+
+private fun AppUiRuntime.applyRouteSelection(next: AppUiState) {
     if (next == uiState) return
     endpointOptionsRefreshJob?.cancel()
     endpointOptionsRefreshJob = null
@@ -127,12 +112,16 @@ internal fun AppUiRuntime.setRuRelayEnabled(enabled: Boolean) {
         profile = persisted.profile,
         endpointOptions = persisted.endpointOptions,
     ), emptyMap()))
+    prepareVpnInAdvance()
     refreshClientLatenciesAsync(uiState.locations)
     if (uiState.connectionState == VpnConnectionState.CONNECTED ||
         uiState.connectionState == VpnConnectionState.CONNECTING
     ) scope.launch {
         previousLatencyJob?.join()
-        if (uiState.advancedSettings.ruRelayEnabled == enabled) vpnCommands.restart()
+        val current = uiState.advancedSettings
+        val selected = next.advancedSettings
+        if (current.ruRelayEnabled == selected.ruRelayEnabled && current.multiHop == selected.multiHop &&
+            current.gamingModeEnabled == selected.gamingModeEnabled) vpnCommands.restart()
     }
 }
 
@@ -150,17 +139,21 @@ internal fun AppUiRuntime.toggleProtectNewDevices(enabled: Boolean) {
 
 internal fun AppUiRuntime.changeProtocol(protocol: VpnProtocol) {
     if (uiState.advancedSettings.multiHop.enabled || uiState.advancedSettings.ruRelayEnabled ||
+        uiState.advancedSettings.gamingModeEnabled ||
         protocol == VpnProtocol.WIREGUARD) return
     val next = AdvancedSettingsStateReducer.changeProtocol(uiState, protocol)
     val persisted = settingsMutationCoordinator.persistProtocolChange(next, protocol)
     uiState = withFreeTrafficLimitNotice(next.copy(profile = persisted.profile))
+    prepareVpnInAdvance()
 }
 
 internal fun AppUiRuntime.toggleAutoEndpointSelection(enabled: Boolean) {
-    if (uiState.advancedSettings.multiHop.enabled || uiState.advancedSettings.ruRelayEnabled) return
+    if (uiState.advancedSettings.multiHop.enabled || uiState.advancedSettings.ruRelayEnabled ||
+        uiState.advancedSettings.gamingModeEnabled) return
     val next = AdvancedSettingsStateReducer.setAutoEndpointSelection(uiState, enabled)
     val persisted = settingsMutationCoordinator.persistAutoEndpointSelection(next)
     uiState = withFreeTrafficLimitNotice(next.copy(profile = persisted.profile))
+    prepareVpnInAdvance()
 }
 
 internal fun AppUiRuntime.setKillSwitchEnabled(enabled: Boolean) {
@@ -174,7 +167,8 @@ internal fun AppUiRuntime.refreshEndpointOptions(
     context: Context,
     force: Boolean = false,
 ) {
-    if (uiState.advancedSettings.multiHop.enabled || uiState.advancedSettings.ruRelayEnabled) return
+    if (uiState.advancedSettings.multiHop.enabled || uiState.advancedSettings.ruRelayEnabled ||
+        uiState.advancedSettings.gamingModeEnabled) return
     val attempt = authSessionCoordinator.attempt() ?: return
     val selectedCountryCode = uiState.userProfile.selectedCountryCode
     val selectedMode = uiState.userProfile.serverSelectionMode
@@ -218,7 +212,7 @@ internal fun AppUiRuntime.refreshEndpointOptions(
                 uiState.userProfile.serverSelectionMode != selectedMode ||
                 uiState.userProfile.selectedNodeId != selectedNodeId ||
                 uiState.advancedSettings.ruRelayEnabled ||
-                uiState.advancedSettings.multiHop.enabled
+                uiState.advancedSettings.multiHop.enabled || uiState.advancedSettings.gamingModeEnabled
             ) {
                 return@launch
             }
@@ -263,7 +257,8 @@ internal fun AppUiRuntime.refreshEndpointOptions(
 }
 
 internal fun AppUiRuntime.selectManualEndpoint(option: VpnEndpointOption) {
-    if (uiState.advancedSettings.multiHop.enabled || uiState.advancedSettings.ruRelayEnabled) return
+    if (uiState.advancedSettings.multiHop.enabled || uiState.advancedSettings.ruRelayEnabled ||
+        uiState.advancedSettings.gamingModeEnabled) return
     if (!isManualEndpointSelectable(
             option = option,
             endpointOptions = uiState.endpointOptions,
@@ -277,6 +272,7 @@ internal fun AppUiRuntime.selectManualEndpoint(option: VpnEndpointOption) {
     val next = AdvancedSettingsStateReducer.selectManualEndpoint(uiState, option)
     val persisted = settingsMutationCoordinator.persistManualEndpointSelection(next, option)
     uiState = withFreeTrafficLimitNotice(next.copy(profile = persisted.profile))
+    prepareVpnInAdvance()
 }
 
 internal fun AppUiRuntime.setLoggingEnabled(enabled: Boolean) {

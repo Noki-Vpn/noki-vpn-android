@@ -41,6 +41,7 @@ class ClientLatencySampler(
     private val icmpPing: (host: String, count: Int, timeoutSeconds: Int) -> Int? = DeviceLatency::measureIcmpPingMs,
     private val locationTimeoutMillis: Long = 8_000L,
     private val context: Context? = null,
+    private val tcpAttempts: Int = LATENCY_TCP_ATTEMPTS,
 ) {
     fun networkSignature(): String = context?.let { AndroidUnderlyingNetworkSource(it).currentSnapshot()?.signature } ?: "none"
 
@@ -73,7 +74,7 @@ class ClientLatencySampler(
                         probeSlots.withPermit {
                             runInterruptible(Dispatchers.IO) {
                                 if (port == null) null else {
-                                    val samples = List(LATENCY_TCP_ATTEMPTS) {
+                                    val samples = List(tcpAttempts.coerceIn(1, LATENCY_TCP_ATTEMPTS)) {
                                         if (network == null) tcpConnect(host, port, LATENCY_TCP_TIMEOUT_MS)
                                         else DeviceLatency.measureTcpConnectMs(host, port, LATENCY_TCP_TIMEOUT_MS,
                                             onDiagnostic = {}, socketFactory = { network.socketFactory.createSocket() },

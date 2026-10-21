@@ -36,7 +36,7 @@ class MainViewModel(
         get() = runtime.uiState
 
     internal suspend fun awaitReady() {
-        snapshotFlow { uiState.isReady }.first { it }
+        snapshotFlow { uiState.isReady && uiState.currentDestination != AppDestination.SPLASH }.first { it }
     }
 
     fun setPendingVpnStartMode(mode: VpnRuntimeMode) = runtime.setPendingVpnStartMode(mode)
@@ -52,6 +52,20 @@ class MainViewModel(
     fun markAndroidUpdateAvailable() = runtime.markAndroidUpdateAvailable()
 
     fun refreshAndroidUpdateStatus() = runtime.refreshAndroidUpdateStatus()
+
+    fun openSupportChat() = runtime.supportChatWorkflow.open()
+    fun closeSupportChat() = runtime.supportChatWorkflow.close()
+    fun refreshSupportChat(older: Boolean = false) = runtime.supportChatWorkflow.refresh(older)
+    fun updateSupportChatDraft(value: String) = runtime.supportChatWorkflow.updateDraft(value)
+    fun sendSupportMessage() = runtime.supportChatWorkflow.submit()
+    fun beginSupportAttachmentPick(): Boolean = runtime.supportChatWorkflow.beginAttachmentPick()
+    fun selectSupportAttachments(uris: List<String>) = runtime.supportChatWorkflow.selectAttachments(uris)
+    fun removeSupportAttachment(path: String) = runtime.supportChatWorkflow.removeAttachment(path)
+    fun previewSupportAttachment(attachment: com.noki.vpn.data.BackendSupportAttachment) = runtime.supportChatWorkflow.loadAttachment(attachment, SupportAttachmentAction.Preview)
+    fun openSupportAttachment(attachment: com.noki.vpn.data.BackendSupportAttachment) = runtime.supportChatWorkflow.loadAttachment(attachment, SupportAttachmentAction.Open)
+    fun saveSupportAttachment(attachment: com.noki.vpn.data.BackendSupportAttachment) = runtime.supportChatWorkflow.loadAttachment(attachment, SupportAttachmentAction.Save)
+    fun markSupportSavePickerLaunched() = runtime.supportChatWorkflow.markSavePickerLaunched()
+    fun saveSupportAttachmentTo(uri: String?) = runtime.supportChatWorkflow.saveAttachmentTo(uri)
 
     fun preparePaymentCheckout() = runtime.paymentCheckoutWorkflow.prepare()
     fun loadPaymentHistory() = runtime.paymentCheckoutWorkflow.loadHistory()
@@ -228,6 +242,10 @@ class MainViewModel(
 
     fun setGlassMode(mode: GlassMode) = runtime.setGlassMode(mode)
 
+    fun setVpnStatusNotificationEnabled(enabled: Boolean) = runtime.setVpnStatusNotificationEnabled(enabled)
+
+    fun setGamingModeEnabled(enabled: Boolean) = runtime.setGamingModeEnabled(enabled)
+
     fun beginAvatarCrop(uri: Uri?) = runtime.beginAvatarCrop(uri)
 
     fun cancelAvatarCrop() = runtime.cancelAvatarCrop()
@@ -332,6 +350,8 @@ class MainViewModel(
 
     fun refreshAppNotificationHistoryState() = runtime.refreshAppNotificationHistoryState()
 
+    internal fun handleAppNotificationAction(action: String?, nonce: String?) = runtime.handleAppNotificationAction(action, nonce)
+
     fun openAppNotificationHistory() = runtime.openAppNotificationHistory()
 
     fun deleteAppNotification(notificationId: String) = runtime.deleteAppNotification(notificationId)
@@ -342,7 +362,8 @@ class MainViewModel(
         connectedAtMillis: Long? = null,
         runtimeMode: VpnRuntimeMode = uiState.vpnRuntimeMode,
         latencyMs: Int? = null,
-    ) = runtime.updateConnectionState(state, reason, connectedAtMillis, runtimeMode, latencyMs)
+        nokiNvCarrier: String = "",
+    ) = runtime.updateConnectionState(state, reason, connectedAtMillis, runtimeMode, latencyMs, nokiNvCarrier)
 
     fun getVpnPermissionIntent(context: Context): Intent? = runtime.getVpnPermissionIntent(context)
 

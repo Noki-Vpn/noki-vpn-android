@@ -7,6 +7,9 @@ internal object VpnNotificationContract {
     const val DISCONNECT_LABEL = "Отключить"
     const val RESTART_LABEL = "Рестарт"
     val ACTION_LABELS = listOf(DISCONNECT_LABEL, RESTART_LABEL)
+
+    fun content(title: String, text: String, statusEnabled: Boolean): Pair<String, String> =
+        if (statusEnabled) title to text else "Noki VPN" to "Служба VPN"
 }
 
 internal fun interface CancelableTask {

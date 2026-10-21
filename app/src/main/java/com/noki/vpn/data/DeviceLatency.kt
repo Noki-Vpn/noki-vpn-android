@@ -107,6 +107,13 @@ object DeviceLatency {
         onFailure: (String) -> Unit = {},
         lookup: (String) -> Array<InetAddress> = InetAddress::getAllByName,
     ): InetAddress? {
+        val octets = host.split('.')
+        if (octets.size == 4 && octets.all { part ->
+                part.isNotEmpty() && part.all { it in '0'..'9' } &&
+                    part.toIntOrNull()?.let { it in 0..255 } == true
+            }) {
+            return InetAddress.getByAddress(octets.map { it.toInt().toByte() }.toByteArray())
+        }
         val safeTimeoutMs = timeoutMs.coerceIn(1, 5_000)
         val deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(safeTimeoutMs.toLong())
         val slotAcquired = try {

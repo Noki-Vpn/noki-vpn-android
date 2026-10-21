@@ -6,16 +6,45 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import androidx.core.app.NotificationCompat
 import com.noki.vpn.MainActivity
 import com.noki.vpn.R
 import com.noki.vpn.data.DeviceTrafficMonitor
+import com.noki.vpn.data.SETTINGS_ENCRYPTED_KEY
+import com.noki.vpn.data.SETTINGS_PREFERENCES_NAME
+import com.noki.vpn.data.SettingsRepository
 import java.util.Locale
 
 internal class VpnNotificationFactory(
     private val context: Context,
+    private val notificationId: Int,
 ) {
     private val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private val repository = SettingsRepository(context)
+    private val preferences = context.getSharedPreferences(SETTINGS_PREFERENCES_NAME, Context.MODE_PRIVATE)
+    @Volatile private var statusEnabled = repository.load().personalizationSettings.vpnStatusNotificationEnabled
+    @Volatile private var renderCurrent: (() -> Notification)? = null
+    private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == SETTINGS_ENCRYPTED_KEY) {
+            val enabled = repository.load().personalizationSettings.vpnStatusNotificationEnabled
+            if (statusEnabled != enabled) {
+                statusEnabled = enabled
+                if (manager.activeNotifications.any { it.id == notificationId }) {
+                    renderCurrent?.let { manager.notify(notificationId, it()) }
+                }
+            }
+        }
+    }
+
+    init {
+        preferences.registerOnSharedPreferenceChangeListener(settingsListener)
+    }
+
+    fun close() {
+        preferences.unregisterOnSharedPreferenceChangeListener(settingsListener)
+        renderCurrent = null
+    }
 
     fun createActive(serverLabel: String): Notification {
         val traffic = DeviceTrafficMonitor.snapshot.value
@@ -24,11 +53,18 @@ internal class VpnNotificationFactory(
         return create(title = "Соединен", text = details, showActions = true)
     }
 
-    fun updateActive(notificationId: Int, serverLabel: String) {
+    fun updateActive(serverLabel: String) {
         manager.notify(notificationId, createActive(serverLabel))
     }
 
     fun create(title: String, text: String, showActions: Boolean): Notification {
+        val render = { build(title, text, showActions) }
+        renderCurrent = render
+        return render()
+    }
+
+    private fun build(title: String, text: String, showActions: Boolean): Notification {
+        val (visibleTitle, visibleText) = VpnNotificationContract.content(title, text, statusEnabled)
         ensureChannel()
         val contentIntent = PendingIntent.getActivity(
             context,
@@ -39,9 +75,9 @@ internal class VpnNotificationFactory(
             PENDING_INTENT_FLAGS,
         )
         val builder = NotificationCompat.Builder(context, VpnNotificationContract.CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentTitle(visibleTitle)
+            .setContentText(visibleText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(visibleText))
             .setSmallIcon(R.drawable.ic_noki_notification)
             .setContentIntent(contentIntent)
             .setOngoing(VpnNotificationContract.ONGOING)

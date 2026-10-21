@@ -56,6 +56,7 @@ internal fun SecurityAndroidVersionBlock(
     backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
     modifier: Modifier,
+    required: Boolean = false,
     onClick: () -> Unit,
 ) {
     val metrics = nokiAdaptiveMetrics(LocalConfiguration.current.screenWidthDp.dp)
@@ -63,6 +64,7 @@ internal fun SecurityAndroidVersionBlock(
     val isBusy = updateState.isChecking || updateState.isDownloading
     val currentVersion = updateState.currentVersionName.ifBlank { "unknown" }
     val title = when {
+        required -> tr(language, "Необходимо обновить приложение", "App update required")
         updateState.isDownloading -> tr(language, "Скачивание обновления", "Downloading update")
         updateState.isChecking -> tr(language, "Проверка обновлений", "Checking for updates")
         update != null -> tr(language, "Обновить приложение", "Update app")
@@ -111,7 +113,7 @@ internal fun SecurityAndroidVersionBlock(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            if (isBusy && update == null) {
+            if (isBusy && update == null && !required) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(metrics.dp(24f)),
                     color = SecurityAccent,
@@ -120,9 +122,11 @@ internal fun SecurityAndroidVersionBlock(
                 )
             }
         }
-        if (update != null) {
+        if (update != null || required) {
             SecurityGlassActionButton(
-                text = if (updateState.isReadyToInstall) {
+                text = if (required) {
+                    tr(language, "Обновить", "Update")
+                } else if (updateState.isReadyToInstall) {
                     tr(language, "Установить обновление", "Install update")
                 } else if (updateState.isDownloading) {
                     tr(language, "Скачивание", "Downloading")
@@ -130,7 +134,7 @@ internal fun SecurityAndroidVersionBlock(
                     tr(language, "Обновить приложение", "Update app")
                 },
                 enabled = !isBusy,
-                showProgress = updateState.isDownloading,
+                showProgress = updateState.isDownloading || (required && updateState.isChecking),
                 backdrop = backdrop,
                 liveGlassEnabled = liveGlassEnabled,
                 accentGradientFill = true,

@@ -627,6 +627,8 @@ internal object BackendVpnSessionJsonParser {
         endpointCandidates = candidates,
         connectIp = json.optBackendString("connect_ip"),
         multiHop = multiHop,
+        nokinvToken = json.optBackendString("nokinv_token").orEmpty(),
+        nokinvCredentialGeneration = json.optInt("nokinv_credential_generation", 0),
     )
     }
 

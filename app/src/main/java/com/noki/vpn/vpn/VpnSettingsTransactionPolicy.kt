@@ -20,6 +20,7 @@ object VpnSettingsTransactionPolicy {
         val multiHop: MultiHopSettings,
         val ruRelaySelection: RuRelaySelection,
         val ruRelaySelectionRevision: Long,
+        val gamingModeEnabled: Boolean,
     )
 
     private fun StoredSettings.selectionKey() = SelectionKey(
@@ -34,6 +35,7 @@ object VpnSettingsTransactionPolicy {
         advancedSettings.multiHop,
         advancedSettings.ruRelaySelection,
         ruRelaySelectionRevision,
+        advancedSettings.gamingModeEnabled,
     )
 
     data class RuntimeCommitOutcome(

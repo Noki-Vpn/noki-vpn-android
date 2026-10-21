@@ -4,7 +4,8 @@ import android.content.Context
 import java.util.UUID
 
 internal enum class AppNotificationAction(val wireValue: String) {
-    OpenSecurityUpdate("open_security_update");
+    OpenSecurityUpdate("open_security_update"),
+    OpenSupportChat("open_support_chat");
 
     companion object {
         fun parse(value: String?): AppNotificationAction? =
@@ -17,9 +18,19 @@ internal object AppNotificationActionNonceStore {
     internal const val MAX_NONCES = 64
 
     @Synchronized
-    fun issue(context: Context, nowMillis: Long = System.currentTimeMillis()): String? {
+    fun issue(
+        context: Context,
+        nowMillis: Long = System.currentTimeMillis(),
+        action: AppNotificationAction = AppNotificationAction.OpenSecurityUpdate,
+        userId: String? = null,
+        deviceId: String? = null,
+    ): String? {
+        val binding = if (action == AppNotificationAction.OpenSupportChat) {
+            if (userId.isNullOrBlank() || deviceId.isNullOrBlank() || ':' in userId || ':' in deviceId) return null
+            ":${action.wireValue}:$userId:$deviceId"
+        } else ""
         val nonce = UUID.randomUUID().toString()
-        val updated = validEntries(context, nowMillis).takeLast(MAX_NONCES - 1) + "$nowMillis:$nonce"
+        val updated = validEntries(context, nowMillis).takeLast(MAX_NONCES - 1) + "$nowMillis:$nonce$binding"
         return nonce.takeIf { save(context, updated.toSet()) }
     }
 
@@ -29,12 +40,20 @@ internal object AppNotificationActionNonceStore {
         action: String?,
         nonce: String?,
         nowMillis: Long = System.currentTimeMillis(),
+        userId: String? = null,
+        deviceId: String? = null,
     ): AppNotificationAction? {
         val parsed = AppNotificationAction.parse(action)
         val entries = validEntries(context, nowMillis)
-        val matching = entries.firstOrNull { it.substringAfter(':') == nonce?.trim() }
-        val accepted = parsed != null && matching != null
-        val updated = if (accepted) entries - matching else entries
+        val matching = entries.firstOrNull { it.split(':').getOrNull(1) == nonce?.trim() }
+        val fields = matching?.split(':').orEmpty()
+        val accepted = when (parsed) {
+            AppNotificationAction.OpenSecurityUpdate -> fields.size == 2
+            AppNotificationAction.OpenSupportChat -> fields.size == 5 && fields[2] == parsed.wireValue &&
+                !userId.isNullOrBlank() && !deviceId.isNullOrBlank() && fields[3] == userId && fields[4] == deviceId
+            null -> false
+        }
+        val updated = if (accepted && matching != null) entries - matching else entries
         // Persist removal before accepting, including across process restarts.
         return parsed.takeIf { save(context, updated.toSet()) && accepted }
     }

@@ -406,7 +406,7 @@ internal fun PlanTariffCard(
                 color = planColor,
                 scale = scale,
                 textAlign = TextAlign.Center,
-                maxLines = 2,
+                maxLines = Int.MAX_VALUE,
                 modifier = Modifier.fillMaxWidth(),
             )
         }

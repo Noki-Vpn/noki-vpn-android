@@ -49,6 +49,7 @@ data class VpnSessionSelection(
     val excludeLocationCode: String? = null,
     val nodeId: String? = null,
     val excludedNodeIds: Set<String> = emptySet(),
+    val excludeNokiNv: Boolean = false,
 )
 
 interface TemporaryVpnApi {

@@ -56,10 +56,12 @@ enum class VpnProtocol {
     AUTO,
     TLS,
     REALITY,
+    NOKINV,
     WIREGUARD;
 
     companion object {
-        fun fromBackendCode(code: String?): VpnProtocol = when {
+        fun fromBackendCode(code: String?, proxyType: String? = null): VpnProtocol = when {
+            code.equals("nokinv", ignoreCase = true) || proxyType.equals("nokinv", ignoreCase = true) -> NOKINV
             code.equals("tls", ignoreCase = true) -> TLS
             code.equals("reality", ignoreCase = true) -> REALITY
             else -> AUTO
@@ -169,6 +171,8 @@ data class VlessProfile(
     val host: String = "",
     val port: String = "443",
     val uuid: String = "",
+    val nokinvToken: String = "",
+    val nokinvCredentialGeneration: Int = 0,
     val flow: String = "",
     val security: String = "reality",
     val fingerprint: String = "chrome",
@@ -246,7 +250,17 @@ data class UserProfile(
     val trialTrafficRemainingGb: Double? = null,
     val freeLocationsOnly: Boolean = false,
     val credentialsSetupRequired: Boolean = false,
-)
+) {
+    val isFreePlan: Boolean
+        get() {
+            selectedPlanTier?.trim()?.takeIf(String::isNotBlank)?.let {
+                return it.equals("free", ignoreCase = true)
+            }
+            val code = selectedPlanCodeRaw.trim().ifBlank { selectedPlanCode.code }
+            return code.equals("free", ignoreCase = true) ||
+                code.startsWith("free_", ignoreCase = true) || code.startsWith("free-", ignoreCase = true)
+        }
+}
 
 data class VpnIncidentReport(
     val id: String,
@@ -264,6 +278,7 @@ data class PersonalizationSettings(
     val accentPalette: AccentPalette = AccentPalette.GREEN,
     val homeLayoutVariant: HomeLayoutVariant = HomeLayoutVariant.MAIN,
     val glassMode: GlassMode = GlassMode.FULL,
+    val vpnStatusNotificationEnabled: Boolean = true,
 )
 
 @Immutable
@@ -275,6 +290,7 @@ data class SecuritySettings(
 
 data class AdvancedSettings(
     val protocol: VpnProtocol = VpnProtocol.AUTO,
+    val gamingModeEnabled: Boolean = false,
     val ruRelayEnabled: Boolean = false,
     val endpointSelectionMode: EndpointSelectionMode = EndpointSelectionMode.AUTO,
     val manualEndpointCode: String = "",
@@ -294,6 +310,7 @@ data class AdvancedSettings(
     val effectiveProtocol: VpnProtocol
         get() {
             if (ruRelayEnabled) return VpnProtocol.WIREGUARD
+            if (gamingModeEnabled) return VpnProtocol.NOKINV
             require(protocol != VpnProtocol.WIREGUARD) { "wireguard_requires_ru_relay" }
             return if (multiHop.enabled) VpnProtocol.AUTO else protocol
         }

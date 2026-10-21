@@ -28,6 +28,29 @@ import org.junit.Test
 
 class BackendTransportTest {
     @Test
+    fun `connection catalog requests only locations with current device identity`() = runBlocking {
+        var requests = 0
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            requests++
+            val request = chain.request()
+            assertEquals("/v1/locations", request.url.encodedPath)
+            assertEquals("GET", request.method)
+            assertEquals("Bearer access", request.header("Authorization"))
+            assertEquals("device", request.header("X-Device-Id"))
+            assertEquals("proof", request.header("X-Device-Key"))
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body("""[{"id":"location","code":"lv","name":"Latvia","entry_host":"lv.example",
+                    "country_code":"LV","is_online":true,"servers":[{"id":"node","name":"Latvia 1",
+                    "country_code":"LV","location_code":"lv","host":"lv.example","probe_port":8443,"is_online":true}]}]"""
+                    .toResponseBody("application/json".toMediaType())).build()
+        }.build()
+        val locations = BackendApiClient(client, "https://api.example").serverLocations("access", "device", "proof")
+        assertEquals("lv", locations.single().code)
+        assertEquals("node", locations.single().servers.single().id)
+        assertEquals(1, requests)
+    }
+
+    @Test
     fun `device traffic pools travel independently of account access rights`() = runBlocking {
         val requests = mutableListOf<Request>()
         val deviceJson = """{"id":"device","device_key":"key","device_name":"Phone","platform":"android",

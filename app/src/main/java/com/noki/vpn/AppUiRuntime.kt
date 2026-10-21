@@ -70,6 +70,10 @@ internal class AppUiRuntime(
     internal val accountDeletionCoordinator = AccountDeletionCoordinator(authSessionCoordinator, backendApi)
     internal val settingsMutationCoordinator = SettingsMutationCoordinator(repository)
     internal val clientLatencySampler = ClientLatencySampler(context = application)
+    internal var vpnPreparationJob: Job? = null
+    internal val vpnStartCoordinator = com.noki.vpn.data.VpnStartCoordinator(
+        application, repository, backendApi, startupTcpPrecheckTimeoutMs = 500,
+    )
     internal val appLogUploadCoordinator = AppLogUploadCoordinator(
         exportLogs = { repository.exportAppLogs() },
         shouldUploadAutomatically = { repository.shouldUploadAppLogsAutomatically() },
@@ -211,6 +215,38 @@ internal class AppUiRuntime(
         },
     )
 
+    internal val supportChatWorkflow = SupportChatWorkflow(
+        scope = scope,
+        currentState = { uiState },
+        publishState = { uiState = it },
+        currentAuthAttempt = { authSessionCoordinator.attempt() },
+        isCurrent = authSessionCoordinator::isCurrent,
+        load = { attempt, before ->
+            authSessionCoordinator.run(attempt) { token -> backendApi.supportChat(token, before) }
+        },
+        send = { attempt, content, requestId, attachments ->
+            authSessionCoordinator.run(attempt) { token ->
+                if (attachments.isEmpty()) backendApi.sendSupportMessage(token, content, requestId)
+                else backendApi.sendSupportAttachments(token, content, requestId, attachments)
+            }
+        },
+        stageAttachment = { uri -> SupportChatFiles.stage(application, uri) },
+        downloadAttachment = { attempt, attachment ->
+            val destination = SupportChatFiles.destination(application)
+            try {
+                authSessionCoordinator.run(attempt) { token -> backendApi.downloadSupportAttachment(token, attachment, destination) }.also {
+                    it.setExecutable(false, false)
+                }.path
+            } catch (error: Throwable) {
+                SupportChatFiles.delete(application, destination.path)
+                throw error
+            }
+        },
+        openAttachment = { path, mime -> SupportChatFiles.open(application, path, mime) },
+        exportAttachment = { path, uri -> SupportChatFiles.export(application, path, uri) },
+        deleteFile = { path -> SupportChatFiles.delete(application, path) },
+    )
+
     internal val paymentCheckoutWorkflow = PaymentCheckoutWorkflow(
         scope = scope,
         currentState = { uiState },
@@ -320,6 +356,7 @@ internal class AppUiRuntime(
                 vpnRuntimeMode = liveVpnRuntimeState.runtimeMode,
                 connectedAtMillis = liveVpnRuntimeState.connectedAtMillis,
                 connectionLatencyMs = liveVpnRuntimeState.latencyMs,
+                nokiNvCarrier = liveVpnRuntimeState.nokiNvCarrier,
                 plans = BootstrapStateMapper.initialPlans(),
                 devices = BootstrapStateMapper.initialDevices(),
                 appNotificationHistory = notificationHistoryState.notifications,

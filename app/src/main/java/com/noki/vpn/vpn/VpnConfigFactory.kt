@@ -27,10 +27,13 @@ object VpnConfigFactory {
     fun build(profile: VlessProfile, advancedSettings: AdvancedSettings, geositeBytes: ByteArray,
               youtubeConnection: YoutubeConnectionConfig? = null): String {
         require(!advancedSettings.ruRelayEnabled) { "ru_wireguard_session_required" }
+        require(!advancedSettings.gamingModeEnabled || VpnProfileValidator.isUsable(profile, advancedSettings)) { "gaming_profile_invalid" }
         require(profile.multiHop == null && !advancedSettings.multiHop.enabled ||
             VpnProfileValidator.isUsable(profile, advancedSettings)) { "multihop_profile_invalid" }
-        return routedConfig(advancedSettings, geositeBytes, JSONArray().put(proxyOutbound(profile)),
-            mtu = VpnTunnelPolicy.MTU, address = "10.10.0.2/32", dnsServers = listOf(VpnTunnelPolicy.DNS_SERVER),
+        // NokiNV vets destinations before the exit intercepts DNS; its public address passes that check.
+        val dnsServer = if (profile.proxyType.equals("nokinv", ignoreCase = true)) profile.host else VpnTunnelPolicy.DNS_SERVER
+        return routedConfig(advancedSettings, geositeBytes, JSONArray().put(proxyOutbound(profile, advancedSettings.gamingModeEnabled)),
+            mtu = VpnTunnelPolicy.MTU, address = "10.10.0.2/32", dnsServers = listOf(dnsServer),
             youtubeConnection = youtubeConnection).toString(2)
     }
 
@@ -122,7 +125,7 @@ object VpnConfigFactory {
             }))
             .put("inbounds", JSONArray().put(JSONObject().put("type", "tun").put("tag", "tun")
                 .put("interface_name", "noki0").put("mtu", mtu).put("address", JSONArray().put(address))
-                .put("dns_mode", "hijack").put("dns_address", JSONArray().put(dnsServers.first()))
+                .put("dns_mode", "hijack").put("dns_address", JSONArray().put(VpnTunnelPolicy.DNS_SERVER))
                 // The VPN app is excluded from TUN; mixed's kernel TCP replies would follow its underlay route.
                 .put("auto_route", false).put("stack", "gvisor")))
             .put("outbounds", outbounds.put(JSONObject().put("type", "direct").put("tag", "direct")
@@ -169,8 +172,8 @@ object VpnConfigFactory {
         }
     }
 
-    private fun proxyOutbound(profile: VlessProfile): JSONObject {
-        require(profile.host.isNotBlank() && profile.uuid.isNotBlank()) { "vpn_profile_invalid" }
+    private fun proxyOutbound(profile: VlessProfile, gamingModeEnabled: Boolean = false): JSONObject {
+        require(profile.host.isNotBlank()) { "vpn_profile_invalid" }
         val port = profile.port.toIntOrNull()
         require(port != null && port in 1..65535) { "vpn_profile_invalid" }
         require(!profile.enableMux && !profile.randomUserAgent && !profile.allowInsecure &&
@@ -179,6 +182,22 @@ object VpnConfigFactory {
         val kind = profile.proxyType.lowercase(Locale.ROOT)
         val security = profile.security.lowercase(Locale.ROOT)
         require(security in setOf("tls", "reality") && profile.serverName.isNotBlank()) { "vpn_profile_tls_required" }
+        if (kind == "nokinv") {
+            require(security == "tls" && transport == "nokinv" && profile.transportMode.isBlank() &&
+                profile.publicKey.isBlank() && profile.shortId.isBlank() && profile.flow.isBlank() &&
+                profile.nokinvToken.matches(Regex("[A-Za-z0-9_-]{43}")) && profile.nokinvCredentialGeneration > 0) {
+                "vpn_profile_nokinv_invalid"
+            }
+            return JSONObject().put("tag", "proxy").put("type", "nokinv")
+                .put("server", profile.host).put("server_port", port)
+                .put("token", profile.nokinvToken).put("credential_generation", profile.nokinvCredentialGeneration)
+                .put("transport", "auto").put("mode", if (gamingModeEnabled) "gaming" else "balanced").put("path", profile.path.ifBlank { "/tunnel" })
+                .put("tcp_exchange", "stream").put("shaping", "off").put("web_profile", "coherent")
+                .put("tls", JSONObject().put("enabled", true).put("server_name", profile.serverName)
+                    .put("min_version", "1.3"))
+                .put("domain_resolver", resolver(BOOTSTRAP_TAG))
+        }
+        require(profile.uuid.isNotBlank()) { "vpn_profile_invalid" }
         val hy2 = kind in setOf("hysteria", "hysteria2", "hy2")
         if (hy2) {
             require(transport in setOf("hysteria", "hysteria2", "hy2") && security == "tls" &&

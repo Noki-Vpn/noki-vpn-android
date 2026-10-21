@@ -9,6 +9,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.ResponseBody
 import org.json.JSONObject
 import java.io.File
 import java.io.ByteArrayOutputStream
@@ -17,6 +20,7 @@ import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.security.MessageDigest
 import java.util.Locale
+import kotlin.coroutines.CoroutineContext
 
 internal class BackendContentClient(
     private val jsonApi: BackendJsonApi,
@@ -150,6 +154,39 @@ internal class BackendContentClient(
             ?: throw BackendException("avatar_url missing", 502)
     }
 
+    suspend fun uploadSupportAttachments(token: String, content: String, requestId: String, files: List<SupportAttachmentDraft>): BackendSupportMessage = withContext(Dispatchers.IO) {
+        require(files.size in 1..SUPPORT_ATTACHMENT_MAX_COUNT) { "support_attachment_count" }
+        require(files.all { File(it.path).isFile && File(it.path).length() in 0..SUPPORT_ATTACHMENT_MAX_BYTES } &&
+            files.sumOf { File(it.path).length() } <= SUPPORT_ATTACHMENT_MAX_BYTES) { "support_attachment_too_large" }
+        val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("content", content)
+            .addFormDataPart("client_message_id", requestId)
+            .apply { files.forEach { file -> addFormDataPart("attachment", file.name,
+                File(file.path).asRequestBody(file.mime.toMediaTypeOrNull() ?: "application/octet-stream".toMediaType())) } }
+            .build()
+        jsonApi.executeStreaming(Request.Builder().url(jsonApi.apiUrl("/app/support/chat/attachments"))
+            .header("Authorization", "Bearer $token").post(multipart).build()).toBackendSupportMessage()
+    }
+
+    suspend fun downloadSupportAttachment(token: String, attachment: BackendSupportAttachment, destination: File): File =
+        withContext(Dispatchers.IO) {
+            require(attachment.id > 0 && attachment.messageId > 0)
+            val coroutine = currentCoroutineContext()
+            val temporary = File(destination.parentFile, "${destination.name}.part")
+            try {
+                val request = Request.Builder().url(authenticatedDownloadUrl(
+                    "$API_PREFIX${attachment.contentPath}", "$API_PREFIX/app/support/chat/messages/"))
+                    .header("Authorization", "Bearer $token").get().build()
+                destination.parentFile?.mkdirs()
+                jsonApi.stream(request) { body ->
+                    writePrivateDownload(body, temporary, SUPPORT_ATTACHMENT_MAX_BYTES, coroutine, "support_attachment_too_large")
+                }
+                coroutine.ensureActive()
+                Files.move(temporary.toPath(), destination.toPath(), REPLACE_EXISTING, ATOMIC_MOVE)
+                destination
+            } finally { temporary.delete() }
+        }
+
     suspend fun deleteAvatar(token: String): String? = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url("$baseUrl$API_PREFIX/app/profile/avatar")
@@ -275,31 +312,7 @@ internal class BackendContentClient(
             destination.parentFile?.mkdirs()
             var downloadedBytes = 0L
             jsonApi.stream(request) { body ->
-                val contentLength = body.contentLength()
-                if (contentLength > AVATAR_DOWNLOAD_MAX_BYTES) {
-                    throw IllegalArgumentException("avatar_file_too_large")
-                }
-                temporary.outputStream().use { output ->
-                    body.byteStream().use { input ->
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        while (true) {
-                            val readLimit = minOf(
-                                buffer.size.toLong(),
-                                AVATAR_DOWNLOAD_MAX_BYTES - downloadedBytes + 1L,
-                            ).toInt()
-                            val read = input.read(buffer, 0, readLimit)
-                            downloadContext.ensureActive()
-                            if (read < 0) break
-                            if (read == 0) continue
-                            val nextSize = downloadedBytes + read
-                            if (nextSize > AVATAR_DOWNLOAD_MAX_BYTES) {
-                                throw IllegalArgumentException("avatar_file_too_large")
-                            }
-                            output.write(buffer, 0, read)
-                            downloadedBytes = nextSize
-                        }
-                    }
-                }
+                downloadedBytes = writePrivateDownload(body, temporary, AVATAR_DOWNLOAD_MAX_BYTES, downloadContext, "avatar_file_too_large")
             }
             if (downloadedBytes == 0L) {
                 throw IllegalArgumentException("avatar_open_failed")
@@ -327,6 +340,26 @@ internal class BackendContentClient(
             .replace(Regex("[^A-Za-z0-9._-]"), "_")
             .trim('_', '.', '-')
         return cleaned.ifBlank { "avatar.jpg" }.take(96)
+    }
+
+    private fun writePrivateDownload(body: ResponseBody, destination: File, limit: Long, coroutine: CoroutineContext, tooLarge: String): Long {
+        require(body.contentLength() <= limit) { tooLarge }
+        var size = 0L
+        destination.outputStream().use { output ->
+            body.byteStream().use { input ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val read = input.read(buffer, 0, minOf(buffer.size.toLong(), limit - size + 1).toInt())
+                    coroutine.ensureActive()
+                    if (read < 0) break
+                    if (read == 0) continue
+                    size += read
+                    require(size <= limit) { tooLarge }
+                    output.write(buffer, 0, read)
+                }
+            }
+        }
+        return size
     }
 
     private fun authenticatedDownloadUrl(rawUrl: String, expectedPathPrefix: String): okhttp3.HttpUrl {

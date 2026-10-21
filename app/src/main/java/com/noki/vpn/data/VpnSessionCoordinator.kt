@@ -32,6 +32,11 @@ class VpnSessionCoordinator(
         startupTcpPrecheck: ((BackendEndpointCandidate) -> Boolean)?,
     ) -> EndpointSelector.EndpointSelectionResult)? = null,
     private val onDiagnostic: (String) -> Unit = {},
+    private val measureClientLatencies: suspend (List<ServerLocation>) -> Map<String, Int> = { locations ->
+        if (context == null) emptyMap() else ClientLatencySampler(
+            context = context, locationTimeoutMillis = 750L, tcpAttempts = 1,
+        ).measure(locations)
+    },
 ) {
     private var sessionApi: VpnSessionApi = backendApi
     data class Result(
@@ -69,11 +74,22 @@ class VpnSessionCoordinator(
             if (!VpnProfileValidator.isUsable(prepared.settings)) throw UnusableFreshProfileException()
             return@withContext prepared
         }
+        val explicitNode = sessionSelection.nodeId ?: settings.userProfile.selectedNodeId.takeIf {
+            settings.userProfile.serverSelectionMode == ServerSelectionMode.SERVER && it.isNotBlank()
+        }
+        if (explicitNode != null && explicitNode !in sessionSelection.excludedNodeIds) {
+            try {
+                val prepared = prepareAtNode(token, settings, knownDevices, sessionSelection.copy(countryCode = "", nodeId = explicitNode))
+                if (!VpnProfileValidator.isUsable(prepared.settings)) throw UnusableFreshProfileException()
+                return@withContext prepared
+            } catch (error: BackendException) {
+                if (error.statusCode !in setOf(404, 503)) throw error
+            }
+        }
         val catalog = backendStep("server_catalog") {
             sessionApi.serverLocations(token, settings.backendDeviceId.ifBlank { null }, settings.backendDeviceKey.ifBlank { null })
         }
         val locations = BootstrapStateMapper.mapLocations(catalog, settings.personalizationSettings.language, emptyMap())
-        val samples = if (context == null) emptyMap() else ClientLatencySampler(context = context).measure(locations)
         val scope = settings.userProfile.let { profile ->
             when {
                 sessionSelection.nodeId != null -> profile.copy(serverSelectionMode = ServerSelectionMode.SERVER, selectedNodeId = sessionSelection.nodeId)
@@ -81,7 +97,7 @@ class VpnSessionCoordinator(
                 else -> profile
             }
         }
-        val visibleNodes = locations.flatMap { it.withClientLatencies(samples).servers }.filter {
+        val visibleNodes = locations.flatMap { it.servers }.filter {
             it.id !in sessionSelection.excludedNodeIds && it.locationCode != sessionSelection.excludeLocationCode
         }
         val scopedNodes = visibleNodes.filter {
@@ -91,10 +107,22 @@ class VpnSessionCoordinator(
         // Saved node/country selections may disappear after an admin changes visibility.
         val fellBackToAuto = preferredNodes.isEmpty() &&
             (scope.serverSelectionMode != ServerSelectionMode.AUTO || sessionSelection.locationCode != null)
-        val nodes = if (fellBackToAuto) EndpointRankingPolicy.rankServers(
-            visibleNodes, scope.copy(serverSelectionMode = ServerSelectionMode.AUTO),
+        val rankingScope = if (fellBackToAuto) scope.copy(serverSelectionMode = ServerSelectionMode.AUTO) else scope
+        val eligibleNodes = if (fellBackToAuto) EndpointRankingPolicy.rankServers(
+            visibleNodes, rankingScope,
         ) else preferredNodes
-        if (nodes.isEmpty()) throw BackendException("No available servers", 503)
+        if (eligibleNodes.isEmpty()) throw BackendException("No available servers", 503)
+        val samples = if (eligibleNodes.size == 1) emptyMap() else {
+            val eligibleIds = eligibleNodes.map { it.id }.toSet()
+            measureClientLatencies(locations.mapNotNull { location ->
+                val servers = location.servers.filter { it.id in eligibleIds }
+                if (servers.isEmpty()) null else location.copy(servers = servers)
+            })
+        }
+        val nodes = if (samples.isEmpty()) eligibleNodes else EndpointRankingPolicy.rankServers(
+            eligibleNodes.map { node -> node.copy(latencyMs = clientLatencyTargetKey(node)?.let(samples::get)) },
+            rankingScope,
+        )
         var lastFailure: Exception = BackendException("No available servers", 503)
         for (node in nodes) {
             try {
@@ -130,24 +158,28 @@ class VpnSessionCoordinator(
             token = token,
             settings = settings,
             knownDevices = knownDevices,
-            profileCode = settings.advancedSettings.protocol.name.lowercase(Locale.ROOT),
+            profileCode = if (settings.advancedSettings.multiHop.enabled) "auto"
+                else settings.advancedSettings.effectiveProtocol.name.lowercase(Locale.ROOT),
             sessionSelection = sessionSelection,
         )
 
         val networkKind = context?.let(EndpointSelector::currentNetworkKind)
             ?: EndpointRankingPolicy.NetworkKind.OTHER
         val multiHop = settings.advancedSettings.multiHop.enabled
+        val selectionSession = if (sessionSelection.excludeNokiNv) deviceSession.session.copy(
+            endpointCandidates = deviceSession.session.endpointCandidates.filterNot { it.proxyType.equals("nokinv", true) },
+        ).also { if (it.endpointCandidates.isEmpty()) throw UnusableFreshProfileException() } else deviceSession.session
         val endpointHealth = if (multiHop) emptyMap() else repository.loadEndpointHealth(networkKind)
         val tcpPrecheck = if (multiHop) null else startupTcpPrecheck ?: ::defaultStartupTcpPrecheck
         val selection = endpointSelectionProvider?.invoke(
-            deviceSession.session,
+            selectionSession,
             settings.advancedSettings,
             endpointHealth,
             repository::nextEndpointRotationIndex,
             tcpPrecheck,
         ) ?: EndpointSelector.selectionForSession(
             context = requireContext(),
-            session = deviceSession.session,
+            session = selectionSession,
             settings = settings.advancedSettings,
             endpointHealth = endpointHealth,
             rotationIndex = repository::nextEndpointRotationIndex,
@@ -192,7 +224,8 @@ class VpnSessionCoordinator(
         val prepared = prepare(
             token = token,
             settings = settings.copy(
-                advancedSettings = settings.advancedSettings.copy(protocol = VpnProtocol.AUTO),
+                advancedSettings = settings.advancedSettings.copy(protocol = VpnProtocol.AUTO,
+                    endpointSelectionMode = EndpointSelectionMode.AUTO, manualEndpointCode = "", manualEndpointGroupKey = ""),
             ),
             knownDevices = knownDevices,
             sessionSelection = VpnSessionSelection(
@@ -225,15 +258,6 @@ class VpnSessionCoordinator(
         val safeDeviceKey = repository.ensureBackendDeviceKey(settings.backendDeviceKey)
         var deviceId = settings.backendDeviceId
         var accessRole = settings.backendDeviceAccessRole.ifBlank { "owner" }
-
-        val access = backendStep("access") { sessionApi.vpnAccess(
-            token = token,
-            deviceId = deviceId.ifBlank { null },
-            deviceKey = safeDeviceKey,
-        ) }
-        if (!access.canConnect) {
-            throw BackendException(access.reason.orEmpty().ifBlank { "vpn_access_denied" }, 403)
-        }
 
         var currentDevice = if (deviceId.isNotBlank() && safeDeviceKey.isNotBlank()) {
             knownDevices.firstOrNull { device ->
@@ -269,7 +293,7 @@ class VpnSessionCoordinator(
                 deviceKey = currentDevice.deviceKey,
                 deviceNonce = challenge.nonce,
                 deviceSignature = signature,
-                countryCode = sessionSelection.countryCode.takeUnless { settings.advancedSettings.multiHop.enabled },
+                countryCode = sessionSelection.countryCode.takeIf { it.isNotBlank() && !settings.advancedSettings.multiHop.enabled },
                 locationCode = sessionSelection.locationCode.takeUnless { settings.advancedSettings.multiHop.enabled },
                 excludeLocationCode = sessionSelection.excludeLocationCode.takeUnless { settings.advancedSettings.multiHop.enabled },
                 profileCode = profileCode,
@@ -304,9 +328,10 @@ class VpnSessionCoordinator(
     }
 
     private suspend fun <T> backendStep(stage: String, block: suspend () -> T): T {
+        val started = System.nanoTime()
         onDiagnostic("stage=$stage; result=start")
         return try {
-            block().also { onDiagnostic("stage=$stage; result=ok") }
+            block().also { onDiagnostic("stage=$stage; result=ok; duration_ms=${(System.nanoTime() - started) / 1_000_000}") }
         } catch (error: BackendException) {
             val reason = if (error.message.equals("Device challenge expired", ignoreCase = true)) {
                 "challenge_expired"

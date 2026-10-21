@@ -41,6 +41,28 @@ internal fun AppUiRuntime.refreshAppNotificationHistoryState() {
     )
 }
 
+internal fun AppUiRuntime.handleAppNotificationAction(action: String?, nonce: String?) {
+    val settings = repository.load()
+    if (AppNotificationAction.parse(action) == AppNotificationAction.OpenSupportChat &&
+        (!uiState.isAuthenticated || !settings.isAuthenticated ||
+            uiState.userProfile.backendUserId != settings.userProfile.backendUserId)
+    ) return
+    when (AppNotificationActionNonceStore.validateAndConsume(
+        context = application, action = action, nonce = nonce,
+        userId = settings.userProfile.backendUserId, deviceId = settings.backendDeviceId,
+    )) {
+        AppNotificationAction.OpenSecurityUpdate -> {
+            markAndroidUpdateAvailable()
+            openScreen(AppDestination.SECURITY)
+        }
+        AppNotificationAction.OpenSupportChat -> {
+            openScreen(AppDestination.SUPPORT)
+            supportChatWorkflow.open()
+        }
+        null -> Unit
+    }
+}
+
 internal fun AppUiRuntime.openAppNotificationHistory() {
     val history = repository.openAppNotificationHistory()
     uiState = uiState.copy(

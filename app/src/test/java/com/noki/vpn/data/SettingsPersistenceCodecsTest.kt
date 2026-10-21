@@ -8,6 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class SettingsPersistenceCodecsTest {
@@ -15,11 +16,40 @@ class SettingsPersistenceCodecsTest {
     private val settingsCodec = StoredSettingsCodec { defaults }
 
     @Test
+    fun explicitProtocolRestoresManualModeAfterAnOlderServerSelectionReset() {
+        val advanced = AdvancedSettings(protocol = VpnProtocol.NOKINV,
+            endpointSelectionMode = EndpointSelectionMode.AUTO, manualEndpointGroupKey = "lv-2|tls|nokinv||100")
+        val restored = settingsCodec.decode(settingsCodec.encode(defaults.copy(advancedSettings = advanced)))
+        assertEquals(VpnProtocol.NOKINV, restored.advancedSettings.protocol)
+        assertEquals(EndpointSelectionMode.MANUAL, restored.advancedSettings.endpointSelectionMode)
+        assertEquals(advanced.manualEndpointGroupKey, restored.advancedSettings.manualEndpointGroupKey)
+    }
+
+    @Test
+    fun `cached Free YouTube setting is disabled before any primary route is configured`() {
+        for (advanced in listOf(
+            AdvancedSettings(ruRelayEnabled = false, youtubeNoAdsEnabled = true),
+            AdvancedSettings(ruRelayEnabled = true, youtubeNoAdsEnabled = true),
+            AdvancedSettings(ruRelayEnabled = true, youtubeNoAdsEnabled = true, multiHop = MultiHopSettings(true,
+                HopSelection(ServerSelectionMode.SERVER, nodeId = "entry"), HopSelection(ServerSelectionMode.SERVER, nodeId = "exit"))),
+        )) {
+            val saved = defaults.copy(advancedSettings = advanced,
+                userProfile = defaults.userProfile.copy(selectedPlanCodeRaw = "free-plus", trialTrafficRemainingGb = 3.0))
+            val legacy = org.json.JSONObject(settingsCodec.encode(saved)).put("youtubeDirectDpiEnabled", true).toString()
+            val restored = settingsCodec.decode(legacy)
+            assertFalse(restored.advancedSettings.youtubeNoAdsEnabled)
+            assertFalse(org.json.JSONObject(settingsCodec.encode(saved)).getBoolean("youtubeDirectDpiEnabled"))
+            assertEquals(advanced.copy(youtubeNoAdsEnabled = false), restored.advancedSettings)
+        }
+    }
+
+    @Test
     fun `YouTube choice preserves the historical storage key without runtime credentials`() {
         assertFalse(settingsCodec.decode(null).advancedSettings.youtubeNoAdsEnabled)
         assertFalse(settingsCodec.decode("{}").advancedSettings.youtubeNoAdsEnabled)
-        assertTrue(settingsCodec.decode("""{"youtubeDirectDpiEnabled":true}""").advancedSettings.youtubeNoAdsEnabled)
+        assertTrue(settingsCodec.decode("""{"youtubeDirectDpiEnabled":true,"selectedPlanTier":"plus"}""").advancedSettings.youtubeNoAdsEnabled)
         val saved = defaults.copy(
+            userProfile = defaults.userProfile.copy(selectedPlanTier = "plus"),
             advancedSettings = defaults.advancedSettings.copy(youtubeNoAdsEnabled = true))
         val encoded = settingsCodec.encode(saved)
         assertEquals(saved, settingsCodec.decode(encoded))
@@ -33,7 +63,7 @@ class SettingsPersistenceCodecsTest {
             profile = defaults.profile.copy(endpointCode = "direct-tls", host = "vpn.example.test", security = "tls",
                 serverName = "cdn.example.test", uuid = "22222222-2222-4222-8222-222222222222"),
             isAuthenticated = true, backendAccessToken = "access", backendRefreshToken = "refresh",
-            userProfile = defaults.userProfile.copy(username = "retained-user"),
+            userProfile = defaults.userProfile.copy(username = "retained-user", selectedPlanTier = "plus"),
             endpointOptions = listOf(VpnEndpointOption(code = "direct-tls")),
             advancedSettings = defaults.advancedSettings.copy(ruRelayEnabled = false, youtubeNoAdsEnabled = true),
         )
@@ -57,6 +87,7 @@ class SettingsPersistenceCodecsTest {
     @Test
     fun `YouTube admission does not prevent cached primary VPN startup`() {
         val profile = VlessProfile(host = "vpn.example.test", endpointCode = "direct-tls", security = "tls",
+            proxyType = "hysteria", transport = "hysteria",
             serverName = "cdn.example.test", uuid = "22222222-2222-4222-8222-222222222222")
         val settings = defaults.copy(profile = profile, endpointOptions = listOf(VpnEndpointOption(code = profile.endpointCode)),
             advancedSettings = AdvancedSettings(ruRelayEnabled = false, youtubeNoAdsEnabled = true))
@@ -104,36 +135,70 @@ class SettingsPersistenceCodecsTest {
     }
 
     @Test
-    fun `upgrade enables RU relay once without resetting account or routing preferences`() {
+    fun manualTransportCannotFallBackThroughALegacySessionWithoutOptions() {
+        val settings = defaults.copy(
+            profile = defaults.profile.copy(security = "reality", transport = "tcp"),
+            endpointOptions = emptyList(),
+            advancedSettings = defaults.advancedSettings.copy(ruRelayEnabled = false,
+                protocol = VpnProtocol.REALITY, endpointSelectionMode = EndpointSelectionMode.MANUAL,
+                manualEndpointGroupKey = "lv2|reality|xhttp|stream-up|100"),
+        )
+        assertEquals("manual_group_mismatch", VpnProfileValidator.rejectionReason(settings))
+    }
+
+    @Test
+    fun `release upgrade disables RU relay once without resetting account or routing preferences`() {
         val saved = defaults.copy(
+            userProfile = defaults.userProfile.copy(selectedPlanTier = "plus"),
             isAuthenticated = true, backendAccessToken = "access", backendRefreshToken = "refresh",
             backendDeviceId = "device-a", ruRelaySelectionRevision = 17L,
             profile = defaults.profile.copy(endpointCode = "direct-tls", host = "vpn.example.test",
                 security = "tls", uuid = "22222222-2222-4222-8222-222222222222"),
             selectedPackages = setOf("example.app"),
-            advancedSettings = defaults.advancedSettings.copy(ruRelayEnabled = false,
-                protocol = VpnProtocol.REALITY, youtubeNoAdsEnabled = true,
+            advancedSettings = defaults.advancedSettings.copy(ruRelayEnabled = true,
+                protocol = VpnProtocol.REALITY, endpointSelectionMode = EndpointSelectionMode.MANUAL,
+                youtubeNoAdsEnabled = true,
                 bypassDomains = listOf("domain:example.test")),
         )
         val legacy = org.json.JSONObject(settingsCodec.encode(saved)).apply {
-            remove("ruRelayDefaultsVersion")
+            put("ruRelayDefaultsVersion", 1)
         }.toString()
         val migrated = settingsCodec.decode(legacy)
-        val expected = if (BuildConfig.RU_RELAY_DEFAULT_ENABLED) saved.copy(
-            advancedSettings = saved.advancedSettings.copy(ruRelayEnabled = true),
+        val expected = saved.copy(
+            advancedSettings = saved.advancedSettings.copy(ruRelayEnabled = false),
             profile = RuntimeProfilePolicy.profileAfterServerSelection(saved.profile),
             ruRelaySelectionRevision = 18L,
-        ) else saved
+        )
 
         assertEquals(expected, migrated)
         val persisted = settingsCodec.encode(migrated)
-        assertEquals(1, org.json.JSONObject(persisted).getInt("ruRelayDefaultsVersion"))
+        assertEquals(2, org.json.JSONObject(persisted).getInt("ruRelayDefaultsVersion"))
         assertEquals(migrated, settingsCodec.decode(persisted))
 
-        val disabled = migrated.copy(advancedSettings = migrated.advancedSettings.copy(ruRelayEnabled = false))
-        assertEquals(disabled, settingsCodec.decode(settingsCodec.encode(disabled)))
-        assertEquals(disabled, settingsCodec.decode(org.json.JSONObject(settingsCodec.encode(disabled))
+        val enabled = migrated.copy(advancedSettings = migrated.advancedSettings.copy(ruRelayEnabled = true))
+        assertEquals(enabled, settingsCodec.decode(settingsCodec.encode(enabled)))
+        assertEquals(enabled, settingsCodec.decode(org.json.JSONObject(settingsCodec.encode(enabled))
             .put("ruRelayDefaultsVersion", 2).toString()))
+        var stored = legacy
+        assertThrows(IllegalStateException::class.java) {
+            settingsCodec.decode(stored) { error("commit failed") }
+        }
+        assertEquals(legacy, stored)
+        settingsCodec.decode(stored) { stored = settingsCodec.encode(it) }
+        assertEquals(expected, settingsCodec.decode(stored) { error("migration must run once") })
+    }
+
+    @Test
+    fun gamingChoiceSurvivesStorageWhileKeepingTheNormalManualProtocol() {
+        val advanced = AdvancedSettings(protocol = VpnProtocol.REALITY, gamingModeEnabled = true,
+            endpointSelectionMode = EndpointSelectionMode.MANUAL,
+            manualEndpointCode = "xhttp", manualEndpointGroupKey = "reality|xhttp|stream-up")
+        val restored = settingsCodec.decode(settingsCodec.encode(defaults.copy(advancedSettings = advanced)))
+        assertEquals(advanced, restored.advancedSettings)
+        assertEquals(VpnProtocol.NOKINV, restored.advancedSettings.effectiveProtocol)
+        assertEquals(VpnProtocol.REALITY, restored.advancedSettings.copy(gamingModeEnabled = false).effectiveProtocol)
+        assertFalse(settingsCodec.decode(null).advancedSettings.ruRelayEnabled)
+        assertFalse(settingsCodec.decode(null).advancedSettings.gamingModeEnabled)
     }
 
     @Test

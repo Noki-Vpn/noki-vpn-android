@@ -17,6 +17,7 @@ object EndpointSelector {
         context: Context,
         session: BackendVpnSession,
         settings: AdvancedSettings,
+        directOnly: Boolean = true,
     ): VlessProfile {
         return selectionForSession(
             context = context,
@@ -24,6 +25,7 @@ object EndpointSelector {
             settings = settings,
             endpointHealth = emptyMap(),
             rotationIndex = { 0 },
+            directOnly = directOnly,
         ).profile
     }
 
@@ -36,6 +38,7 @@ object EndpointSelector {
         startupTcpPrecheck: ((BackendEndpointCandidate) -> Boolean)? = null,
         networkKind: EndpointRankingPolicy.NetworkKind? = null,
         onDiagnostic: (String) -> Unit = {},
+        directOnly: Boolean = true,
     ): EndpointSelectionResult {
         require(!settings.ruRelayEnabled) { "ru_route_requires_ru_coordinator" }
         require(session.multiHop?.selection == settings.multiHop.takeIf { it.enabled }) { "multihop_session_mismatch" }
@@ -48,6 +51,7 @@ object EndpointSelector {
             startupTcpPrecheck = startupTcpPrecheck,
             networkKind = networkKind,
             onDiagnostic = onDiagnostic,
+            directOnly = directOnly,
         )
         val candidate = selection?.candidate
         onDiagnostic("stage=selection; selected=${candidate?.code.orEmpty()}; tcp_failed=${selection?.precheckFailedEndpointCodes?.size ?: 0}; legacy=${selection == null}")
@@ -87,20 +91,25 @@ object EndpointSelector {
         startupTcpPrecheck: ((BackendEndpointCandidate) -> Boolean)?,
         networkKind: EndpointRankingPolicy.NetworkKind?,
         onDiagnostic: (String) -> Unit,
+        directOnly: Boolean,
     ): CandidateSelection? {
         val withHost = session.endpointCandidates
             .filter { it.entryHost.isNotBlank() }
         val secure = withHost
             .filter(EndpointSecurityPolicy::isAllowedCandidate)
+            .filter { !directOnly || settings.multiHop.enabled || EndpointTransportPolicy.isDirectCandidate(it) }
         val matchingProtocol = secure.filter { matchesProtocol(it, settings.effectiveProtocol) }
         val candidates = matchingProtocol.filter { !it.canaryOnly }
         onDiagnostic("stage=candidates; received=${session.endpointCandidates.size}; with_host=${withHost.size}; security_allowed=${secure.size}; protocol_allowed=${matchingProtocol.size}; eligible=${candidates.size}; protocol=${settings.protocol}; mode=${settings.endpointSelectionMode}")
         if (candidates.isEmpty()) {
             require(!settings.multiHop.enabled) { "multihop_transport_unavailable" }
-            return null
+            return if (session.endpointCandidates.isEmpty()) null else CandidateSelection(
+                candidate = null, networkKind = networkKind ?: currentNetworkKind(context),
+            )
         }
         val network = networkKind ?: currentNetworkKind(context)
-        if (settings.endpointSelectionMode == EndpointSelectionMode.MANUAL && !settings.multiHop.enabled) {
+        if (settings.endpointSelectionMode == EndpointSelectionMode.MANUAL && !settings.multiHop.enabled &&
+            !settings.gamingModeEnabled) {
             val manualCandidates = EndpointGroupPolicy.manualCandidates(candidates, settings)
             onDiagnostic("stage=manual_group; candidates=${manualCandidates.size}")
             if (startupTcpPrecheck != null) {
@@ -158,7 +167,8 @@ object EndpointSelector {
     internal fun matchesProtocol(candidate: BackendEndpointCandidate, protocol: VpnProtocol): Boolean =
         when (protocol) {
             VpnProtocol.AUTO -> true
-            VpnProtocol.TLS -> candidate.security.equals("tls", ignoreCase = true)
+            VpnProtocol.NOKINV -> candidate.proxyType.equals("nokinv", ignoreCase = true)
+            VpnProtocol.TLS -> !candidate.proxyType.equals("nokinv", ignoreCase = true) && candidate.security.equals("tls", ignoreCase = true)
             VpnProtocol.REALITY -> candidate.security.equals("reality", ignoreCase = true)
             VpnProtocol.WIREGUARD -> false
         }
@@ -181,7 +191,9 @@ object EndpointSelector {
                 candidate.connectIp == route.entryIp && candidate.entryPort in 20000..29999) { "multihop_exit_mismatch" }
         }
         return profileFromCandidate(candidate.copy(proxyType = candidate.proxyType.ifBlank { session.proxyType }), session.vpnSecret)
-            .copy(remark = "Noki ${candidate.locationName.ifBlank { session.locationName }}", multiHop = session.multiHop)
+            .copy(remark = "Noki ${candidate.locationName.ifBlank { session.locationName }}", multiHop = session.multiHop,
+                nokinvToken = if (candidate.proxyType == "nokinv") session.nokinvToken else "",
+                nokinvCredentialGeneration = if (candidate.proxyType == "nokinv") session.nokinvCredentialGeneration else 0)
     }
 
     internal fun profileFromCandidate(candidate: BackendEndpointCandidate, vpnSecret: String): VlessProfile =
@@ -238,6 +250,7 @@ object EndpointSelector {
         return session.endpointCandidates
             .filter { !it.canaryOnly }
             .filter(EndpointSecurityPolicy::isAllowedCandidate)
+            .filter { session.multiHop != null || EndpointTransportPolicy.isDirectCandidate(it) }
             .map { candidate ->
             val option = VpnEndpointOption(
                 code = candidate.code,

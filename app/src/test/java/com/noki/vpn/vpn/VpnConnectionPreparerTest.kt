@@ -20,6 +20,33 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VpnConnectionPreparerTest {
+    @Test fun `prepared grants are single use and bound to TTL physical network account and settings`() = runBlocking {
+        val settings = cachedSettings().copy(isAuthenticated = true, backendAccessToken = "prepared-test")
+        val session = com.noki.vpn.data.BackendVpnSession(
+            true, "auto", "lv", "Latvia", "lv-1", "vpn.example", 443, "vpn.example", "vless", "xhttp", "stream-up",
+            "reality", null, null, "/noki", null, false, false, false, "public", "abcd", "test",
+            settings.profile.uuid, null, null, emptyList())
+        val device = com.noki.vpn.data.BackendDevice(id = "device", deviceKey = "key", deviceName = "Phone",
+            platform = "android", accessRole = "owner", isActive = true, lastSeenAt = null)
+        var calls = 0
+        var clock = 1000L
+        var network = "wifi/prepared-test"
+        val coordinator = VpnStartCoordinator(com.noki.vpn.data.VpnStartCoordinator.VpnSessionPreparer { _, input, _, _ ->
+            calls++
+            com.noki.vpn.data.VpnSessionCoordinator.Result(input, session, device,
+                com.noki.vpn.data.EndpointSelector.EndpointSelectionResult(input.profile, "lv-1", ""))
+        }, networkSignature = { network }, nowMillis = { clock })
+        suspend fun prepare() = coordinator.prepareInAdvance("prepared-test", settings, emptyList())
+        suspend fun connect(input: StoredSettings = settings, token: String = "prepared-test") = coordinator.resolveStart(token, input, emptyList(), false)
+        prepare(); prepare(); assertEquals(1, calls)
+        assertTrue(connect() is VpnStartCoordinator.StartDecision.FreshSession); assertEquals(1, calls)
+        connect(); assertEquals(2, calls)
+        prepare(); clock += 60_001; connect(); assertEquals(4, calls)
+        prepare(); network = "mobile/prepared-test"; connect(); assertEquals(6, calls)
+        prepare(); connect(token = "another-account-token"); assertEquals(8, calls)
+        prepare(); connect(settings.copy(advancedSettings = settings.advancedSettings.copy(killSwitchEnabled = true)))
+        assertEquals(9, calls)
+    }
     @Test
     fun `required client update never retries or starts the usable cached profile`() = runBlocking {
         val settings = cachedSettings().copy(backendAccessToken = "token", isAuthenticated = true)
@@ -290,16 +317,20 @@ class VpnConnectionPreparerTest {
 
     private fun cachedSettings(): StoredSettings {
         val baseline = DefaultStoredSettingsFactory.create()
-        val endpoint = VpnEndpointOption(code = "lv-1", locationCode = "lv")
+        val endpoint = VpnEndpointOption(code = "lv-1", locationCode = "lv", security = "reality",
+            transport = "xhttp", transportMode = "stream-up")
         return baseline.copy(
             advancedSettings = baseline.advancedSettings.copy(ruRelayEnabled = false),
             profile = baseline.profile.copy(
                 endpointCode = endpoint.code,
+                transport = endpoint.transport,
+                transportMode = endpoint.transportMode,
                 host = "vpn.example",
                 uuid = "00000000-0000-4000-8000-000000000001",
                 serverName = "vpn.example",
                 publicKey = "public-key",
                 shortId = "abcd",
+                path = "/noki",
             ),
             endpointOptions = listOf(endpoint),
         )

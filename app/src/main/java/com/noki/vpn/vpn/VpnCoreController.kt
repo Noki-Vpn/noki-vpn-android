@@ -33,7 +33,7 @@ internal class VpnCoreController(
     @Synchronized
     override fun start(config: String, tunFd: Int): Boolean = try {
         setup(context)
-        Libbox.checkConfig(config)
+        // startOrReloadService validates and constructs the same core once.
         stop()
         this.tunFd = tunFd
         val core = Libbox.newCommandServer(handler, platform)
@@ -66,6 +66,9 @@ internal class VpnCoreController(
     override fun cancelMeasureDelay() {
         server?.cancelMeasureDelay()
     }
+
+    @Synchronized
+    override fun nokiNvCarrier(): String = server?.getNokiNVCarrier().orEmpty()
 
     override fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult = try {
         val core = checkNotNull(server) { "vpn_core_not_running" }

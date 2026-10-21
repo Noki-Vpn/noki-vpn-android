@@ -79,8 +79,10 @@ fun AdvancedSettingsScreen(
             val bypassCount = state.advancedSettings.bypassDomains.size
             var showProtocolSheet by rememberSaveable { mutableStateOf(false) }
             var showProtocolNotice by rememberSaveable { mutableStateOf(false) }
-            LaunchedEffect(state.advancedSettings.ruRelayEnabled, state.advancedSettings.multiHop.enabled) {
-                if (state.advancedSettings.ruRelayEnabled || state.advancedSettings.multiHop.enabled) showProtocolSheet = false
+            LaunchedEffect(state.advancedSettings.ruRelayEnabled, state.advancedSettings.multiHop.enabled,
+                state.advancedSettings.gamingModeEnabled) {
+                if (state.advancedSettings.ruRelayEnabled || state.advancedSettings.multiHop.enabled ||
+                    state.advancedSettings.gamingModeEnabled) showProtocolSheet = false
             }
 
             LaunchedEffect(showProtocolNotice) {
@@ -164,7 +166,8 @@ fun AdvancedSettingsScreen(
                             .padding(horizontal = metrics.dp(18f), vertical = metrics.dp(8f)),
                     )
                 }
-                if (!state.advancedSettings.multiHop.enabled && !state.advancedSettings.ruRelayEnabled) {
+                if (!state.advancedSettings.multiHop.enabled && !state.advancedSettings.ruRelayEnabled &&
+                    !state.advancedSettings.gamingModeEnabled) {
                     Spacer(modifier = Modifier.height(metrics.dp(25f)))
                     AdvancedToggleCard(
                         enabled = autoEndpointSelection,
@@ -185,7 +188,7 @@ fun AdvancedSettingsScreen(
                 }
 
                 if (!autoEndpointSelection && !state.advancedSettings.multiHop.enabled &&
-                    !state.advancedSettings.ruRelayEnabled) {
+                    !state.advancedSettings.ruRelayEnabled && !state.advancedSettings.gamingModeEnabled) {
                     Spacer(modifier = Modifier.height(metrics.dp(25f)))
 
                     AdvancedManualProtocolCard(
@@ -249,16 +252,18 @@ fun AdvancedSettingsScreen(
                     onConfigure = onAppFilterClicked,
                 )
 
-                Spacer(modifier = Modifier.height(metrics.dp(25f)))
-                AdvancedToggleCard(
-                    enabled = state.advancedSettings.youtubeNoAdsEnabled,
-                    title = tr(language, "YouTube без рекламы", "YouTube without ads"),
-                    backdrop = surfaceBackdrop,
-                    liveGlassEnabled = liveGlassEnabled,
-                    modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
-                        .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp)),
-                    onEnabledChanged = viewModel::setYoutubeNoAdsEnabled,
-                )
+                if (!state.userProfile.isFreePlan) {
+                    Spacer(modifier = Modifier.height(metrics.dp(25f)))
+                    AdvancedToggleCard(
+                        enabled = state.advancedSettings.youtubeNoAdsEnabled,
+                        title = tr(language, "YouTube без рекламы", "YouTube without ads"),
+                        backdrop = surfaceBackdrop,
+                        liveGlassEnabled = liveGlassEnabled,
+                        modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
+                            .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp)),
+                        onEnabledChanged = viewModel::setYoutubeNoAdsEnabled,
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(metrics.dp(25f)))
 

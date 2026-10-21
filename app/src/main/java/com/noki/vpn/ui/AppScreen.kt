@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.movableContentOf
@@ -96,7 +97,16 @@ fun AppScreen(
     onDisconnectClicked: () -> Unit,
     onOpenVpnSettings: () -> Unit,
     onPickAvatarClicked: () -> Unit,
+    onPickSupportAttachmentClicked: () -> Unit = {},
+    onSaveSupportAttachment: (com.noki.vpn.SupportAttachmentSaveRequest) -> Unit = {},
 ) {
+    LaunchedEffect(state.supportChat.saveRequest?.id, state.supportChat.savePickerPending) {
+        val request = state.supportChat.saveRequest
+        if (request != null && state.supportChat.savePickerPending) {
+            viewModel.markSupportSavePickerLaunched()
+            onSaveSupportAttachment(request)
+        }
+    }
     var plansCheckoutVisible by remember { mutableStateOf(false) }
     val sharedBackdrop = rememberPrismalGlassLayer {
         drawRect(Color(0xFF07111A))
@@ -116,7 +126,8 @@ fun AppScreen(
         isAuthenticated = state.isAuthenticated,
         destination = state.currentDestination,
     )
-    val showSharedBottomNavigation = initialOnboardingComplete && PrimaryNavigationPolicy.showsBottomNavigation(
+    val supportChatVisible = state.currentDestination == AppDestination.SUPPORT && state.supportChat.isOpen
+    val showSharedBottomNavigation = !supportChatVisible && initialOnboardingComplete && PrimaryNavigationPolicy.showsBottomNavigation(
         isAuthenticated = state.isAuthenticated,
         destination = state.currentDestination,
         dialogVisible = state.dialog != null,
@@ -402,11 +413,25 @@ fun AppScreen(
                             sharedBackdrop = sharedBackgroundBackdrop,
                             liveGlassEnabled = liveGlassEnabled,
                             showBackground = !showSharedNavigation,
+                            onOpenChat = {
+                                if (state.isAuthenticated) viewModel.openSupportChat()
+                                else viewModel.openScreen(AppDestination.LOGIN)
+                            },
+                            onCloseChat = viewModel::closeSupportChat,
+                            onRefreshChat = viewModel::refreshSupportChat,
+                            onDraftChanged = viewModel::updateSupportChatDraft,
+                            onSendMessage = viewModel::sendSupportMessage,
+                            onPickAttachment = onPickSupportAttachmentClicked,
+                            onRemoveAttachment = viewModel::removeSupportAttachment,
+                            onPreviewAttachment = viewModel::previewSupportAttachment,
+                            onOpenAttachment = viewModel::openSupportAttachment,
+                            onSaveAttachment = viewModel::saveSupportAttachment,
                         )
                         AppDestination.PERSONALIZATION -> PersonalizationScreen(
                             state = state,
                             onLanguageChanged = viewModel::setLanguage,
                             onGlassModeChanged = viewModel::setGlassMode,
+                            onVpnStatusNotificationChanged = viewModel::setVpnStatusNotificationEnabled,
                             onPickAvatarClicked = onPickAvatarClicked,
                             onDeleteAvatarClicked = viewModel::deleteAvatar,
                             onAvatarEditDenied = viewModel::showCurrentDeviceAccessDenied,
@@ -489,7 +514,7 @@ fun AppScreen(
                 }
             }
 
-            if (showSharedNavigation && state.isAuthenticated) {
+            if (showSharedNavigation && state.isAuthenticated && !supportChatVisible) {
                 PullToRefreshBox(
                     isRefreshing = state.isRefreshingData,
                     onRefresh = {

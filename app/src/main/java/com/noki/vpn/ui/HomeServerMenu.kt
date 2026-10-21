@@ -229,20 +229,20 @@ internal fun HomeServerMenuItem(
             if (countryCode != null && !serverRow) {
                 CountryFlagMarker(countryCode = countryCode, scale = scale,
                     sizeDp = markerSize)
+            } else if (!serverRow) {
+                AutomaticServerMarker(scale, markerSize)
             } else {
                 Box(
                     modifier = Modifier
                         .size(designDp(markerSize, scale))
-                        .clip(RoundedCornerShape(designDp(14f, scale)))
-                        .then(if (serverRow) Modifier else Modifier.background(
-                            lerp(SettingsBgSoft, HomeAccentPrimary, 0.12f))),
+                        .clip(RoundedCornerShape(designDp(14f, scale))),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = if (serverRow) Icons.Rounded.Dns else Icons.Rounded.AutoAwesome,
+                        imageVector = Icons.Rounded.Dns,
                         contentDescription = null,
-                        tint = if (serverRow && !selected) HomeTextSecondary else HomeAccentPrimary,
-                        modifier = Modifier.size(designDp(if (serverRow) 21f else 24f, scale)),
+                        tint = if (!selected) HomeTextSecondary else HomeAccentPrimary,
+                        modifier = Modifier.size(designDp(21f, scale)),
                     )
                 }
             }
@@ -303,6 +303,19 @@ internal fun HomeServerMenuItem(
                 )
             }
         }
+    }
+}
+
+@Composable
+internal fun AutomaticServerMarker(scale: Float, sizeDp: Float) {
+    Box(
+        Modifier.size(designDp(sizeDp, scale))
+            .clip(RoundedCornerShape(designDp(14f, scale)))
+            .background(lerp(SettingsBgSoft, HomeAccentPrimary, 0.12f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Rounded.AutoAwesome, contentDescription = null,
+            tint = HomeAccentPrimary, modifier = Modifier.size(designDp(24f, scale)))
     }
 }
 

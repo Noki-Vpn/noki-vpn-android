@@ -6,6 +6,7 @@ import com.noki.vpn.data.VlessProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LogoutStateReducerTest {
@@ -83,6 +84,7 @@ class LogoutStateReducerTest {
             isAndroidUpdateAvailable = true,
             hasUnreadAppNotifications = true,
             androidUpdate = AndroidUpdateUiState(
+                isRequired = true,
                 isChecking = true,
                 isDownloading = true,
                 currentVersionName = "0.9.172",
@@ -102,6 +104,7 @@ class LogoutStateReducerTest {
         assertFalse(result.hasUnreadAppNotifications)
         assertFalse(result.androidUpdate.isChecking)
         assertFalse(result.androidUpdate.isDownloading)
+        assertTrue(result.androidUpdate.requiresUpdate)
         assertEquals("0.9.172", result.androidUpdate.currentVersionName)
         assertNull(result.androidUpdate.update)
         assertNull(result.androidUpdate.error)

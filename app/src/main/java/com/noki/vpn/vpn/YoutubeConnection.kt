@@ -28,7 +28,9 @@ internal class YoutubeConnection(
     private var failedTarget: String? = null
 
     fun configFor(settings: StoredSettings, primary: VlessProfile?): YoutubeConnectionConfig? =
-        configuration.takeIf { target == targetFor(settings, primary) && validUntil > System.currentTimeMillis() }
+        targetFor(settings, primary)?.let { requested ->
+            configuration.takeIf { target == requested && validUntil > System.currentTimeMillis() }
+        }
 
     @Synchronized fun start(settings: StoredSettings, primary: VlessProfile?) {
         val next = targetFor(settings, primary)
@@ -185,7 +187,8 @@ internal class YoutubeConnection(
     }
 
     private fun targetFor(settings: StoredSettings, primary: VlessProfile?): String? {
-        if (!settings.isAuthenticated || !settings.advancedSettings.youtubeNoAdsEnabled || settings.backendDeviceId.isBlank()) return null
+        if (!settings.isAuthenticated || settings.userProfile.isFreePlan ||
+            !settings.advancedSettings.youtubeNoAdsEnabled || settings.backendDeviceId.isBlank()) return null
         return listOf(settings.userProfile.backendUserId, settings.backendDeviceId, settings.backendDeviceKey,
             primary?.endpointCode.orEmpty(), primary?.let(::transportFamily).orEmpty()).joinToString("|")
     }

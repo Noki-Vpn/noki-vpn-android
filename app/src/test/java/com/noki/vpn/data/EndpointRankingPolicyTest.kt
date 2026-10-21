@@ -4,6 +4,14 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class EndpointRankingPolicyTest {
+    @Test fun nokinvSelectionUsesItsOwnTransportClassWithoutTcpPrecheck() {
+        val endpoint = tcpCandidate("nv").copy(proxyType = "nokinv", transport = "nokinv", security = "tls", publicKey = null, shortId = null)
+        for (network in EndpointRankingPolicy.NetworkKind.entries) {
+            val result = EndpointStartupPreflightPolicy.selectWithTcpPrecheck(listOf(endpoint), emptyMap(), network,
+                1000, { 0 }, canReach = { error("NokiNV Auto must also work when TCP is blocked") })
+            assertEquals(endpoint, result.selected)
+        }
+    }
     @Test
     fun directHealthDoesNotAdoptRetiredRouteScopedRows() {
         val direct = EndpointHealth(score = 90)

@@ -7,6 +7,7 @@ import com.noki.vpn.data.EndpointRankingPolicy
 import com.noki.vpn.data.RuntimeProfilePolicy
 import com.noki.vpn.data.StoredSettings
 import com.noki.vpn.data.VpnProfileValidator
+import com.noki.vpn.data.VpnProtocol
 import com.noki.vpn.data.VpnSessionSelection
 import com.noki.vpn.data.VpnStartCoordinator
 import java.net.SocketTimeoutException
@@ -67,7 +68,10 @@ internal class VpnConnectionPreparer(
         if (localSettings.advancedSettings.ruRelayEnabled) {
             return Outcome.Failure(IllegalStateException("ru_wireguard_session_unavailable"))
         }
-        if (!strategy.forceRefreshSession && RuntimeProfilePolicy.isCachedProfileUsable(localSettings)) {
+        val prepareAutoCandidates = localSettings.advancedSettings.effectiveProtocol == VpnProtocol.AUTO &&
+            localSettings.endpointOptions.any { it.proxyType == "nokinv" }
+        if (!strategy.forceRefreshSession && !prepareAutoCandidates &&
+            RuntimeProfilePolicy.isCachedProfileUsable(localSettings)) {
             return Outcome.Success(
                 PreparedVpnSession(
                     preparationBaseline = localSettings,

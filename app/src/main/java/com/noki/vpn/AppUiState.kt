@@ -198,7 +198,13 @@ data class AndroidUpdateUiState(
     val currentVersionName: String = "",
     val update: AndroidUpdateInfo? = null,
     val error: String? = null,
-)
+    val isRequired: Boolean = false,
+) {
+    val requiresUpdate: Boolean get() = isRequired || update?.isForced == true
+
+    fun retainRequirement(previous: AndroidUpdateUiState): AndroidUpdateUiState =
+        copy(isRequired = requiresUpdate || previous.requiresUpdate)
+}
 
 @Immutable
 data class SettingsPreparedState(
@@ -361,15 +367,7 @@ object SettingsPreparedStatePolicy {
         }
     }
 
-    fun isFreePlan(state: AppUiState): Boolean {
-        val profile = state.userProfile
-        profile.selectedPlanTier?.trim()?.takeIf { it.isNotBlank() }?.let {
-            return it.equals("free", ignoreCase = true)
-        }
-        val code = profile.selectedPlanCodeRaw.trim().ifBlank { profile.selectedPlanCode.code }
-        return code.equals("free", ignoreCase = true) ||
-            code.startsWith("free_", ignoreCase = true) || code.startsWith("free-", ignoreCase = true)
-    }
+    fun isFreePlan(state: AppUiState): Boolean = state.userProfile.isFreePlan
 
     private fun planActionColorArgb(state: AppUiState, plan: PlanSummary?): Long {
         return planColorArgb(state, plan) ?: when (state.userProfile.selectedPlanCode) {
@@ -410,6 +408,7 @@ object SettingsPreparedStatePolicy {
 data class AppUiState(
     val installOnboardingStep: InstallOnboardingStep = InstallOnboardingStep.CONSENT,
     val paymentCheckout: PaymentCheckoutState = PaymentCheckoutState(),
+    val supportChat: SupportChatState = SupportChatState(),
     val isReady: Boolean = false,
     val screenStack: List<AppDestination> = listOf(AppDestination.SPLASH),
     val profile: VlessProfile = VlessProfile(),
@@ -428,6 +427,7 @@ data class AppUiState(
     val vpnRuntimeMode: VpnRuntimeMode = VpnRuntimeMode.ACCOUNT,
     val connectedAtMillis: Long? = null,
     val connectionLatencyMs: Int? = null,
+    val nokiNvCarrier: String = "",
     val connectionReason: String = "",
     val inlineMessage: String? = null,
     val authStep: AuthStep = AuthStep.WELCOME,

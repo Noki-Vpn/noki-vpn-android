@@ -10,6 +10,7 @@ import com.noki.vpn.data.RuForeignNode
 import com.noki.vpn.data.SecuritySettings
 import com.noki.vpn.data.UserProfile
 import com.noki.vpn.data.VlessProfile
+import com.noki.vpn.data.VpnEndpointOption
 import com.noki.vpn.data.VpnConnectionState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -17,6 +18,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BackendSyncStateReducerTest {
+    @Test
+    fun mandatoryUpdateSurvivesLateRefreshAndOrdinaryDialogChanges() {
+        val forced = updateInfo(versionCode = 78).copy(isForced = true)
+        for (required in listOf(AndroidUpdateUiState(isRequired = true), AndroidUpdateUiState(update = forced))) {
+            val latest = AppUiState(androidUpdate = required, dialog = AppDialog.AccessDenied)
+            val refreshed = BackendSyncStateReducer.apply(latest, backendPatch(AndroidUpdateUiState()))
+            assertTrue(refreshed.copy(dialog = null).androidUpdate.requiresUpdate)
+            assertTrue(AndroidUpdateUiState(error = "offline").retainRequirement(refreshed.androidUpdate).requiresUpdate)
+        }
+        val busy = AppUiState(androidUpdate = AndroidUpdateUiState(isChecking = true))
+        val startup = BackendSyncStateReducer.apply(busy, backendPatch(AndroidUpdateUiState(update = forced)))
+        assertTrue(startup.androidUpdate.requiresUpdate)
+        assertFalse(AndroidUpdateUiState(update = forced.copy(isForced = false)).requiresUpdate)
+    }
+
     @Test
     fun patchAppliesBackendFieldsToLatestUiStateOnly() {
         val latest = AppUiState(
@@ -65,7 +81,7 @@ class BackendSyncStateReducerTest {
 
         assertTrue(result.isAuthenticated)
         assertEquals(patch.userProfile, result.userProfile)
-        assertEquals(patch.profile, result.profile)
+        assertEquals(latest.profile, result.profile)
         assertEquals(listOf(backendDevice), result.devices)
         assertEquals(patch.ruForeignNodes, result.ruForeignNodes)
         assertEquals("invited", result.currentDeviceAccessRole)
@@ -89,6 +105,29 @@ class BackendSyncStateReducerTest {
         assertEquals(latest.isUploadingAvatar, result.isUploadingAvatar)
         assertEquals(latest.avatarUploadMessage, result.avatarUploadMessage)
         assertEquals(latest.pendingAvatarCropUri, result.pendingAvatarCropUri)
+    }
+
+    @Test
+    fun staleBootstrapCannotReplaceTheConnectedRouteIdentityButStillUpdatesAccountFields() {
+        val endpoint = VpnEndpointOption(code = "active", nodeId = "active-exit")
+        val active = AppUiState(
+            connectionState = VpnConnectionState.CONNECTED,
+            userProfile = UserProfile(selectedServerCode = "active-exit", actualCountryCode = "NL"),
+            profile = VlessProfile(endpointCode = endpoint.code, host = "active.example"),
+            endpointOptions = listOf(endpoint),
+        )
+        val patch = backendPatch(androidUpdate = AndroidUpdateUiState()).copy(
+            userProfile = active.userProfile.copy(username = "backend-user", subscriptionStatus = "limited",
+                trafficUsedGb = 42.0, selectedServerCode = "old-exit", actualCountryCode = "LV"),
+            profile = VlessProfile(endpointCode = "old", host = "old.example"),
+        )
+        val result = BackendSyncStateReducer.apply(active, patch)
+        assertEquals(patch.userProfile.copy(selectedServerCode = "active-exit", actualCountryCode = "NL"), result.userProfile)
+        assertEquals(active.profile, result.profile)
+        assertEquals(active.endpointOptions, result.endpointOptions)
+        val disconnected = BackendSyncStateReducer.apply(active.copy(connectionState = VpnConnectionState.DISCONNECTED), patch)
+        assertEquals(patch.userProfile, disconnected.userProfile)
+        assertEquals(patch.profile, disconnected.profile)
     }
 
     @Test

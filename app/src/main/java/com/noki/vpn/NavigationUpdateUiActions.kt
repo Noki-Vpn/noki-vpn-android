@@ -263,11 +263,11 @@ internal fun AppUiRuntime.markAndroidUpdateAvailable() {
     refreshAndroidUpdateStatus()
 }
 
-internal fun AppUiRuntime.refreshAndroidUpdateStatus() {
+internal fun AppUiRuntime.refreshAndroidUpdateStatus(installWhenAvailable: Boolean = false) {
     if (androidUpdateJob != null) return
     val attempt = authSessionCoordinator.attempt()
     if (attempt == null) {
-        val updateState = androidUpdateCoordinator.unauthenticatedState()
+        val updateState = androidUpdateCoordinator.unauthenticatedState().retainRequirement(uiState.androidUpdate)
         uiState = uiState.copy(
             isAndroidUpdateAvailable = false,
             androidUpdate = updateState,
@@ -286,6 +286,7 @@ internal fun AppUiRuntime.refreshAndroidUpdateStatus() {
     val job = scope.launch(start = CoroutineStart.LAZY) {
         val owner = currentCoroutineContext()[Job]
             ?: error("Android update coroutine has no Job")
+        var availableUpdate: AndroidUpdateInfo? = null
         try {
             withContext(Dispatchers.IO) {
                 androidUpdateCoordinator.clearSameOrOlderCachedApks()
@@ -297,8 +298,9 @@ internal fun AppUiRuntime.refreshAndroidUpdateStatus() {
             if (isCurrentAndroidUpdateOperation(owner, attempt)) {
                 uiState = uiState.copy(
                     isAndroidUpdateAvailable = updateState.update != null,
-                    androidUpdate = updateState,
+                    androidUpdate = updateState.retainRequirement(uiState.androidUpdate),
                 )
+                availableUpdate = updateState.update
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -320,6 +322,12 @@ internal fun AppUiRuntime.refreshAndroidUpdateStatus() {
                 uiState = uiState.copy(
                     androidUpdate = uiState.androidUpdate.copy(isChecking = false),
                 )
+                if (installWhenAvailable && availableUpdate != null && owner.isActive &&
+                    authSessionCoordinator.isCurrent(attempt) && uiState.androidUpdate.requiresUpdate &&
+                    uiState.androidUpdate.update == availableUpdate
+                ) {
+                    installAndroidUpdate()
+                }
             }
         }
     }
@@ -329,7 +337,10 @@ internal fun AppUiRuntime.refreshAndroidUpdateStatus() {
 
 internal fun AppUiRuntime.installAndroidUpdate() {
     if (androidUpdateJob != null || uiState.androidUpdate.isDownloading) return
-    val update = uiState.androidUpdate.update ?: return
+    val update = uiState.androidUpdate.update ?: run {
+        refreshAndroidUpdateStatus(installWhenAvailable = true)
+        return
+    }
     val language = uiState.personalizationSettings.language
     val attempt = authSessionCoordinator.attempt()
     if (attempt == null) {

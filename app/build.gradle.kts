@@ -33,19 +33,19 @@ val nokiBackendProbeHost = providers.gradleProperty("noki.backendProbeHost")
     .orElse(URI(nokiApiBaseUrl).host ?: "api.noki.ykino.tech")
     .get()
 val nokiBackendProbeHealthUrl = providers.gradleProperty("noki.backendProbeHealthUrl")
-    .orElse("$nokiApiBaseUrl/health")
+    .orElse("$nokiApiBaseUrl/v1/vpn/connectivity")
     .get()
 val ruRelayDefaultEnabled = providers.gradleProperty("noki.ruRelayDefaultEnabled")
-    .orElse("true")
+    .orElse("false")
     .get()
     .also { require(it == "true" || it == "false") { "noki.ruRelayDefaultEnabled must be true or false" } }
 val googleWebClientId = providers.gradleProperty("noki.googleWebClientId")
     .orElse("")
     .get()
 val libboxAarFile = layout.projectDirectory.file("libs/libbox.aar")
-val libboxAarSha256 = "5BCBD08AF407A6F434F354A66B040C6872A2E77D0F66573F9854376C26C185BF"
+val libboxAarSha256 = "798BFFCE0DEB408FA900312D1B274EF3364EE76685E64A16A7909B3D35C99DF7"
 val libboxSourceFile = layout.projectDirectory.file("libs/libbox.SOURCE.zip")
-val libboxSourceSha256 = "FEC740D5053398F2DBC308228D0DC5DB051A4EFD39E981245888BE99B7975EC0"
+val libboxSourceSha256 = "97A2FB2E11E8B4DA8A83C4F9C964B43751B9C8BEC3025571D9F7EE8E713536B5"
 val geositeFile = layout.projectDirectory.file("src/main/assets/geosite.dat")
 val geositeSha256 = "1B9012AB376E142DA68506385E4B0590ABEB20A0DEAC0169293E1057FCE8D949"
 val geositeSourceFile = layout.projectDirectory.file("../third_party/geosite/SOURCE.zip")
@@ -54,8 +54,8 @@ val geositeLicenseFile = layout.projectDirectory.file("src/main/assets/licenses/
 val prismalAarFile = layout.projectDirectory.file("libs/prismal-1.0.3.aar")
 val prismalAarSha256 = "40D5EAFC3B68554E0D5E159EA02ECDA8CA86EB32A43DC1B3BAE5C65344C08C2A"
 val supportedAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
-val expectedReleaseVersionCode = 274
-val expectedReleaseVersionName = "1.8.6"
+val expectedReleaseVersionCode = 287
+val expectedReleaseVersionName = "1.9.7"
 
 fun String.toBuildConfigString(): String =
     "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
@@ -83,6 +83,7 @@ android {
         targetSdk = 36
         versionCode = expectedReleaseVersionCode
         versionName = expectedReleaseVersionName
+        manifestPlaceholders["nokiAppLabel"] = "Noki Vpn"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters += supportedAbis

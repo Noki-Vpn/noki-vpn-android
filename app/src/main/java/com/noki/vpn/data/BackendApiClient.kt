@@ -1,5 +1,6 @@
 package com.noki.vpn.data
 
+import com.noki.vpn.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -37,6 +38,22 @@ class BackendApiClient(
     private val baseUrl = jsonApi.baseUrl
     private val contentClient = BackendContentClient(jsonApi)
     private val authClient = BackendAuthClient(jsonApi)
+
+    suspend fun supportChat(token: String, before: Long? = null): BackendSupportChat =
+        jsonApi.get("/app/support/chat" + (before?.let { "?before=$it" } ?: ""), token).toBackendSupportChat()
+
+    suspend fun sendSupportMessage(token: String, content: String, clientMessageId: String): BackendSupportMessage =
+        jsonApi.post(
+            path = "/app/support/chat/messages",
+            payload = JSONObject().put("content", content).put("client_message_id", clientMessageId),
+            token = token,
+        ).toBackendSupportMessage()
+
+    suspend fun sendSupportAttachments(token: String, content: String, clientMessageId: String, files: List<SupportAttachmentDraft>): BackendSupportMessage =
+        contentClient.uploadSupportAttachments(token, content, clientMessageId, files)
+
+    suspend fun downloadSupportAttachment(token: String, attachment: BackendSupportAttachment, destination: File): File =
+        contentClient.downloadSupportAttachment(token, attachment, destination)
 
     internal fun onNetwork(network: android.net.Network): BackendApiClient = BackendApiClient(
         client = client.newBuilder().socketFactory(network.socketFactory)
@@ -407,6 +424,7 @@ class BackendApiClient(
             .put("device_nonce", deviceNonce)
             .put("device_signature", deviceSignature)
             .put("profile_code", if (hops != null) "auto" else profileCode)
+            .put("capabilities", JSONArray().put("nokinv_v1").put("nokinv_release_v1"))
             .put("country_code", countryCode)
             .put("location_code", locationCode)
             .put("exclude_location_code", excludeLocationCode)
@@ -420,7 +438,11 @@ class BackendApiClient(
     }
 
     override suspend fun serverLocations(token: String, deviceId: String?, deviceKey: String?): List<BackendLocation> =
-        bootstrap(token, deviceId, deviceKey).locations
+        withContext(Dispatchers.IO) {
+            executeArray(Request.Builder().url(jsonApi.apiUrl("/locations"))
+                .header("Authorization", "Bearer $token").currentDeviceHeaders(deviceId, deviceKey)
+                .get().build()).toLocationList()
+        }
 
     suspend fun ruRelayCatalog(
         token: String,

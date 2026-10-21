@@ -65,6 +65,8 @@ internal class BackendJsonApi(
 
     suspend fun execute(request: Request): JSONObject = transport.jsonObject(request)
 
+    suspend fun executeStreaming(request: Request): JSONObject = transport.streamingJsonObject(request)
+
     suspend fun executeArray(request: Request): JSONArray = transport.jsonArray(request)
 
     suspend fun stream(request: Request, sink: (ResponseBody) -> Unit) = transport.stream(request, sink)

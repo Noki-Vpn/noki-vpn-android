@@ -308,7 +308,7 @@ internal class AndroidUpdateCoordinator(
             isDownloading = download != null && !download.state.isFinished,
             isReadyToInstall = readyFile(download) != null,
             error = download?.takeIf { it.state == WorkInfo.State.FAILED }?.outputData?.getString("error"),
-        )
+        ).retainRequirement(fallbackState)
     }
 
     private fun BackendAndroidUpdate.toAndroidUpdateInfoOrNull(currentVersionCode: Long): AndroidUpdateInfo? {

@@ -34,6 +34,7 @@ import com.noki.vpn.data.EndpointHealthEvents
 import com.noki.vpn.data.EndpointRankingPolicy
 import com.noki.vpn.data.EndpointSelector
 import com.noki.vpn.data.EndpointSelectionMode
+import com.noki.vpn.data.EndpointTransportPolicy
 import com.noki.vpn.data.PendingLogoutRevocationWorker
 import com.noki.vpn.data.PendingRuWireGuardRevoke
 import com.noki.vpn.data.hasSameAuthSessionAs
@@ -47,11 +48,14 @@ import com.noki.vpn.data.VpnIncidentReport
 import com.noki.vpn.data.VpnSessionSelection
 import com.noki.vpn.data.VpnStartCoordinator
 import com.noki.vpn.data.VpnProfileValidator
+import com.noki.vpn.data.VpnProtocol
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
@@ -148,7 +152,7 @@ class AppVpnService : VpnService() {
         super.onCreate()
         updateLiveRuntimeState(VpnConnectionState.DISCONNECTED, null)
         delayedTaskScheduler = HandlerDelayedTaskScheduler(notificationHandler)
-        notificationFactory = VpnNotificationFactory(this)
+        notificationFactory = VpnNotificationFactory(this, NOTIFICATION_ID)
         warmupController = VpnWarmupController(
             scheduler = delayedTaskScheduler,
             delayMillis = BACKGROUND_ENDPOINT_WARMUP_DELAY_MS,
@@ -235,6 +239,7 @@ class AppVpnService : VpnService() {
                     context = applicationContext,
                     session = session,
                     settings = AdvancedSettings(),
+                    directOnly = false,
                 )
             },
         )
@@ -349,6 +354,7 @@ class AppVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        notificationFactory.close()
         screenStateMonitor.stop()
         stopNetworkChangeMonitor()
         pendingStartOptions = null
@@ -500,17 +506,22 @@ class AppVpnService : VpnService() {
         strategy: VpnPreparationStrategy,
         generationId: Long,
     ) {
-        GeositeAsset.ensureBundledFallback(applicationContext)
         if (!connectionOrchestrator.isCurrent(generationId) || !currentCoroutineContext().isActive) return
         if (repository.load().advancedSettings.ruRelayEnabled) {
+            GeositeAsset.ensureBundledFallback(applicationContext)
             performRuWireGuardStart(repository, generationId)
             return
         }
-        val prepared = prepareConnectionSettings(
-            repository = repository,
-            strategy = strategy,
-            destructiveOnFailure = true,
-        ) ?: return
+        val prepared = coroutineScope {
+            val geosite = async(Dispatchers.Default) { GeositeAsset.ensureBundledFallback(applicationContext) }
+            val connection = prepareConnectionSettings(
+                repository = repository,
+                strategy = strategy,
+                destructiveOnFailure = true,
+            )
+            geosite.await()
+            connection
+        } ?: return
         if (!connectionOrchestrator.isCurrent(generationId) || !currentCoroutineContext().isActive) return
         val cachedStart = !strategy.forceRefreshSession && prepared.pendingWarmupSession == null
         if (cachedStart) {
@@ -1111,6 +1122,7 @@ class AppVpnService : VpnService() {
         val excludedCodes = preparedMetadata?.pendingWarmupSession?.selection
             ?.precheckFailedEndpointCodes.orEmpty().toMutableSet()
         val excludedNodeIds = mutableSetOf<String>()
+        var excludeNokiNv = false
         var attemptSettings = settings
         while (true) {
             currentCoroutineContext().ensureActive()
@@ -1144,7 +1156,9 @@ class AppVpnService : VpnService() {
             }
             var readinessCompleted = false
             val readinessLatencyMs = try {
-                (if (started) measureRuntimeReadiness(recovery = true) else null)
+                (if (started) measureRuntimeReadiness(recovery = true,
+                    fastStartup = !attemptSettings.advancedSettings.ruRelayEnabled &&
+                        !attemptSettings.advancedSettings.multiHop.enabled) else null)
                     .also { readinessCompleted = true }
             } finally {
                 if (!readinessCompleted) {
@@ -1203,8 +1217,10 @@ class AppVpnService : VpnService() {
                     health = health,
                 )
             }
+            if (settings.advancedSettings.effectiveProtocol == VpnProtocol.AUTO &&
+                attemptSettings.profile.proxyType.equals("nokinv", true)) excludeNokiNv = true
             val remaining = fallbackSession?.endpointCandidates.orEmpty()
-                .filterNot { it.code in excludedCodes }
+                .filterNot { it.code in excludedCodes || excludeNokiNv && it.proxyType.equals("nokinv", true) }
             val nextSelection = if (remaining.isNotEmpty() && fallbackSession != null) {
                 EndpointSelector.selectionForSession(
                     context = this@AppVpnService,
@@ -1243,6 +1259,7 @@ class AppVpnService : VpnService() {
                     sessionSelection = VpnSessionSelection(
                         countryCode = settings.userProfile.selectedCountryCode,
                         excludedNodeIds = excludedNodeIds.toSet(),
+                        excludeNokiNv = excludeNokiNv,
                     ),
                     onFailure = { nextNodeFailure = it },
                 )
@@ -2157,21 +2174,25 @@ class AppVpnService : VpnService() {
         }
     }
 
-    private suspend fun measureRuntimeReadiness(recovery: Boolean): Long? = readinessMutex.withLock {
+    private suspend fun measureRuntimeReadiness(recovery: Boolean, fastStartup: Boolean = false): Long? = readinessMutex.withLock {
         val repository = SettingsRepository(this)
         val connectedTargets = VpnProbePlanPolicy.connectedTargets(recovery)
-        val deadline = SystemClock.elapsedRealtime() + VpnProbePlanPolicy.TOTAL_TIMEOUT_MILLIS
+        val totalTimeout = if (fastStartup) VpnProbePlanPolicy.STARTUP_TOTAL_TIMEOUT_MILLIS else VpnProbePlanPolicy.TOTAL_TIMEOUT_MILLIS
+        val targetTimeout = if (fastStartup) VpnProbePlanPolicy.STARTUP_PER_TARGET_TIMEOUT_MILLIS else VpnProbePlanPolicy.PER_TARGET_TIMEOUT_MILLIS
+        val deadline = SystemClock.elapsedRealtime() + totalTimeout
         for (target in connectedTargets) {
             currentCoroutineContext().ensureActive()
             val remainingMillis = deadline - SystemClock.elapsedRealtime()
             if (remainingMillis <= 0L) break
             val startedAt = SystemClock.elapsedRealtime()
-            val result = connectionOrchestrator.measureDelay(
-                targetUrl = target.url,
-                timeoutMillis = remainingMillis.coerceAtMost(
-                    VpnProbePlanPolicy.PER_TARGET_TIMEOUT_MILLIS,
-                ),
-            )
+            val timeoutMillis = remainingMillis.coerceAtMost(targetTimeout)
+            val measure = { connectionOrchestrator.measureDelay(target.url, timeoutMillis) }
+            val result = if (fastStartup) withTimeoutOrNull(timeoutMillis) {
+                EndpointProbeRunner.awaitNativeProbe(
+                    measure = measure,
+                    cancel = connectionOrchestrator::cancelReadinessProbe,
+                )
+            } ?: VpnProbeResult(null, VpnCoreIssue.PROXY_TCP_TIMEOUT) else measure()
             currentCoroutineContext().ensureActive()
             recordDiagnostic(
                 repository = repository,
@@ -2400,6 +2421,7 @@ class AppVpnService : VpnService() {
                     currentRuntimeMode == VpnRuntimeMode.ACCOUNT &&
                     underlyingNetworkSource.currentSnapshot()?.signature == next.signature &&
                     persisted.hasSameAuthSessionAs(settings) &&
+                    settings.advancedSettings.gamingModeEnabled == baseline.advancedSettings.gamingModeEnabled &&
                     !VpnSettingsTransactionPolicy.candidateBecameStale(baseline, persisted) &&
                     persisted.advancedSettings.protocol == baseline.advancedSettings.protocol
             }
@@ -2443,7 +2465,8 @@ class AppVpnService : VpnService() {
                 EndpointRankingPolicy.select(
                     candidates = it.endpointCandidates.filter { candidate ->
                         candidate.nodeId == nodeId &&
-                            EndpointSelector.matchesProtocol(candidate, baseline.advancedSettings.protocol)
+                            EndpointSelector.matchesProtocol(candidate, baseline.advancedSettings.effectiveProtocol) &&
+                            (baseline.advancedSettings.multiHop.enabled || EndpointTransportPolicy.isDirectCandidate(candidate))
                     },
                     health = repository.loadEndpointHealth(next.kind),
                     networkKind = next.kind,
@@ -2974,7 +2997,8 @@ class AppVpnService : VpnService() {
         if (ruSession != null) notificationServerLabel else VpnServiceLogContext.serverLabel(settings)
 
     private fun updateActiveNotification() {
-        notificationFactory.updateActive(NOTIFICATION_ID, notificationServerLabel)
+        if (connectionOrchestrator.nokiNvCarrier() != liveRuntimeState().nokiNvCarrier) broadcastState(currentState)
+        notificationFactory.updateActive(notificationServerLabel)
     }
 
     private fun startNotificationTicker() {
@@ -3228,13 +3252,14 @@ class AppVpnService : VpnService() {
         val publicConnectedAtMillis = connectedAtMillis.takeIf { publicState == VpnConnectionState.CONNECTED }
         currentState = publicState
         updateLiveRuntimeState(publicState, publicConnectedAtMillis, currentRuntimeMode,
-            ruSession?.identity?.sessionId, latencyMs)
+            ruSession?.identity?.sessionId, latencyMs, connectionOrchestrator.nokiNvCarrier())
         val intent = Intent(ACTION_STATE_CHANGED)
             .setPackage(packageName)
             .putExtra(EXTRA_STATE, publicState.name)
             .putExtra(EXTRA_REASON, reason.orEmpty())
             .putExtra(EXTRA_CONNECTED_AT, publicConnectedAtMillis ?: 0L)
             .putExtra(EXTRA_RUNTIME_MODE, currentRuntimeMode.name)
+            .putExtra(EXTRA_NOKINV_CARRIER, liveRuntimeState().nokiNvCarrier)
         latencyLocationCode?.takeIf { it.isNotBlank() }?.let { code ->
             intent.putExtra(EXTRA_LATENCY_LOCATION_CODE, code)
         }
@@ -3253,6 +3278,7 @@ class AppVpnService : VpnService() {
         val runtimeMode: VpnRuntimeMode,
         val ruSessionId: String? = null,
         val latencyMs: Int? = null,
+        val nokiNvCarrier: String = "",
     )
 
     companion object {
@@ -3273,6 +3299,7 @@ class AppVpnService : VpnService() {
         const val EXTRA_RUNTIME_MODE = "runtime_mode"
         const val EXTRA_LATENCY_LOCATION_CODE = "latency_location_code"
         const val EXTRA_LATENCY_MS = "latency_ms"
+        const val EXTRA_NOKINV_CARRIER = "nokinv_carrier"
         private const val EXTRA_REFRESH_SESSION = "refresh_session"
         private const val NOTIFICATION_ID = 1001
         private const val NOTIFICATION_SPEED_UPDATE_INTERVAL_MS = 1_000L
@@ -3301,6 +3328,7 @@ class AppVpnService : VpnService() {
             runtimeMode: VpnRuntimeMode = VpnRuntimeMode.ACCOUNT,
             ruSessionId: String? = null,
             latencyMs: Int? = null,
+            nokiNvCarrier: String = "",
         ) {
             val previous = liveRuntimeState
             liveRuntimeState = LiveRuntimeState(
@@ -3308,6 +3336,7 @@ class AppVpnService : VpnService() {
                 connectedAtMillis = connectedAtMillis.takeIf { state == VpnConnectionState.CONNECTED },
                 runtimeMode = runtimeMode,
                 ruSessionId = ruSessionId.takeIf { state == VpnConnectionState.CONNECTED },
+                nokiNvCarrier = nokiNvCarrier.takeIf { state == VpnConnectionState.CONNECTED }.orEmpty(),
                 latencyMs = if (state == VpnConnectionState.CONNECTED) {
                     latencyMs?.takeIf { it > 0 } ?: previous.latencyMs.takeIf {
                         previous.state == state && previous.connectedAtMillis == connectedAtMillis &&

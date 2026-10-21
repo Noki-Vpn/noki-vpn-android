@@ -53,6 +53,7 @@ fun PersonalizationScreen(
     state: AppUiState,
     onLanguageChanged: (AppLanguage) -> Unit,
     onGlassModeChanged: (GlassMode) -> Unit,
+    onVpnStatusNotificationChanged: (Boolean) -> Unit,
     onPickAvatarClicked: () -> Unit,
     onDeleteAvatarClicked: () -> Unit,
     onAvatarEditDenied: () -> Unit,
@@ -176,9 +177,21 @@ fun PersonalizationScreen(
                             .height(metrics.dp(80f)),
                     )
                     Spacer(modifier = Modifier.height(metrics.dp(15f)))
-                    PersonalizationGlassModeRow(
-                        glassMode = state.personalizationSettings.glassMode,
-                        onGlassModeChanged = onGlassModeChanged,
+                    PersonalizationToggleRow(
+                        title = tr(language, "Статус в уведомлении", "Notification status"),
+                        selected = state.personalizationSettings.vpnStatusNotificationEnabled,
+                        onSelectedChange = onVpnStatusNotificationChanged,
+                        backdrop = backdrop,
+                        liveGlassEnabled = liveGlassEnabled,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(metrics.dp(80f)),
+                    )
+                    Spacer(modifier = Modifier.height(metrics.dp(15f)))
+                    PersonalizationToggleRow(
+                        title = "Full Glass",
+                        selected = fullGlassEnabled(state.personalizationSettings.glassMode),
+                        onSelectedChange = { onGlassModeChanged(glassModeForFullGlassEnabled(it)) },
                         backdrop = backdrop,
                         liveGlassEnabled = liveGlassEnabled,
                         modifier = Modifier

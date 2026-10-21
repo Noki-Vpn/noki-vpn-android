@@ -1,6 +1,15 @@
 package com.noki.vpn.data
 
 object RuntimeProfilePolicy {
+    fun normalizeAdvancedSettings(settings: AdvancedSettings, profile: UserProfile): AdvancedSettings {
+        return settings.copy(
+            endpointSelectionMode = if (settings.protocol != VpnProtocol.AUTO) EndpointSelectionMode.MANUAL
+                else settings.endpointSelectionMode,
+            ruRelayEnabled = settings.ruRelayEnabled && !settings.gamingModeEnabled,
+            youtubeNoAdsEnabled = settings.youtubeNoAdsEnabled && !profile.isFreePlan,
+        )
+    }
+
     fun profileAfterServerSelection(profile: VlessProfile): VlessProfile = profile.withoutRuntimeCredentials()
 
     fun normalize(settings: StoredSettings): StoredSettings {
@@ -8,7 +17,7 @@ object RuntimeProfilePolicy {
         return settings.copy(
             profile = profileAfterProtocolChange(
                 profile = settings.profile,
-                protocol = settings.advancedSettings.protocol,
+                protocol = settings.advancedSettings.effectiveProtocol,
             ),
         )
     }
@@ -18,7 +27,8 @@ object RuntimeProfilePolicy {
         protocol: VpnProtocol,
     ): VlessProfile {
         if (protocol == VpnProtocol.AUTO) return profile
-        return if (profile.security.equals(protocol.name, ignoreCase = true)) {
+        return if (if (protocol == VpnProtocol.NOKINV) profile.proxyType == "nokinv"
+            else profile.proxyType != "nokinv" && profile.security.equals(protocol.name, ignoreCase = true)) {
             profile
         } else {
             profile.withoutRuntimeCredentials()
@@ -54,6 +64,8 @@ object RuntimeProfilePolicy {
             port = option.port.toString(),
             security = option.security,
             uuid = "",
+            nokinvToken = "",
+            nokinvCredentialGeneration = 0,
             serverName = "",
             requestHost = "",
             path = "",
@@ -77,6 +89,8 @@ object RuntimeProfilePolicy {
         return copy(
             endpointCode = "",
             uuid = "",
+            nokinvToken = "",
+            nokinvCredentialGeneration = 0,
             serverName = "",
             requestHost = "",
             path = "",

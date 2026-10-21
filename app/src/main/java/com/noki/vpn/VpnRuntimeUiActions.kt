@@ -26,7 +26,15 @@ internal fun AppUiRuntime.updateConnectionState(
     connectedAtMillis: Long? = null,
     runtimeMode: VpnRuntimeMode = uiState.vpnRuntimeMode,
     latencyMs: Int? = null,
+    nokiNvCarrier: String = "",
 ) {
+    if (state == VpnConnectionState.CONNECTED && uiState.connectionState == state && reason.isBlank() &&
+        connectedAtMillis == uiState.connectedAtMillis && runtimeMode == uiState.vpnRuntimeMode &&
+        latencyMs == uiState.connectionLatencyMs && nokiNvCarrier != uiState.nokiNvCarrier) {
+        uiState = uiState.copy(nokiNvCarrier = nokiNvCarrier)
+        if (nokiNvCarrier.isBlank() || uiState.profile.proxyType != "nokinv") syncRuntimeSettingsFromRepository()
+        return
+    }
     when (val transition = connectionStateTransition(state, reason, connectedAtMillis, latencyMs)) {
         is ConnectionStateReducer.Transition.TrafficLimit -> {
             uiState = withFreeTrafficLimitNotice(
@@ -48,6 +56,10 @@ internal fun AppUiRuntime.updateConnectionState(
         }
         is ConnectionStateReducer.Transition.Normal -> applyConnectionTransition(transition, runtimeMode)
     }
+    uiState = uiState.copy(nokiNvCarrier = nokiNvCarrier.takeIf {
+        uiState.connectionState == VpnConnectionState.CONNECTED
+    }.orEmpty())
+    if (reason == "client_update_required") refreshAndroidUpdateStatus()
 }
 
 internal fun AppUiRuntime.connectionStateTransition(
@@ -72,6 +84,7 @@ internal fun AppUiRuntime.applyConnectionTransition(
     transition: ConnectionStateReducer.Transition.Normal,
     runtimeMode: VpnRuntimeMode,
 ) {
+    val previousState = uiState.connectionState
     uiState = transition.state.copy(
         vpnRuntimeMode = if (transition.state.connectionState == VpnConnectionState.DISCONNECTED) {
             VpnRuntimeMode.ACCOUNT
@@ -91,6 +104,8 @@ internal fun AppUiRuntime.applyConnectionTransition(
         ConnectionStateReducer.RuntimeAction.None -> Unit
     }
     transition.logAction?.let(::recordConnectionLog)
+    if (previousState != VpnConnectionState.DISCONNECTED &&
+        uiState.connectionState == VpnConnectionState.DISCONNECTED) prepareVpnInAdvance()
     if (transition.state.connectionState == VpnConnectionState.CONNECTED &&
         runtimeMode == VpnRuntimeMode.ACCOUNT
     ) {
@@ -109,6 +124,7 @@ internal data class RuntimeSettingsSyncKey(
     val manualEndpointCode: String,
     val manualEndpointGroupKey: String,
     val endpointOptions: List<com.noki.vpn.data.VpnEndpointOption>,
+    val gamingModeEnabled: Boolean,
 )
 
 internal fun runtimeSettingsSyncKey(state: AppUiState): RuntimeSettingsSyncKey = RuntimeSettingsSyncKey(
@@ -122,6 +138,7 @@ internal fun runtimeSettingsSyncKey(state: AppUiState): RuntimeSettingsSyncKey =
     manualEndpointCode = state.advancedSettings.manualEndpointCode,
     manualEndpointGroupKey = state.advancedSettings.manualEndpointGroupKey,
     endpointOptions = state.endpointOptions,
+    gamingModeEnabled = state.advancedSettings.gamingModeEnabled,
 )
 
 internal fun applyRuntimeOwnedSettingsSnapshot(
@@ -183,6 +200,12 @@ internal fun AppUiRuntime.getVpnPermissionIntent(context: Context): Intent? {
 }
 
 internal fun AppUiRuntime.startVpn() {
+    vpnPreparationJob?.cancel()
+    if (uiState.androidUpdate.requiresUpdate) {
+        uiState = uiState.copy(inlineMessage = null)
+        refreshAndroidUpdateStatus()
+        return
+    }
     val token = authSessionCoordinator.snapshot().accessToken
     if (token.isNullOrBlank()) {
         uiState = VpnStartStateReducer.notAuthenticatedState(uiState)
@@ -204,6 +227,23 @@ internal fun AppUiRuntime.startVpn() {
     )
 
     vpnCommands.start()
+}
+
+internal fun AppUiRuntime.prepareVpnInAdvance() {
+    vpnPreparationJob?.cancel()
+    if (uiState.androidUpdate.requiresUpdate || !uiState.isAuthenticated || uiState.connectionState != VpnConnectionState.DISCONNECTED ||
+        uiState.advancedSettings.ruRelayEnabled || uiState.advancedSettings.multiHop.enabled) return
+    val attempt = authSessionCoordinator.attempt() ?: return
+    vpnPreparationJob = scope.launch {
+        kotlinx.coroutines.delay(350)
+        try {
+            withContext(Dispatchers.IO) { com.noki.vpn.vpn.GeositeAsset.ensureBundledFallback(application) }
+            authSessionCoordinator.run(attempt) { token ->
+                vpnStartCoordinator.prepareInAdvance(token, repository.load(), syncedDevices)
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Connecting retains the normal fresh-session path. */ }
+    }
 }
 
 internal fun AppUiRuntime.startTemporaryVpn() {
@@ -254,11 +294,18 @@ internal fun AppUiRuntime.withFreeTrafficLimitNotice(
 ): AppUiState {
     var state = newState
     val limitReached = VpnStartStateReducer.freeTrafficLimitReached(state)
-    val notice = connectionUiCoordinator.limitNotice(limitReached, forceDialog, state.dialog != null)
-    if (!limitReached) return state
+    val legacyNotice = connectionUiCoordinator.limitNotice(limitReached, forceDialog, state.dialog != null)
+    val profile = state.userProfile
+    val trialExhausted = state.isAuthenticated && profile.isFreePlan && profile.freeLocationsOnly &&
+        profile.trialTrafficRemainingGb?.let { it.isFinite() && it <= 0.0 } == true
+    if (!limitReached && !trialExhausted) return state
+    val notice = if (trialExhausted) ConnectionUiCoordinator.LimitNoticeDecision(
+        showNotification = repository.claimFreeTrialNotification(profile.backendUserId),
+        showDialog = state.dialog == null && repository.claimFreeTrialDialog(profile.backendUserId),
+    ) else legacyNotice
 
     val language = state.personalizationSettings.language
-    if (state.connectionState == VpnConnectionState.CONNECTED || state.connectionState == VpnConnectionState.CONNECTING) {
+    if (limitReached && (state.connectionState == VpnConnectionState.CONNECTED || state.connectionState == VpnConnectionState.CONNECTING)) {
         vpnCommands.stop()
         repository.clearVpnRuntimeState()
         state = state.copy(
@@ -271,11 +318,11 @@ internal fun AppUiRuntime.withFreeTrafficLimitNotice(
     if (notice.showNotification) {
         FreeTrafficLimitNotifier.show(
             context = application,
-            title = tr(language, "Трафик закончился", "Traffic limit reached"),
+            title = tr(language, "Пробный трафик закончился", "Trial traffic used up"),
             message = tr(
                 language,
-                "Бесплатный трафик израсходован. Подключите подписку, чтобы продолжить пользоваться VPN.",
-                "Your free traffic is used up. Choose a subscription to keep using VPN.",
+                "Вы использовали пробный трафик. Можно остаться на Free или выбрать подписку с полным доступом.",
+                "You have used your trial traffic. You can stay on Free or choose a subscription with full access.",
             ),
         )
     }

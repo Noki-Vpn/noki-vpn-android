@@ -6,6 +6,7 @@ import com.noki.vpn.data.ServerLocation
 import com.noki.vpn.data.RuForeignNode
 import com.noki.vpn.data.UserProfile
 import com.noki.vpn.data.VlessProfile
+import com.noki.vpn.data.VpnConnectionState
 
 internal data class BackendSyncPatch(
     val userProfile: UserProfile,
@@ -80,15 +81,19 @@ internal object BackendSyncStateReducer {
             latest.androidUpdate
         } else {
             patch.androidUpdate
-        }
+        }.retainRequirement(latest.androidUpdate).retainRequirement(patch.androidUpdate)
+        val connected = latest.connectionState == VpnConnectionState.CONNECTED
         return latest.copy(
             isAuthenticated = true,
-            userProfile = patch.userProfile,
+            userProfile = if (connected) patch.userProfile.copy(
+                selectedServerCode = latest.userProfile.selectedServerCode,
+                actualCountryCode = latest.userProfile.actualCountryCode,
+            ) else patch.userProfile,
             devices = patch.devices,
             locations = patch.locations,
             ruForeignNodes = patch.ruForeignNodes,
             plans = patch.plans,
-            profile = patch.profile,
+            profile = if (connected) latest.profile else patch.profile,
             currentDeviceAccessRole = patch.currentDeviceAccessRole,
             isAndroidUpdateAvailable = androidUpdate.update != null,
             androidUpdate = androidUpdate,

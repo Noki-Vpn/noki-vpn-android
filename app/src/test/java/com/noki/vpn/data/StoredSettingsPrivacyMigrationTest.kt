@@ -8,6 +8,19 @@ class StoredSettingsPrivacyMigrationTest {
     private val codec = StoredSettingsCodec(DefaultStoredSettingsFactory::create)
 
     @Test
+    fun notificationStatusDefaultsOnAndExplicitChoiceSurvivesRoundTrip() {
+        assertTrue(codec.decode(null).personalizationSettings.vpnStatusNotificationEnabled)
+        assertTrue(codec.decode("""{"glassMode":"SIMPLE"}""").personalizationSettings.vpnStatusNotificationEnabled)
+        val defaults = DefaultStoredSettingsFactory.create()
+        val hidden = defaults.copy(personalizationSettings = defaults.personalizationSettings.copy(
+            vpnStatusNotificationEnabled = false,
+        ))
+
+        assertFalse(codec.decode(codec.encode(hidden)).personalizationSettings.vpnStatusNotificationEnabled)
+        assertTrue(codec.decode(codec.encode(defaults)).personalizationSettings.vpnStatusNotificationEnabled)
+    }
+
+    @Test
     fun firstInstallEnablesLoggingAndAutomaticUpload() {
         val settings = codec.decode(null).advancedSettings
 

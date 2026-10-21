@@ -111,35 +111,37 @@ class AppVpnServiceCommandTest {
     }
 
     @Test
-    fun coldAccountStartInstallsTheRoutingAssetBeforeSessionPreparation() = runBlocking {
+    fun coldAccountStartInstallsTheRoutingAssetDuringSessionPreparation() = runBlocking {
         val fixture = Fixture(this)
         fixture.orchestrator.withLifecycleLock {
             fixture.orchestrator.releaseResourcesWhileOwned(VpnConnectionState.DISCONNECTED)
         }
         AtomicFile(GeositeAsset.file(fixture.service)).delete()
-        var digestAtPreparation: String? = null
-        fixture.useOfflinePreparation {
-            digestAtPreparation = GeositeAsset.currentDigest(fixture.service)
-        }
+        fixture.useOfflinePreparation()
 
         fixture.startAccount()
         fixture.orchestrator.activeTransitionJob()!!.join()
 
         val bundled = fixture.service.assets.open("geosite.dat").use { it.readBytes() }
-        assertEquals(GeositeAsset.sha256(bundled), digestAtPreparation)
+        assertEquals(GeositeAsset.sha256(bundled), GeositeAsset.currentDigest(fixture.service))
         assertEquals(emptyList<String>(), fixture.startedEndpoints)
         assertEquals(0, fixture.tunnelsCreated)
     }
 
     @Test
     fun cancelledColdBootstrapCannotFailOrCloseANewerConnection() = runBlocking {
-        var worker: Thread? = null
         val dispatcher = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
-            Thread(task, "geosite-cancel-test").also { worker = it }
+            Thread(task, "geosite-cancel-test")
         }.asCoroutineDispatcher()
         val scope = CoroutineScope(SupervisorJob() + dispatcher)
         try {
             val fixture = Fixture(scope)
+            val preparationStarted = java.util.concurrent.CountDownLatch(1)
+            val releasePreparation = java.util.concurrent.CountDownLatch(1)
+            fixture.useOfflinePreparation {
+                preparationStarted.countDown()
+                check(releasePreparation.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            }
             fixture.orchestrator.withLifecycleLock {
                 fixture.orchestrator.releaseResourcesWhileOwned(VpnConnectionState.DISCONNECTED)
             }
@@ -154,15 +156,12 @@ class AppVpnServiceCommandTest {
             synchronized(GeositeAsset) {
                 fixture.startAccount()
                 cancelledStart = fixture.orchestrator.activeTransitionJob()!!
-                val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
-                while (worker?.state != Thread.State.BLOCKED && System.nanoTime() < deadline) Thread.sleep(5)
-                org.junit.Assert.assertTrue(worker?.stackTrace?.any {
-                    it.className == GeositeAsset::class.java.name && it.methodName == "ensureBundledFallback"
-                } == true)
+                assertTrue(preparationStarted.await(5, java.util.concurrent.TimeUnit.SECONDS))
                 cancelledStart.cancel()
                 newerGeneration = fixture.orchestrator.invalidate()
                 fixture.orchestrator.replaceTunnel(newerTunnel)
                 fixture.orchestrator.updateState(VpnConnectionState.CONNECTED)
+                releasePreparation.countDown()
             }
             cancelledStart.join()
 
@@ -530,7 +529,9 @@ class AppVpnServiceCommandTest {
             requestHost = null, path = null, alpn = null, allowInsecure = false, enableMux = false,
             randomUserAgent = false, publicKey = null, shortId = null, vpnUsername = "test",
             vpnSecret = "test-secret", flow = null, planCode = null,
-            endpointCandidates = listOf(candidate, tcpCandidate("reality").copy(path = null)),
+            endpointCandidates = listOf(candidate, tcpCandidate("reality").copy(
+                transport = "xhttp", transportMode = "stream-up", path = "/noki", flow = null,
+            )),
         )
         for (mode in EndpointSelectionMode.entries) {
             for (protocol in com.noki.vpn.data.VpnProtocol.entries) {
@@ -545,12 +546,22 @@ class AppVpnServiceCommandTest {
                     measureTcpDelay = { _, _, _ -> 10 },
                     measureNativeDelay = { _, _ -> calls.incrementAndGet(); 20L },
                 )
-                val outcomes = runner.probeAutoCandidates(session, settings, isCurrent = { true },
-                    networkKind = EndpointRankingPolicy.NetworkKind.WIFI, staggerMillis = 0L)
+                val result = runCatching {
+                    runner.probeAutoCandidates(session, settings, isCurrent = { true },
+                        networkKind = EndpointRankingPolicy.NetworkKind.WIFI, staggerMillis = 0L)
+                }
+                if (mode == EndpointSelectionMode.AUTO && protocol == com.noki.vpn.data.VpnProtocol.WIREGUARD) {
+                    assertEquals(IllegalArgumentException::class.java, result.exceptionOrNull()?.javaClass)
+                    assertEquals("wireguard_requires_ru_relay", result.exceptionOrNull()?.message)
+                    assertEquals(0, calls.get())
+                    continue
+                }
+                val outcomes = result.getOrThrow()
                 val expected = if (mode == EndpointSelectionMode.MANUAL) emptySet() else when (protocol) {
                     com.noki.vpn.data.VpnProtocol.AUTO -> setOf("tls", "reality")
                     com.noki.vpn.data.VpnProtocol.TLS -> setOf("tls")
                     com.noki.vpn.data.VpnProtocol.REALITY -> setOf("reality")
+                    com.noki.vpn.data.VpnProtocol.NOKINV -> emptySet()
                     com.noki.vpn.data.VpnProtocol.WIREGUARD -> emptySet()
                 }
                 assertEquals("$mode/$protocol", expected, outcomes.map { it.endpointCode }.toSet())
@@ -828,6 +839,46 @@ class AppVpnServiceCommandTest {
             it.action == AppVpnService.ACTION_STATE_CHANGED
         }
         assertEquals(0, stopped.getIntExtra(AppVpnService.EXTRA_LATENCY_MS, 0))
+    }
+
+    @Test
+    fun nativeCarrierFollowsTheExistingTickAndClearsOnResetAndStopWithoutLosingGamingLabel() = runBlocking {
+        val fixture = Fixture(this)
+        fixture.set("connectedAtMillis", 1234L)
+        val profile = com.noki.vpn.data.VlessProfile(endpointCode = "nv", proxyType = "nokinv", transport = "nokinv")
+        fun label(gaming: Boolean = false): String {
+            val live = AppVpnService.liveRuntimeState()
+            return com.noki.vpn.ui.protocolCardLabel(com.noki.vpn.AppUiState(
+                profile = profile, connectionState = live.state, nokiNvCarrier = live.nokiNvCarrier,
+                advancedSettings = com.noki.vpn.data.AdvancedSettings(gamingModeEnabled = gaming),
+                personalizationSettings = com.noki.vpn.data.PersonalizationSettings(language = com.noki.vpn.data.AppLanguage.RU),
+            ), autoEndpointSelection = true)
+        }
+        for ((carrier, text) in listOf("quic" to "QUIC (UDP)", "tls" to "TCP/TLS", "mixed" to "UDP + TCP")) {
+            fixture.runtimeCarrier = carrier
+            fixture.invoke("updateActiveNotification")
+            assertEquals(carrier, AppVpnService.liveRuntimeState().nokiNvCarrier)
+            val broadcast = shadowOf(fixture.service).broadcastIntents.last {
+                it.action == AppVpnService.ACTION_STATE_CHANGED
+            }
+            assertEquals(carrier, broadcast.getStringExtra(AppVpnService.EXTRA_NOKINV_CARRIER))
+            assertEquals("NokiNV · $text", label())
+            assertEquals("NokiNV · $text · Игровой", label(gaming = true))
+        }
+        fixture.runtimeCarrier = ""
+        fixture.invoke("updateActiveNotification")
+        assertEquals("", AppVpnService.liveRuntimeState().nokiNvCarrier)
+        assertEquals("Auto (NokiNV / Auto)", label())
+        fixture.runtimeCarrier = "quic"
+        fixture.invoke("updateActiveNotification")
+        fixture.stop(1)
+        fixture.orchestrator.activeTransitionJob()!!.join()
+        assertEquals("", AppVpnService.liveRuntimeState().nokiNvCarrier)
+        assertEquals("Auto (NokiNV / Auto)", label())
+        val stopped = shadowOf(fixture.service).broadcastIntents.last {
+            it.action == AppVpnService.ACTION_STATE_CHANGED
+        }
+        assertEquals("", stopped.getStringExtra(AppVpnService.EXTRA_NOKINV_CARRIER))
     }
 
     @Test
@@ -1358,6 +1409,8 @@ class AppVpnServiceCommandTest {
         assertEquals("hy2", fixture.orchestrator.currentSettings()?.profile?.endpointCode)
         assertEquals("hy2", fixture.savedSettings().profile.endpointCode)
         assertEquals(1, fixture.tunnelsCreated)
+        assertTrue(fixture.probeTimeouts.isNotEmpty())
+        assertTrue(fixture.probeTimeouts.all { it in 1L..1_500L })
     }
 
     @Test
@@ -1458,6 +1511,7 @@ class AppVpnServiceCommandTest {
         fixture.startPrepared()
         val settings = checkNotNull(fixture.orchestrator.currentSettings()).let { current -> current.copy(
             isAuthenticated = true, backendDeviceId = "66666666-6666-4666-8666-666666666666", backendDeviceKey = "device-key",
+            userProfile = current.userProfile.copy(selectedPlanTier = "plus"),
             advancedSettings = current.advancedSettings.copy(youtubeNoAdsEnabled = true)) }
         fixture.saveSettings(settings)
         fixture.installYoutubeConfig(YoutubeConnectionConfig.WireGuard(BackendRuWireGuardConfig(
@@ -1772,8 +1826,10 @@ class AppVpnServiceCommandTest {
         val service = Robolectric.buildService(AppVpnService::class.java).get()
         val startedEndpoints = mutableListOf<String>()
         val startedConfigs = mutableListOf<JSONObject>()
+        val probeTimeouts = java.util.concurrent.CopyOnWriteArrayList<Long>()
         var rejectYoutubeRuntime = false
         var runtimeRunning = false
+        var runtimeCarrier = ""
         var runtimeStops = 0
         var runtimeRebinds = 0
         var runtimeRebindSucceeds = true
@@ -1804,6 +1860,7 @@ class AppVpnServiceCommandTest {
         )
         val orchestrator = VpnConnectionOrchestrator(
             core = object : VpnCoreRuntime {
+                override fun nokiNvCarrier(): String = runtimeCarrier
                 override fun start(config: String, tunFd: Int): Boolean {
                     check(probeFallback)
                     val parsed = JSONObject(config)
@@ -1822,6 +1879,7 @@ class AppVpnServiceCommandTest {
                 }
                 override fun cancelMeasureDelay() { probeCancels.incrementAndGet() }
                 override fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult {
+                    probeTimeouts += timeoutMillis
                     if (!probeActive.compareAndSet(false, true)) {
                         busyProbes.incrementAndGet()
                         busyProbeObserved.countDown()
@@ -1877,7 +1935,7 @@ class AppVpnServiceCommandTest {
             set("warmupController", VpnWarmupController<BackendVpnSession>(scheduler, 1L))
             set("statsCoordinator", VpnStatsCoordinator(SettingsRepository(service), scope, scheduler, { null }, { _, _ -> }))
             set("underlyingNetworkSource", AndroidUnderlyingNetworkSource(service))
-            set("notificationFactory", VpnNotificationFactory(service))
+            set("notificationFactory", VpnNotificationFactory(service, 1001))
             if (realSidecars) {
                 set("connectedAtMillis", System.currentTimeMillis())
                 set("notificationController", VpnNotificationController(
@@ -2029,7 +2087,7 @@ class AppVpnServiceCommandTest {
         suspend fun measureReadiness(): Long? = suspendCoroutineUninterceptedOrReturn { continuation ->
             try {
                 AppVpnService::class.java.declaredMethods.single { it.name == "measureRuntimeReadiness" }
-                    .apply { isAccessible = true }.invoke(service, false, continuation)
+                    .apply { isAccessible = true }.invoke(service, false, false, continuation)
             } catch (error: java.lang.reflect.InvocationTargetException) { throw error.targetException }
         }
 
@@ -2086,16 +2144,18 @@ class AppVpnServiceCommandTest {
             failedClosed: Boolean = false,
             nodeId: String? = null,
         ) {
-            val candidates = (1..4).map { tcpCandidate("tcp$it").copy(path = null, nodeId = nodeId) } +
+            val candidates = (1..4).map { tcpCandidate("tcp$it").copy(
+                transport = "xhttp", transportMode = "stream-up", path = "/noki", flow = null, nodeId = nodeId,
+            ) } +
                 hysteriaCandidate("hy2").copy(path = null, nodeId = nodeId)
             val session = BackendVpnSession(
                 canConnect = true, profileCode = "auto", locationCode = "lv1", locationName = "Latvia",
                 endpointCode = "tcp1", entryHost = "tcp1.example.com", entryPort = 443,
-                serverName = "www.lu.lv", proxyType = "vless", transport = "tcp", transportMode = null,
-                security = "reality", fingerprint = "chrome", requestHost = null, path = null, alpn = null,
+                serverName = "www.lu.lv", proxyType = "vless", transport = "xhttp", transportMode = "stream-up",
+                security = "reality", fingerprint = "chrome", requestHost = null, path = "/noki", alpn = null,
                 allowInsecure = false, enableMux = false, randomUserAgent = false,
                 publicKey = "public", shortId = "short", vpnUsername = "test",
-                vpnSecret = "e912e725-2dc7-4b44-85d2-7fbc31a48b5e", flow = "xtls-rprx-vision",
+                vpnSecret = "e912e725-2dc7-4b44-85d2-7fbc31a48b5e", flow = null,
                 planCode = null, endpointCandidates = candidates,
             )
             val baseline = store.load()

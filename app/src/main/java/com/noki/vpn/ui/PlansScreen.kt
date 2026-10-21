@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -121,7 +121,7 @@ fun PlansScreen(
             val scale = metrics.contentScale
             val contentWidth = metrics.contentWidth
             val cardWidth = contentWidth
-            val cardHeight = settingsDp(454f, scale)
+            val minimumCardHeight = settingsDp(454f, scale)
             val indicatorGap = settingsDp(15f, scale)
             val indicatorHeight = settingsDp(10f, scale)
             val containerGap = settingsDp(40f, scale)
@@ -131,14 +131,18 @@ fun PlansScreen(
             val centeredContentHeight = if (plans.isEmpty()) {
                 settingsDp(260f, scale)
             } else {
-                cardHeight + indicatorGap + indicatorHeight
+                minimumCardHeight + indicatorGap + indicatorHeight
             }
-            val topPadding = PlansLayoutPolicy.centeredCardTopPaddingDp(
+            val minimumTopPadding = settingsDp(15f, scale)
+            val centeredTopPadding = PlansLayoutPolicy.centeredCardTopPaddingDp(
                 viewportHeightDp = maxHeight.value,
                 cardHeightDp = centeredContentHeight.value,
                 bottomReservedDp = bottomNavigationReserved.value,
-                minimumTopDp = 15f * scale,
+                minimumTopDp = minimumTopPadding.value,
             ).dp
+            val topPadding = if (plans.isEmpty()) centeredTopPadding else minimumTopPadding
+            // Grow into the space above the card, keeping its bottom and the action in place.
+            val cardHeight = minimumCardHeight + centeredTopPadding - topPadding
             val pagePadding = 0.dp
             val localBackdrop = if (showBackground) {
                 rememberPrismalGlassLayer {
@@ -235,7 +239,7 @@ fun PlansScreen(
                                     state = pagerState,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(cardHeight),
+                                        .heightIn(min = cardHeight),
                                     contentPadding = PaddingValues(horizontal = pagePadding),
                                     pageSpacing = settingsDp(16f, scale),
                                 ) { page ->
@@ -248,7 +252,7 @@ fun PlansScreen(
                                         liveGlassEnabled = liveGlassEnabled,
                                         modifier = Modifier
                                             .width(cardWidth)
-                                            .height(cardHeight),
+                                            .heightIn(min = cardHeight),
                                         onCycleChanged = viewModel::setBillingCycle,
                                     )
                                 }

@@ -15,6 +15,7 @@ internal fun AppUiRuntime.logout() {
     val notificationHistorySettings = repository.load()
     accountSecurityUiWorkflow.invalidate()
     paymentCheckoutWorkflow.invalidate()
+    supportChatWorkflow.invalidate()
     telegramLoginGateway.cancel()
     telegramAuthPurposeState.invalidate()
     vpnCommands.stop()

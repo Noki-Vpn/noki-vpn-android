@@ -39,7 +39,8 @@ class NokiFirebaseMessagingService : FirebaseMessagingService() {
                 message = "fcm_notification_received",
                 details = "has_action=${!notification.action.isNullOrBlank()}",
             )
-            if (AppBroadcastNotifier.show(applicationContext, notification)) {
+            if (AppBroadcastNotifier.show(applicationContext, notification,
+                    userId = settings.userProfile.backendUserId, deviceId = settings.backendDeviceId)) {
                 repository.markAppNotificationsSeen(listOf(notification.id))
             }
         }

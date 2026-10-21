@@ -3,6 +3,7 @@ package com.noki.vpn.ui
 import com.noki.vpn.AppUiState
 import com.noki.vpn.data.EndpointGroupPolicy
 import com.noki.vpn.data.VpnEndpointOption
+import com.noki.vpn.data.VpnConnectionState
 
 internal fun selectedEndpointLabel(state: AppUiState): String {
     return resolvedEndpointLabel(state)
@@ -13,9 +14,21 @@ internal fun protocolCardLabel(
     state: AppUiState,
     autoEndpointSelection: Boolean,
 ): String {
+    if (state.connectionState == VpnConnectionState.CONNECTED && state.profile.proxyType == "nokinv") {
+        val carrier = when (state.nokiNvCarrier) {
+            "quic" -> "QUIC (UDP)"
+            "tls" -> "TCP/TLS"
+            "mixed" -> "UDP + TCP"
+            else -> null
+        }
+        if (carrier != null) return "NokiNV · $carrier" + if (state.advancedSettings.gamingModeEnabled) {
+            " · " + tr(state.personalizationSettings.language, "Игровой", "Gaming")
+        } else ""
+    }
+    if (state.advancedSettings.gamingModeEnabled) return "NokiNV / Gaming"
     if (state.advancedSettings.ruRelayEnabled) return "Auto"
     if (!autoEndpointSelection) return selectedEndpointLabel(state)
-    val endpointLabel = resolvedEndpointLabel(state) ?: profileEndpointLabel(state)
+    val endpointLabel = profileEndpointLabel(state) ?: resolvedEndpointLabel(state)
     return endpointLabel?.let { "Auto ($it)" } ?: "Auto"
 }
 

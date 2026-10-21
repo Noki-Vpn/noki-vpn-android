@@ -56,6 +56,21 @@ internal class SettingsMarkersStore(
         }
     }
 
+    fun claimFreeTrialNotification(userId: String): Boolean = claimFreeTrialNotice(userId, KEY_FREE_TRIAL_NOTIFICATION_USERS)
+
+    fun claimFreeTrialDialog(userId: String): Boolean = claimFreeTrialNotice(userId, KEY_FREE_TRIAL_DIALOG_USERS)
+
+    private fun claimFreeTrialNotice(userId: String, key: String): Boolean {
+        if (userId.isBlank()) return false
+        return synchronized(SEEN_APP_NOTIFICATION_IDS_LOCK) {
+            val users = preferences.getStringSet(key, emptySet()).orEmpty()
+            if (userId in users) false else {
+                preferences.edit { putStringSet(key, users + userId) }
+                true
+            }
+        }
+    }
+
     fun loadLastRegisteredFcmTokenHash(): String =
         preferences.getString(KEY_LAST_REGISTERED_FCM_TOKEN_HASH, "").orEmpty()
 
@@ -108,6 +123,8 @@ internal class SettingsMarkersStore(
         const val KEY_VPN_RUNTIME_CONNECTED_AT = "vpn_runtime_connected_at"
         const val KEY_LAST_AUTO_APP_LOG_UPLOAD_AT = "last_auto_app_log_upload_at"
         const val KEY_SEEN_APP_NOTIFICATION_IDS = "seen_app_notification_ids"
+        const val KEY_FREE_TRIAL_NOTIFICATION_USERS = "free_trial_notification_users"
+        const val KEY_FREE_TRIAL_DIALOG_USERS = "free_trial_dialog_users"
         const val KEY_LAST_REGISTERED_FCM_TOKEN_HASH = "last_registered_fcm_token_hash"
         const val KEY_LAST_REGISTERED_FCM_DEVICE_ID = "last_registered_fcm_device_id"
         const val KEY_ANDROID_UPDATE_AVAILABLE = "android_update_available"

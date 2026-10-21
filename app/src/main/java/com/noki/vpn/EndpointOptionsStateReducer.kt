@@ -2,10 +2,10 @@ package com.noki.vpn
 
 import com.noki.vpn.data.BackendDevice
 import com.noki.vpn.data.EndpointGroupPolicy
+import com.noki.vpn.data.VpnProtocol
 import com.noki.vpn.data.EndpointSelectionMode
 import com.noki.vpn.data.RuntimeProfilePolicy
 import com.noki.vpn.data.VpnEndpointOption
-import com.noki.vpn.data.VpnProtocol
 import com.noki.vpn.data.VpnSessionCoordinator
 
 object EndpointOptionsStateReducer {
@@ -19,7 +19,8 @@ object EndpointOptionsStateReducer {
         result: VpnSessionCoordinator.EndpointOptionsResult,
         syncedDevices: List<BackendDevice>,
     ): Result? {
-        if (current.advancedSettings.ruRelayEnabled || current.advancedSettings.multiHop.enabled) return null
+        if (current.advancedSettings.ruRelayEnabled || current.advancedSettings.multiHop.enabled ||
+            current.advancedSettings.gamingModeEnabled) return null
         val options = result.endpointOptions
         if (options.isEmpty()) return null
 
@@ -28,17 +29,18 @@ object EndpointOptionsStateReducer {
             current = current,
             options = options,
         )
-        val nextAdvanced = if (manualMode) {
+        val nextAdvanced = if (manualMode && selectedOption != null) {
             current.advancedSettings.copy(
-                protocol = VpnProtocol.fromBackendCode(selectedOption.security),
                 manualEndpointCode = selectedOption.code,
                 manualEndpointGroupKey = EndpointGroupPolicy.groupKey(selectedOption),
             )
         } else {
             current.advancedSettings
         }
-        val nextProfile = if (manualMode) {
+        val nextProfile = if (manualMode && selectedOption != null) {
             RuntimeProfilePolicy.profileForManualEndpoint(current.profile, selectedOption)
+        } else if (manualMode) {
+            RuntimeProfilePolicy.profileAfterServerSelection(current.profile)
         } else {
             current.profile
         }
@@ -59,13 +61,17 @@ object EndpointOptionsStateReducer {
     private fun selectedOption(
         current: AppUiState,
         options: List<VpnEndpointOption>,
-    ): VpnEndpointOption {
+    ): VpnEndpointOption? {
         val currentGroupKey = EndpointGroupPolicy.resolveManualGroupKey(
             settings = current.advancedSettings,
             endpointOptions = options,
             profile = current.profile,
         )
-        return options.firstOrNull { EndpointGroupPolicy.groupKey(it) == currentGroupKey }
-            ?: options.first()
+        if (currentGroupKey.isNotBlank()) return options.firstOrNull {
+            EndpointGroupPolicy.groupKey(it) == currentGroupKey
+        }
+        return options.firstOrNull {
+            VpnProtocol.fromBackendCode(it.security, it.proxyType) == current.advancedSettings.protocol
+        }
     }
 }

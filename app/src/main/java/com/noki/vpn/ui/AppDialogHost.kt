@@ -28,10 +28,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.noki.vpn.AppDestination
 import com.noki.vpn.AppDialog
 import com.noki.vpn.AppUiState
+import com.noki.vpn.AndroidUpdateUiState
 import com.noki.vpn.MainViewModel
+import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.showsInstallAppearanceDialog
 
 @Composable
@@ -40,20 +44,29 @@ internal fun AppDialogHost(
     viewModel: MainViewModel,
     onOpenVpnSettings: () -> Unit,
 ) {
+    if (state.isAuthenticated && state.androidUpdate.requiresUpdate) {
+        MandatoryAndroidUpdateDialog(
+            updateState = state.androidUpdate,
+            language = state.personalizationSettings.language,
+            onUpdate = viewModel::installAndroidUpdate,
+        )
+        return
+    }
     if (showsInstallAppearanceDialog(state)) {
         InstallAppearanceDialog(state, viewModel)
         return
     }
     when (state.dialog) {
         AppDialog.FreeTrafficLimitReached -> LimitNoticeDialog(
-            title = tr(state.personalizationSettings.language, "Трафик закончился", "Traffic limit reached"),
+            title = tr(state.personalizationSettings.language, "Пробный трафик закончился", "Trial traffic used up"),
             message = tr(
                 state.personalizationSettings.language,
-                "Бесплатные 0.5 Gb израсходованы. Чтобы продолжить пользоваться VPN, подключите подписку.",
-                "Your free 0.5 GB is used up. Choose a subscription to keep using VPN.",
+                "Вы использовали пробный трафик. Можно остаться на Free или выбрать подписку с полным доступом.",
+                "You have used your trial traffic. You can stay on Free or choose a subscription with full access.",
             ),
-            primaryText = tr(state.personalizationSettings.language, "Выбрать тариф", "Choose plan"),
-            secondaryText = tr(state.personalizationSettings.language, "Позже", "Later"),
+            primaryText = tr(state.personalizationSettings.language, "Выбрать подписку", "Choose subscription"),
+            secondaryText = tr(state.personalizationSettings.language, "Остаться на Free", "Stay on Free"),
+            showSecondaryAction = true,
             onDismiss = viewModel::dismissDialog,
             onPrimary = viewModel::confirmDialog,
         )
@@ -111,6 +124,33 @@ internal fun AppDialogHost(
             )
         }
         else -> Unit
+    }
+}
+
+@Composable
+internal fun MandatoryAndroidUpdateDialog(
+    updateState: AndroidUpdateUiState,
+    language: AppLanguage,
+    onUpdate: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+    ) {
+        val shape = RoundedCornerShape(24.dp)
+        SecurityAndroidVersionBlock(
+            updateState = updateState,
+            language = language,
+            backdrop = null,
+            liveGlassEnabled = false,
+            modifier = Modifier.fillMaxWidth()
+                .clip(shape)
+                .background(NokiBgLighter, shape)
+                .border(BorderStroke(1.dp, NokiStroke), shape)
+                .padding(20.dp),
+            required = true,
+            onClick = onUpdate,
+        )
     }
 }
 
@@ -187,6 +227,7 @@ private fun LimitNoticeDialog(
     message: String,
     primaryText: String,
     secondaryText: String,
+    showSecondaryAction: Boolean = false,
     onDismiss: () -> Unit,
     onPrimary: () -> Unit,
 ) {
@@ -240,6 +281,13 @@ private fun LimitNoticeDialog(
                 textColor = Color(0xFFF4FBFF),
                 modifier = Modifier.fillMaxWidth(),
                 onClick = onPrimary,
+            )
+            if (showSecondaryAction) FreeTrafficDialogButton(
+                text = secondaryText,
+                background = Color(0xFF07111A),
+                textColor = Color(0xFF9FB6C5),
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onDismiss,
             )
         }
     }

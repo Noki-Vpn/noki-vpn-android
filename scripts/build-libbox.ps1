@@ -71,14 +71,14 @@ if mode=='extract':
     actual={'python':sys.version.split()[0],'zlib':zlib.ZLIB_VERSION,'zlib_runtime':zlib.ZLIB_RUNTIME_VERSION}
     assert actual==inputs['packaging'], 'Packaging runtime mismatch: expected '+str(inputs['packaging'])+', actual '+str(actual)
     assert inputs['source_commit']=='55faa763f986f4ca8a492d9b2719bc6330d2bef5'
-    assert inputs['version']=='1.14.1-extended-2.7.2-noki-users-2'
+    assert inputs['version']=='1.14.1-extended-2.7.2-nokinv-2'
     assert inputs['android_api']==26
     assert inputs['tags']==['with_gvisor','with_quic','with_wireguard','with_utls']
-    assert sha((source/'src/go.mod').read_bytes())=='a0b0b2943add52f7455433206a9d661535badb00d1dc6819a43bced46cf0300a'
-    assert sha((source/'src/go.sum').read_bytes())=='30537da5ff1ae5b2072e37450b70d395e6af2b8bf59d5c160dd52fea3418695f'
+    assert sha((source/'src/go.mod').read_bytes())=='c627b1fc34add42bd7c35cc487bea142de0ee77aa32566de365bb4be3f18e912'
+    assert sha((source/'src/go.sum').read_bytes())=='a1f7623b0a94f7295e3d75fc5c71eb54110a628bcb84e53fa8dfbb1c1d604272'
     for tree in inputs['trees']:
         root=source/tree['source']
-        members=[p for p in sorted(root.rglob('*')) if p.is_file()]
+        members=[p for p in sorted(root.rglob('*'),key=lambda p:p.relative_to(root).as_posix()) if p.is_file()]
         listing=[p.relative_to(root).as_posix()+'\0'+sha(p.read_bytes()) for p in members]
         assert len(members)==tree['files'] and sha('\n'.join(listing).encode())==tree['tree_sha256'], tree['source']
 elif mode=='downloads':
@@ -151,9 +151,9 @@ if (-not $GoRoot) {
 }
 $GoRoot = (Resolve-Path -LiteralPath $GoRoot).Path
 $go = Join-Path $GoRoot 'bin\go.exe'
-if ((Get-Sha256 $go) -ne '9b3239fee08fa24ec8280180789cd3fdcfc24f33dc19b3a1230fa6b0ae3c5aad') { throw 'Go executable checksum mismatch' }
+if ((Get-Sha256 $go) -ne '5b25a4a434c7bbba11112a94c3fa9c1502c0f377bd971705ee8e07b8e3c12620') { throw 'Go executable checksum mismatch' }
 $goVersion = (& $go version) -join "`n"
-if ($LASTEXITCODE -ne 0 -or $goVersion -ne 'go version go1.26.4 windows/amd64') { throw 'Go 1.26.4 is required' }
+if ($LASTEXITCODE -ne 0 -or $goVersion -ne 'go version go1.26.9 windows/amd64') { throw 'Go 1.26.9 is required' }
 if (-not $ModuleCache) { $ModuleCache = Join-Path $OutputDirectory 'gomodcache' }
 if (-not $BuildCache) { $BuildCache = Join-Path $OutputDirectory 'gocache' }
 $environmentNames = @('GOROOT','GOTOOLCHAIN','GOENV','GOWORK','GOPATH','GOBIN','GOMODCACHE','GOCACHE','GOTMPDIR','TMP','TEMP','GOFLAGS','GOMAXPROCS','GOSUMDB','GOPROXY','GONOSUMDB','GONOPROXY','GOPRIVATE','GODEBUG','GOOS','GOARCH','GOARM','CGO_ENABLED','JAVA_HOME','ANDROID_HOME','ANDROID_SDK_ROOT','ANDROID_NDK_HOME','PATH')
@@ -179,8 +179,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Pinned module download failed' }
         [IO.File]::WriteAllText((Join-Path $OutputDirectory 'module-downloads.json'), ($downloads -join "`n"), (New-Object Text.UTF8Encoding($false)))
         Invoke-Checked -FilePath $PythonPath -Arguments @('-I', $helperPath, 'downloads', $SourceArchive, $OutputDirectory)
-        if ((Get-Sha256 (Join-Path $sourceRoot 'src\go.mod')) -ne 'a0b0b2943add52f7455433206a9d661535badb00d1dc6819a43bced46cf0300a' -or
-            (Get-Sha256 (Join-Path $sourceRoot 'src\go.sum')) -ne '30537da5ff1ae5b2072e37450b70d395e6af2b8bf59d5c160dd52fea3418695f') { throw 'Pinned upstream module inputs changed' }
+        if ((Get-Sha256 (Join-Path $sourceRoot 'src\go.mod')) -ne 'c627b1fc34add42bd7c35cc487bea142de0ee77aa32566de365bb4be3f18e912' -or
+            (Get-Sha256 (Join-Path $sourceRoot 'src\go.sum')) -ne 'a1f7623b0a94f7295e3d75fc5c71eb54110a628bcb84e53fa8dfbb1c1d604272') { throw 'Pinned upstream module inputs changed' }
         Invoke-Checked -FilePath $go -Arguments @('mod','verify')
         $env:GOWORK = 'off'
         Invoke-Checked -FilePath $go -Arguments @('install','github.com/sagernet/gomobile/cmd/gomobile@v0.1.13')

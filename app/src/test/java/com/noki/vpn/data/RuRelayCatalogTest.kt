@@ -2,6 +2,9 @@ package com.noki.vpn.data
 
 import org.json.JSONObject
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import com.noki.vpn.vpn.measureRuRelayRtt
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -77,6 +80,47 @@ class RuRelayCatalogTest {
             if (relay.id == ru3Id) null else 28
         }
         assertEquals(listOf(RuRelayRttSample(readyId, 28)), second)
+    }
+
+    @Test
+    fun queuedStalledRelayProbesShareOneDeadlineAndKeepReadySamples() = runBlocking {
+        val catalog = RuRelayCatalog(exitId, (1..32).map { index ->
+            RuRelayCatalogEntry("relay-$index", "RU$index", "RU", true, null,
+                "192.0.2.$index", 20000 + index, pairReady = true)
+        })
+        var active = 0
+        var maximumActive = 0
+        val samples = withTimeout(4_000L) {
+            measureRuRelayRtt(catalog) { relay ->
+                active++
+                maximumActive = maxOf(maximumActive, active)
+                try {
+                    if (relay.id == "relay-1") 42 else awaitCancellation()
+                } finally {
+                    active--
+                }
+            }
+        }
+        assertEquals(listOf(RuRelayRttSample("relay-1", 42)), samples)
+        assertEquals(6, maximumActive)
+        assertEquals(0, active)
+    }
+
+    @Test
+    fun callerCancellationStopsActiveAndQueuedRelayProbes() = runBlocking {
+        val catalog = RuRelayCatalog(exitId, (1..32).map { index ->
+            RuRelayCatalogEntry("relay-$index", "RU$index", "RU", true, null,
+                "192.0.2.$index", 20000 + index, pairReady = true)
+        })
+        var active = 0
+        val samples = withTimeoutOrNull(50L) {
+            measureRuRelayRtt(catalog) {
+                active++
+                try { awaitCancellation() } finally { active-- }
+            }
+        }
+        assertEquals(null, samples)
+        assertEquals(0, active)
     }
 
     @Test

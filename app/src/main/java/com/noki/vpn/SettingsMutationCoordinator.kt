@@ -4,7 +4,7 @@ import com.noki.vpn.data.AtomicStoredSettingsStore
 import com.noki.vpn.data.RuntimeProfilePolicy
 import com.noki.vpn.data.StoredSettings
 import com.noki.vpn.data.ServerSelectionMode
-import com.noki.vpn.data.EndpointSelectionMode
+import com.noki.vpn.data.EndpointGroupPolicy
 import com.noki.vpn.data.VpnEndpointOption
 import com.noki.vpn.data.VpnProtocol
 import java.util.Locale
@@ -48,9 +48,9 @@ internal class SettingsMutationCoordinator(
                 profile = RuntimeProfilePolicy.profileAfterServerSelection(latest.profile),
                 endpointOptions = emptyList(),
                 advancedSettings = latest.advancedSettings.copy(
-                    endpointSelectionMode = EndpointSelectionMode.AUTO,
                     manualEndpointCode = "",
-                    manualEndpointGroupKey = "",
+                    manualEndpointGroupKey = EndpointGroupPolicy.resolveManualGroupKey(
+                        latest.advancedSettings, latest.endpointOptions, latest.profile),
                 ),
                 userProfile = latest.userProfile.copy(
                     selectedCountryCode = if (mode == ServerSelectionMode.AUTO) latest.userProfile.selectedCountryCode else selectedCode,
@@ -102,14 +102,16 @@ internal class SettingsMutationCoordinator(
             securitySettings = state.securitySettings,
             advancedSettings = state.advancedSettings,
             ruRelaySelectionRevision = if (advancedSettings.ruRelaySelection != state.advancedSettings.ruRelaySelection ||
-                advancedSettings.multiHop != state.advancedSettings.multiHop) {
+                advancedSettings.multiHop != state.advancedSettings.multiHop ||
+                advancedSettings.gamingModeEnabled != state.advancedSettings.gamingModeEnabled) {
                 ruRelaySelectionRevision + 1L
             } else {
                 ruRelaySelectionRevision
             },
         ).let { updated ->
             if (advancedSettings.multiHop == state.advancedSettings.multiHop &&
-                advancedSettings.ruRelaySelection == state.advancedSettings.ruRelaySelection) updated
+                advancedSettings.ruRelaySelection == state.advancedSettings.ruRelaySelection &&
+                advancedSettings.gamingModeEnabled == state.advancedSettings.gamingModeEnabled) updated
             else updated.copy(
                 profile = RuntimeProfilePolicy.profileAfterServerSelection(profile),
                 endpointOptions = emptyList(),

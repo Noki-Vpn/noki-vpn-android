@@ -1,5 +1,8 @@
 package com.noki.vpn.ui
 
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
+
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -17,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -41,14 +45,26 @@ import androidx.lifecycle.viewModelScope
 import com.styropyr0.prismal.sources.prismalGlassLayer
 import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import com.noki.vpn.AppUiState
+import com.noki.vpn.AppDestination
 import com.noki.vpn.AuthStep
 import com.noki.vpn.MainViewModel
+import com.noki.vpn.applyAndPersist
+import com.noki.vpn.applyBackendSyncResult
+import com.noki.vpn.withFreeTrafficLimitNotice
 import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.DeviceSession
 import com.noki.vpn.data.PersonalizationSettings
 import com.noki.vpn.data.ServerSelectionMode
 import com.noki.vpn.data.SettingsRepository
 import com.noki.vpn.vpn.AppVpnServiceCommandTest.InMemoryAndroidKeyStore
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.asImage
+import coil3.fetch.Fetcher
+import coil3.fetch.FetchResult
+import coil3.fetch.ImageFetchResult
+import coil3.decode.DataSource
+import coil3.request.Options
 import java.io.File
 import java.security.Provider
 import java.security.Security
@@ -73,6 +89,55 @@ import org.robolectric.annotation.GraphicsMode
 class AdaptiveScreenLayoutTest {
     @get:Rule val compose = createEmptyComposeRule()
     private lateinit var activity: ComponentActivity
+
+    @Test
+    fun mandatoryUpdateAllowsLoginAfterLogoutAndReturnsAfterAuthentication() {
+        val viewModel = layoutViewModel()
+        var state by androidx.compose.runtime.mutableStateOf(com.noki.vpn.LogoutStateReducer.reduce(
+            russianState().copy(isAuthenticated = true, androidUpdate = com.noki.vpn.AndroidUpdateUiState(isRequired = true)),
+        ))
+        render {
+            androidx.compose.material3.Text("Войти")
+            AppDialogHost(state, viewModel, onOpenVpnSettings = {})
+        }.use {
+            assertTrue(state.androidUpdate.requiresUpdate)
+            compose.onNodeWithText("Войти").assertIsDisplayed()
+            compose.onNodeWithText("Необходимо обновить приложение").assertDoesNotExist()
+            compose.runOnIdle { state = state.copy(isAuthenticated = true) }
+            compose.onNodeWithText("Необходимо обновить приложение").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun mandatoryUpdateHasOneActionIgnoresDismissalAndReusesDownloadProgress() {
+        var updates = 0
+        var updateState by androidx.compose.runtime.mutableStateOf(com.noki.vpn.AndroidUpdateUiState(
+            isRequired = true,
+            currentVersionName = "1.9.6",
+            update = com.noki.vpn.AndroidUpdateInfo(287, "1.9.7", architecture = "arm64-v8a", apkUrl = "https://example.invalid/update.apk"),
+        ))
+        render { MandatoryAndroidUpdateDialog(updateState, AppLanguage.RU) { updates++ } }.use {
+            compose.onNodeWithText("Необходимо обновить приложение").assertIsDisplayed()
+            compose.onAllNodes(hasClickAction()).assertCountEquals(1)
+            compose.runOnIdle {
+                val dialog = org.robolectric.shadows.ShadowDialog.getLatestDialog()
+                dialog.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_BACK))
+                dialog.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_BACK))
+                val outside = android.view.MotionEvent.obtain(0, 0, android.view.MotionEvent.ACTION_OUTSIDE, -1f, -1f, 0)
+                dialog.onTouchEvent(outside)
+                outside.recycle()
+                assertTrue(dialog.isShowing)
+            }
+            compose.onNodeWithText("Обновить").performClick()
+            assertEquals(1, updates)
+            compose.runOnIdle { updateState = updateState.copy(isDownloading = true) }
+            compose.onNodeWithText("Обновить").assertIsNotEnabled()
+            compose.onAllNodes(androidx.compose.ui.test.hasProgressBarRangeInfo(
+                androidx.compose.ui.semantics.ProgressBarRangeInfo.Indeterminate,
+            )).assertCountEquals(1)
+            assertEquals(1, updates)
+        }
+    }
 
     @Before
     fun provideInMemoryAndroidKeyStore() {
@@ -101,6 +166,184 @@ class AdaptiveScreenLayoutTest {
         assertEquals(expected.screenWidthDp, actual.screenWidthDp)
         assertEquals(expected.screenHeightDp, actual.screenHeightDp)
         assertEquals(expected.smallestScreenWidthDp, actual.smallestScreenWidthDp)
+    }
+
+    @Test
+    @Config(qualifiers = "w412dp-h915dp-420dpi")
+    fun plusCardUsesTheSpaceAboveAndShowsAllFeaturesAndItsFullFooter() {
+        val viewModel = layoutViewModel()
+        val footer = "Для одного человека и нескольких личных устройств"
+        val features = listOf("без ограничений трафика", "скорость до 150 Мбит/с", "3 устройства", "приватный DNS",
+            "блокировка рекламы", "Группа с неограниченным количеством устройств")
+        val plan = com.noki.vpn.data.PlanSummary("plus_yearly", "plus", "Plus", 3, null, "Без ограничений", 3000, 250,
+            headline = footer, features = features)
+        render {
+            PlansScreen(russianState().copy(plans = listOf(plan)), viewModel, liveGlassEnabled = false,
+                showBackground = false, onCheckoutVisibilityChanged = {})
+        }.use {
+            val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
+            val title = compose.onNodeWithText("Plus").fetchSemanticsNode().boundsInRoot
+            assertTrue("The card must use the empty space above it", title.top < root.height * 0.15f)
+            features.forEach { compose.onNodeWithText(it).assertIsDisplayed() }
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            compose.onNodeWithText(footer).assertIsDisplayed().performSemanticsAction(
+                androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val layout = layouts.single()
+            assertFalse(layout.hasVisualOverflow)
+            assertEquals(footer.length, layout.getLineEnd(layout.lineCount - 1, visibleEnd = true))
+            compose.onNodeWithText("Подключить").assertIsDisplayed()
+            saveImage("plus-card-full")
+        }
+    }
+
+    @Test
+    fun freeTrialHidesYoutubeToggleWhilePaidPlanKeepsIt() {
+        val viewModel = layoutViewModel()
+        val free = russianState().let { it.copy(userProfile = it.userProfile.copy(selectedPlanCodeRaw = "free-plus",
+            trialTrafficRemainingGb = 3.0), advancedSettings = it.advancedSettings.copy(youtubeNoAdsEnabled = true)) }
+        render { AdvancedSettingsScreen(free, viewModel, rememberPrismalGlassLayer(), liveGlassEnabled = false, showBackground = false) }.use {
+            compose.onNodeWithText("YouTube без рекламы").assertDoesNotExist()
+        }
+        render { AdvancedSettingsScreen(free.copy(userProfile = free.userProfile.copy(selectedPlanTier = "plus")), viewModel,
+            rememberPrismalGlassLayer(), liveGlassEnabled = false, showBackground = false) }.use {
+            compose.onNodeWithText("YouTube без рекламы").assertExists()
+        }
+    }
+
+    @Test
+    fun freePlanDowngradeDisablesCachedYoutubeAndRestartsOnlyOnceFromStats() {
+        val application = RuntimeEnvironment.getApplication()
+        val viewModel = layoutViewModel()
+        val runtime = org.robolectric.util.ReflectionHelpers.getField<com.noki.vpn.AppUiRuntime>(viewModel, "runtime")
+        runtime.uiState = russianState().let { it.copy(isAuthenticated = true,
+            connectionState = com.noki.vpn.data.VpnConnectionState.CONNECTED,
+            advancedSettings = it.advancedSettings.copy(youtubeNoAdsEnabled = true),
+            userProfile = it.userProfile.copy(backendUserId = "downgraded", selectedPlanTier = "plus")) }
+        val paid = runtime.uiState
+        val free = paid.userProfile.copy(selectedPlanTier = "free", trialTrafficRemainingGb = 3.0)
+        val result = com.noki.vpn.BackendSyncResult(
+            com.noki.vpn.BackendSyncPatch(free, emptyList(), emptyList(), emptyList(), paid.profile, "owner", paid.androidUpdate),
+            emptyList(), emptyList(), emptyList())
+        val services = org.robolectric.Shadows.shadowOf(application)
+        while (services.nextStartedService != null) Unit
+        runtime.applyBackendSyncResult(result, com.noki.vpn.BackendRefreshTrigger.Stats, false, 0L, false)
+        assertEquals(com.noki.vpn.vpn.AppVpnService.restartIntent(application).action, services.nextStartedService?.action)
+        assertFalse(runtime.repository.load().advancedSettings.youtubeNoAdsEnabled)
+        assertEquals("free", runtime.repository.load().userProfile.selectedPlanTier)
+        runtime.applyBackendSyncResult(result, com.noki.vpn.BackendRefreshTrigger.Stats, false, 0L, false)
+        assertFalse(runtime.uiState.advancedSettings.youtubeNoAdsEnabled)
+        assertEquals(null, services.nextStartedService)
+    }
+
+    @Test
+    fun trialExhaustionFromStatsNotifiesOncePerAccountAndKeepsFreeVpn() {
+        val application = RuntimeEnvironment.getApplication()
+        org.robolectric.Shadows.shadowOf(application).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+        val notifications = application.getSystemService(android.app.NotificationManager::class.java)
+        val viewModel = layoutViewModel()
+        val runtime = org.robolectric.util.ReflectionHelpers.getField<com.noki.vpn.AppUiRuntime>(viewModel, "runtime")
+        val connected = russianState().copy(
+            isAuthenticated = true, isReady = true, installOnboardingStep = com.noki.vpn.data.InstallOnboardingStep.COMPLETE,
+            screenStack = listOf(AppDestination.HOME),
+            connectionState = com.noki.vpn.data.VpnConnectionState.CONNECTED, connectedAtMillis = 123L,
+        )
+        val exhausted = connected.userProfile.copy(backendUserId = "trial-account", selectedPlanCodeRaw = "free-plus",
+            trialTrafficRemainingGb = 0.0, freeLocationsOnly = true)
+        runtime.uiState = connected.copy(userProfile = exhausted.copy(trialTrafficRemainingGb = 1.0))
+        val services = org.robolectric.Shadows.shadowOf(application)
+        while (services.nextStartedService != null) Unit
+        val result = com.noki.vpn.BackendSyncResult(
+            com.noki.vpn.BackendSyncPatch(exhausted, emptyList(), emptyList(), emptyList(), connected.profile,
+                "owner", connected.androidUpdate), emptyList(), emptyList(), emptyList(),
+        )
+        runtime.applyBackendSyncResult(result, com.noki.vpn.BackendRefreshTrigger.Stats, false, 0L, false)
+        assertEquals(com.noki.vpn.AppDialog.FreeTrafficLimitReached, runtime.uiState.dialog)
+        assertEquals(com.noki.vpn.data.VpnConnectionState.CONNECTED, runtime.uiState.connectionState)
+        assertEquals(123L, runtime.uiState.connectedAtMillis)
+        assertEquals(null, services.nextStartedService)
+        val notice = org.robolectric.Shadows.shadowOf(notifications).allNotifications.single()
+        assertEquals("Пробный трафик закончился", notice.extras.getString(android.app.Notification.EXTRA_TITLE))
+        assertEquals("Вы использовали пробный трафик. Можно остаться на Free или выбрать подписку с полным доступом.",
+            notice.extras.getString(android.app.Notification.EXTRA_TEXT))
+        render { AppDialogHost(viewModel.uiState, viewModel, {}) }.use {
+            compose.onNodeWithText("Остаться на Free").performClick()
+            assertEquals(null, runtime.uiState.dialog)
+        }
+        notifications.cancelAll()
+        val recreated = layoutViewModel()
+        val restored = org.robolectric.util.ReflectionHelpers.getField<com.noki.vpn.AppUiRuntime>(recreated, "runtime")
+        restored.applyAndPersist(connected.copy(userProfile = exhausted))
+        assertEquals(null, restored.uiState.dialog)
+        assertTrue(org.robolectric.Shadows.shadowOf(notifications).allNotifications.isEmpty())
+        restored.applyAndPersist(connected.copy(userProfile = exhausted.copy(backendUserId = "another-trial-account")))
+        assertEquals(com.noki.vpn.AppDialog.FreeTrafficLimitReached, restored.uiState.dialog)
+        recreated.confirmDialog()
+        assertEquals(AppDestination.PLANS, restored.uiState.currentDestination)
+    }
+
+    @Test
+    fun trialNoticeIgnoresPaidSharedQuotaAndMissingTrialDataAndRespectsNotificationPermission() {
+        val application = RuntimeEnvironment.getApplication()
+        org.robolectric.Shadows.shadowOf(application).denyPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+        val viewModel = layoutViewModel()
+        val runtime = org.robolectric.util.ReflectionHelpers.getField<com.noki.vpn.AppUiRuntime>(viewModel, "runtime")
+        val base = russianState().copy(isAuthenticated = true)
+        for (profile in listOf(
+            base.userProfile.copy(backendUserId = "paid", selectedPlanCodeRaw = "plus-monthly", selectedPlanTier = "plus",
+                trialTrafficRemainingGb = 0.0, sharedFreeOnly = true, freeLocationsOnly = true),
+            base.userProfile.copy(backendUserId = "unknown", trialTrafficRemainingGb = null, freeLocationsOnly = true),
+            base.userProfile.copy(backendUserId = "remaining", trialTrafficRemainingGb = 1.0),
+            base.userProfile.copy(backendUserId = "rounded", trialTrafficRemainingGb = 0.0, freeLocationsOnly = false),
+        )) assertEquals(null, runtime.withFreeTrafficLimitNotice(base.copy(userProfile = profile)).dialog)
+        val exhausted = base.copy(userProfile = base.userProfile.copy(backendUserId = "no-permission",
+            trialTrafficRemainingGb = 0.0, freeLocationsOnly = true))
+        assertEquals(com.noki.vpn.AppDialog.FreeTrafficLimitReached, runtime.withFreeTrafficLimitNotice(exhausted).dialog)
+        val notifications = application.getSystemService(android.app.NotificationManager::class.java)
+        assertTrue(org.robolectric.Shadows.shadowOf(notifications).allNotifications.isEmpty())
+    }
+
+    @Test
+    fun homeRefreshUpdatesTheServerSheetAndHomeFromTheSameProbeEvenDuringBackendRefresh() = kotlinx.coroutines.runBlocking {
+        val application = RuntimeEnvironment.getApplication()
+        val viewModel = layoutViewModel()
+        val runtime = org.robolectric.util.ReflectionHelpers.getField<com.noki.vpn.AppUiRuntime>(viewModel, "runtime")
+        val workers = kotlinx.coroutines.SupervisorJob()
+        org.robolectric.util.ReflectionHelpers.setField(runtime, "scope", kotlinx.coroutines.CoroutineScope(coroutineContext + workers))
+        runtime.authSessionCoordinator.restore(runtime.repository.load().copy(backendAccessToken = "test-token"))
+        val delay = java.util.concurrent.atomic.AtomicInteger(39)
+        val probes = java.util.concurrent.atomic.AtomicInteger()
+        org.robolectric.util.ReflectionHelpers.setField(runtime, "clientLatencySampler", com.noki.vpn.data.ClientLatencySampler(
+            tcpConnect = { _, _, _ -> probes.incrementAndGet(); delay.get() },
+        ))
+        val shadow = org.robolectric.Shadows.shadowOf(application)
+        while (shadow.nextStartedService != null) Unit
+        val node = com.noki.vpn.data.VpnServer("active", "Active", "LV", "lv2", "probe.example", 443, true)
+        runtime.uiState = russianState().let { it.copy(
+            advancedSettings = it.advancedSettings.copy(ruRelayEnabled = false),
+            connectionState = com.noki.vpn.data.VpnConnectionState.CONNECTED,
+            connectionLatencyMs = 999,
+            locations = listOf(com.noki.vpn.data.ServerLocation("lv2", "LV", "Latvia", "Riga", node.host,
+                isOnline = true, servers = listOf(node))),
+            userProfile = it.userProfile.copy(selectedServerCode = "lv2"),
+            isRefreshingData = true,
+        ) }
+        try {
+            for (sample in listOf(39, 75)) {
+                delay.set(sample)
+                refreshVisibleScreenData(AppDestination.HOME,
+                    { latency -> viewModel.refreshAllData(refreshClientLatency = latency) }, {})
+                kotlinx.coroutines.withTimeout(5_000) {
+                    while (runtime.uiState.locations.single().servers.single().latencyMs != sample) kotlinx.coroutines.yield()
+                }
+                val row = serverMenuLocations(runtime.uiState.locations).single().servers.single()
+                assertEquals(sample, row.latencyMs)
+                assertEquals(row.latencyMs.toString(), currentMetrics(runtime.uiState, HomeDeviceTrafficSnapshot()).latency)
+                assertEquals(null, shadow.nextStartedService)
+            }
+            assertEquals(6, probes.get())
+        } finally {
+            workers.cancel()
+        }
     }
 
     @Test
@@ -294,6 +537,7 @@ class AdaptiveScreenLayoutTest {
     fun widePersonalizationUsesAvailableWidth() = checkSettingsWidth("Персонализация", "personalization-wide") {
         PersonalizationScreen(
             state = russianState(), onLanguageChanged = {}, onGlassModeChanged = {},
+            onVpnStatusNotificationChanged = {},
             onPickAvatarClicked = {}, onDeleteAvatarClicked = {}, onAvatarEditDenied = {},
             sharedBackdrop = rememberPrismalGlassLayer(), liveGlassEnabled = false, showBackground = false,
         )
@@ -302,6 +546,133 @@ class AdaptiveScreenLayoutTest {
     @Test
     fun wideSupportUsesAvailableWidth() = checkSettingsWidth("Поддержка", "support-wide") {
         SupportScreen(russianState(), rememberPrismalGlassLayer(), liveGlassEnabled = false, showBackground = false)
+    }
+
+    @Test
+    @Config(qualifiers = "w412dp-h915dp-420dpi")
+    fun supportOffersExactlyThreeChannelsAndOpensNativeChat() {
+        var opened = false
+        render {
+            SupportScreen(russianState().copy(isAuthenticated = true), rememberPrismalGlassLayer(),
+                liveGlassEnabled = false, showBackground = false, onOpenChat = { opened = true })
+        }.use {
+            compose.onNodeWithText("Онлайн-чат").assertIsDisplayed()
+            compose.onNodeWithText("@NokiSupport").assertIsDisplayed()
+            compose.onNodeWithText("noki_support@ykino.tech").assertIsDisplayed()
+            compose.onNodeWithText("Поддержка").assertIsDisplayed()
+            compose.onNodeWithText("Давайте поможем").assertDoesNotExist()
+            compose.onNodeWithText("Напишите прямо здесь. История — в вашем аккаунте.").assertDoesNotExist()
+            assertEquals(3, compose.onAllNodes(hasClickAction()).fetchSemanticsNodes().size)
+            val first = compose.onNodeWithText("Онлайн-чат").fetchSemanticsNode().boundsInRoot
+            val last = compose.onNodeWithText("noki_support@ykino.tech").fetchSemanticsNode().boundsInRoot
+            val screen = compose.onRoot().fetchSemanticsNode().boundsInRoot
+            assertTrue((first.top + last.bottom) / 2f in screen.height * 0.4f..screen.height * 0.6f)
+            compose.onNodeWithText("Онлайн-чат").performClick()
+            assertTrue(opened)
+            saveImage("support-phone")
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "w412dp-h915dp-420dpi")
+    fun supportChatShowsHistoryComposerAndRetryWithoutOperatorPresenceClaim() {
+        var sent = false
+        var retried = false
+        val messages = listOf(
+            com.noki.vpn.data.BackendSupportMessage(1, "Не удаётся подключиться", "incoming", 1790000000),
+            com.noki.vpn.data.BackendSupportMessage(2, "Здравствуйте! Уточните, пожалуйста, что происходит при подключении.", "outgoing", 1790000060),
+            com.noki.vpn.data.BackendSupportMessage(3, "Да", "outgoing", 1790000120),
+        )
+        render {
+            SupportScreen(russianState().copy(isAuthenticated = true,
+                supportChat = com.noki.vpn.SupportChatState(isOpen = true, hasLoaded = true,
+                    messages = messages, draft = "Подключение останавливается", error = "Нет соединения с сервером")),
+                rememberPrismalGlassLayer(), liveGlassEnabled = false, showBackground = false,
+                onRefreshChat = { if (!it) retried = true }, onSendMessage = { sent = true })
+        }.use {
+            compose.onNodeWithText("Поддержка Noki").assertIsDisplayed()
+            compose.onNodeWithText(messages.last().content).assertIsDisplayed()
+            compose.onNodeWithText("Подключение останавливается").assertIsDisplayed()
+            compose.onNodeWithText("Повторить").performClick()
+            assertTrue(retried)
+            compose.onNodeWithContentDescription("Отправить сообщение").performClick()
+            assertTrue(sent)
+            compose.onNodeWithText("Онлайн").assertDoesNotExist()
+            compose.onNodeWithText("Команда Noki").assertDoesNotExist()
+            compose.onNodeWithText("История сохранена в аккаунте").assertDoesNotExist()
+            assertEquals(2, compose.onAllNodesWithText("Noki").fetchSemanticsNodes().size)
+            saveImage("support-chat-phone")
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "w412dp-h915dp-420dpi")
+    fun supportChatOpensAtLatestMessageAndCopyMenuDismisses() {
+        val messages = (1L..40L).map { com.noki.vpn.data.BackendSupportMessage(it, "Message $it", "incoming", 1790000000 + it,
+            status = if (it == 40L) "read" else "sent") }
+        render {
+            SupportScreen(russianState().copy(isAuthenticated = true,
+                supportChat = com.noki.vpn.SupportChatState(isOpen = true, hasLoaded = true, messages = messages)),
+                rememberPrismalGlassLayer(), liveGlassEnabled = false, showBackground = false)
+        }.use {
+            compose.onNodeWithText("Message 40").assertIsDisplayed()
+            compose.onNodeWithText("Message 1").assertDoesNotExist()
+            compose.onNodeWithContentDescription("Прочитано поддержкой").assertIsDisplayed()
+            compose.onNodeWithText("Message 40").performTouchInput { longClick() }
+            compose.onNodeWithText("Копировать").assertIsDisplayed().performClick()
+            compose.onNodeWithText("Копировать").assertDoesNotExist()
+            saveImage("support-chat-compact-latest")
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "w412dp-h915dp-420dpi", shadows = [com.noki.vpn.SupportFileProviderFixture::class])
+    @OptIn(coil3.annotation.DelicateCoilApi::class)
+    fun supportChatDisplaysMediaAndFilesAndAllowsSendingWithoutCaption() {
+        var picked = false
+        var sent = false
+        var removed = false
+        var opened: Long? = null
+        var saved: Long? = null
+        val image = com.noki.vpn.SupportChatFiles.destination(RuntimeEnvironment.getApplication())
+        val bitmap = android.graphics.Bitmap.createBitmap(180, 120, android.graphics.Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(android.graphics.Color.rgb(58, 112, 103))
+        image.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        // Test-only fetcher bypasses Android/Linux descriptor paths on the Windows Robolectric host.
+        SingletonImageLoader.setUnsafe {
+            ImageLoader.Builder(RuntimeEnvironment.getApplication()).components {
+                add(object : Fetcher.Factory<coil3.Uri> {
+                    override fun create(data: coil3.Uri, options: Options, imageLoader: ImageLoader): Fetcher? =
+                        if (data.scheme != "content") null else object : Fetcher {
+                            override suspend fun fetch(): FetchResult = ImageFetchResult(bitmap.asImage(), false, DataSource.DISK)
+                        }
+                })
+            }.build()
+        }
+        val photo = com.noki.vpn.data.BackendSupportAttachment(10, 2, "image", "photo.png", image.length(), "image/png")
+        val file = com.noki.vpn.data.BackendSupportAttachment(11, 3, "file", "instructions.pdf", 2048, "application/pdf")
+        val messages = listOf(com.noki.vpn.data.BackendSupportMessage(2, "Проверьте настройки", "outgoing", 1790000060, listOf(photo)),
+            com.noki.vpn.data.BackendSupportMessage(3, "", "incoming", 1790000120, listOf(file)))
+        render {
+            SupportScreen(russianState().copy(isAuthenticated = true, supportChat = com.noki.vpn.SupportChatState(isOpen = true,
+                hasLoaded = true, messages = messages, attachmentFiles = mapOf(10L to image.path),
+                pendingAttachments = listOf(com.noki.vpn.data.SupportAttachmentDraft(image.path, "diagnostic.txt", "text/plain", 0)))),
+                rememberPrismalGlassLayer(), liveGlassEnabled = false, showBackground = false,
+                onPickAttachment = { picked = true }, onRemoveAttachment = { removed = true }, onSendMessage = { sent = true },
+                onOpenAttachment = { opened = it.id }, onSaveAttachment = { saved = it.id })
+        }.use {
+            compose.onNodeWithText("instructions.pdf").assertIsDisplayed()
+            saveImage("support-chat-media-phone")
+            compose.onNodeWithContentDescription("photo.png").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Сохранить instructions.pdf").performClick()
+            assertEquals(11L, saved)
+            compose.onAllNodesWithText("Открыть")[0].performClick()
+            assertEquals(11L, opened)
+            compose.onNodeWithContentDescription("Прикрепить медиа или файл").performClick(); assertTrue(picked)
+            compose.onNodeWithContentDescription("Отправить сообщение").performClick(); assertTrue(sent)
+            compose.onNodeWithContentDescription("Убрать вложение").performClick(); assertTrue(removed)
+            saveImage("support-chat-media-phone")
+        }
     }
 
     @Test
@@ -733,11 +1104,13 @@ class AdaptiveScreenLayoutTest {
         saveImage(imageName)
     }
 
-    private fun renderHome(): AutoCloseable {
+    private fun renderHome(state: AppUiState = AppUiState(
+        personalizationSettings = PersonalizationSettings(language = AppLanguage.RU),
+    )): AutoCloseable {
         val viewModel = layoutViewModel()
         return render {
             HomeScreen(
-                state = AppUiState(personalizationSettings = PersonalizationSettings(language = AppLanguage.RU)),
+                state = state,
                 viewModel = viewModel, onConnectClicked = {}, onDisconnectClicked = {},
                 sharedBackdrop = rememberPrismalGlassLayer(), liveGlassEnabled = false,
                 showBackground = false,
@@ -880,6 +1253,34 @@ class AdaptiveScreenLayoutTest {
     private fun layoutViewModel() = MainViewModel(RuntimeEnvironment.getApplication(), SavedStateHandle()).also {
         // Layout uses the supplied state; keep account bootstrap/network work out of this UI fixture.
         it.viewModelScope.cancel()
+    }
+
+    @Test
+    fun automaticServerCardUsesItsOwnIconOnlyWithoutConnection() {
+        for (ruRelay in listOf(false, true)) {
+            val base = russianState().let { it.copy(
+                advancedSettings = it.advancedSettings.copy(ruRelayEnabled = ruRelay),
+                locations = listOf(com.noki.vpn.data.ServerLocation("lv", "LV", "Латвия", "Riga", "lv.example", isOnline = true)),
+                ruForeignNodes = listOf(com.noki.vpn.data.RuForeignNode("lv2", "Латвия 2", "LV")),
+                userProfile = it.userProfile.copy(serverSelectionMode = ServerSelectionMode.AUTO,
+                    actualCountryCode = "LV", selectedServerCode = if (ruRelay) "lv2" else "lv"),
+            ) }
+            for (connected in listOf(false, true)) {
+                val state = base.copy(connectionState = if (connected) com.noki.vpn.data.VpnConnectionState.CONNECTED
+                    else com.noki.vpn.data.VpnConnectionState.DISCONNECTED)
+                renderHome(state).use {
+                    compose.onNodeWithText("Автовыбор").assertIsDisplayed()
+                    if (connected) {
+                        compose.onNodeWithContentDescription("Автовыбор").assertDoesNotExist()
+                        compose.onNodeWithText(if (ruRelay) "RU-реле → Латвия 2" else "Латвия").assertIsDisplayed()
+                    } else {
+                        compose.onNodeWithContentDescription("Автовыбор").assertIsDisplayed()
+                        compose.onNodeWithText("Латвия", substring = true).assertDoesNotExist()
+                    }
+                    saveImage("automatic-server-card-$ruRelay-$connected")
+                }
+            }
+        }
     }
 
     @Test

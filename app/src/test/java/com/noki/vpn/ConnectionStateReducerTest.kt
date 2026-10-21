@@ -1,7 +1,6 @@
 package com.noki.vpn
 
 import com.noki.vpn.data.AppLanguage
-import com.noki.vpn.data.BackendException
 import com.noki.vpn.data.PersonalizationSettings
 import com.noki.vpn.data.UserProfile
 import com.noki.vpn.data.VpnConnectionState
@@ -36,17 +35,8 @@ class ConnectionStateReducerTest {
     }
 
     @Test
-    fun requiredClientUpdateExplainsHowToConnectWithoutLosingDiagnosticCode() {
-        for ((language, labels) in listOf(
-            AppLanguage.RU to Pair(
-                "Обновите Noki для подключения",
-                "Обновите Noki для подключения. Обновление доступно в «Безопасности».",
-            ),
-            AppLanguage.EN to Pair(
-                "Update Noki to connect",
-                "Update Noki to connect. The update is available in Security.",
-            ),
-        )) {
+    fun requiredClientUpdateBlocksWithModalWithoutInlineErrorOrLostDiagnosticCode() {
+        for (language in listOf(AppLanguage.RU, AppLanguage.EN)) {
             val result = ConnectionStateReducer.reduce(
                 current = AppUiState(
                     personalizationSettings = PersonalizationSettings(language = language),
@@ -58,12 +48,10 @@ class ConnectionStateReducerTest {
                 connectedAtMillis = null, nowMillis = 1L, dailyStats = emptyList(), endpointRating = "",
             ) as ConnectionStateReducer.Transition.Normal
 
-            assertEquals(labels.first, result.state.connectionReason)
-            assertEquals(labels.second, result.state.inlineMessage)
-            assertEquals(
-                labels.second,
-                AppErrorMapper.readableNetworkError(language, BackendException("client_update_required", 426)),
-            )
+            assertEquals("", result.state.connectionReason)
+            assertEquals(null, result.state.inlineMessage)
+            assertTrue(result.state.androidUpdate.requiresUpdate)
+            assertEquals(null, result.state.androidUpdate.update)
             assertEquals(null, result.state.connectedAtMillis)
             assertEquals(ConnectionStateReducer.RuntimeAction.Clear, result.runtimeAction)
             assertEquals("client_update_required", result.logAction?.errorType)

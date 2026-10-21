@@ -16,12 +16,72 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VpnConfigFactoryTest {
+    @Test fun nokinvUsesDeviceCredentialAndOneAutomaticTransport() {
+        val token = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 7 })
+        val profile = VlessProfile(proxyType = "nokinv", transport = "nokinv", security = "tls",
+            host = "node.example", port = "10443", serverName = "node.example", uuid = "",
+            nokinvToken = token, nokinvCredentialGeneration = 3)
+        val settings = AdvancedSettings(protocol = com.noki.vpn.data.VpnProtocol.NOKINV)
+        assertTrue(com.noki.vpn.data.VpnProfileValidator.isUsable(profile, settings))
+        val outbound = JSONObject(VpnConfigFactory.buildProbe(profile)).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("nokinv", outbound.getString("type"))
+        assertEquals(token, outbound.getString("token"))
+        assertEquals(3, outbound.getInt("credential_generation"))
+        assertEquals("auto", outbound.getString("transport"))
+        assertEquals("balanced", outbound.getString("mode"))
+        assertEquals("stream", outbound.getString("tcp_exchange"))
+        assertEquals("off", outbound.getString("shaping"))
+        assertEquals("coherent", outbound.getString("web_profile"))
+        assertEquals("/tunnel", outbound.getString("path"))
+        assertEquals("/custom", JSONObject(VpnConfigFactory.buildProbe(profile.copy(path = "/custom")))
+            .getJSONArray("outbounds").getJSONObject(0).getString("path"))
+        assertFalse(outbound.has("uuid"))
+        assertFalse(com.noki.vpn.data.VpnProfileValidator.isUsable(profile.copy(nokinvToken = ""), settings))
+        assertTrue(com.noki.vpn.data.VpnProfileValidator.isUsable(profile, AdvancedSettings(ruRelayEnabled = false)))
+    }
     private val geosite = GeositeAssetTest.asset(
         "CATEGORY-RU" to listOf(GeositeAssetTest.domain(2, "russian.example")),
         "SAMPLE" to listOf(GeositeAssetTest.domain(3, "sample.example")),
         "YOUTUBE" to listOf(GeositeAssetTest.domain(2, "youtube.com"),
             GeositeAssetTest.domain(2, "googlevideo.com"), GeositeAssetTest.domain(3, "youtubei.googleapis.com")),
     )
+
+    @Test
+    fun gamingUsesOnlyNokiNvAndPassesTheNativeGamingMode() {
+        val profile = VlessProfile(proxyType = "nokinv", transport = "nokinv", security = "tls",
+            host = "node.example", port = "10443", serverName = "node.example",
+            nokinvToken = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 7 }),
+            nokinvCredentialGeneration = 1)
+        val settings = AdvancedSettings(gamingModeEnabled = true)
+        val outbound = JSONObject(VpnConfigFactory.build(profile, settings, geosite))
+            .getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("nokinv", outbound.getString("type"))
+        assertEquals("gaming", outbound.getString("mode"))
+        assertThrows(IllegalArgumentException::class.java) {
+            VpnConfigFactory.build(profile(), settings, geosite)
+        }
+    }
+
+    @Test
+    fun nokinvDnsUsesTheExitThroughTheTunnelAndKeepsTheLocalTunDnsAddress() {
+        for (host in listOf("93.184.216.34", "node.example")) {
+            val profile = VlessProfile(proxyType = "nokinv", transport = "nokinv", security = "tls",
+                host = host, port = "10443", serverName = "node.example", uuid = "",
+                nokinvToken = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 7 }),
+                nokinvCredentialGeneration = 1)
+            val config = JSONObject(VpnConfigFactory.build(profile,
+                AdvancedSettings(protocol = com.noki.vpn.data.VpnProtocol.NOKINV), geosite))
+            val dns = config.getJSONObject("dns")
+            val nodeDns = dns.getJSONArray("servers").getJSONObject(0)
+            assertEquals(host, nodeDns.getString("server"))
+            assertEquals(53, nodeDns.getInt("server_port"))
+            assertEquals("tcp", nodeDns.getString("type"))
+            assertEquals("proxy", nodeDns.getString("detour"))
+            assertEquals("noki-node-dns", dns.getString("final"))
+            assertEquals("198.18.0.1", config.getJSONArray("inbounds").getJSONObject(0)
+                .getJSONArray("dns_address").getString(0))
+        }
+    }
 
     @Test
     fun emittedConfigurationUsesNativeRouteAndInboundContracts() {
@@ -112,6 +172,8 @@ class VpnConfigFactoryTest {
         assertEquals("and", rules[3].getString("mode"))
         assertEquals("reject", rules[3].getString("action"))
         val constraints = rules[3].getJSONArray("rules")
+        assertEquals("[\"cloudflare-dns.com\",\"one.one.one.one\"]",
+            constraints.getJSONObject(0).getJSONArray("domain_suffix").toString())
         assertEquals("[443]", constraints.getJSONObject(1).getJSONArray("port").toString())
         assertEquals("[\"tcp\"]", constraints.getJSONObject(2).getJSONArray("network").toString())
         val dns = config.getJSONObject("dns")
@@ -180,6 +242,23 @@ class VpnConfigFactoryTest {
         assertEquals("1.1.1.1", dns.getJSONObject(0).getString("server"))
         assertEquals("local", dns.getJSONObject(1).getString("type"))
         assertFalse(config.toString().contains("8.8.8.8"))
+    }
+
+    @Test
+    fun wireGuardTunDnsDoesNotAdvertiseItsRemotePublicResolver() {
+        val wg = BackendRuWireGuardConfig("203.0.113.10:51820", java.util.Base64.getEncoder().encodeToString(ByteArray(32) { 2 }),
+            "10.240.1.2/32", listOf("1.1.1.1", "8.8.8.8"), 1280, listOf("0.0.0.0/0"))
+        val config = JSONObject(VpnConfigFactory.buildWireGuard(wg, ByteArray(32) { 1 },
+            AdvancedSettings(ruRelayEnabled = true), geosite))
+
+        val inbound = config.getJSONArray("inbounds").getJSONObject(0)
+        assertEquals("hijack", inbound.getString("dns_mode"))
+        assertEquals("[\"198.18.0.1\"]", inbound.getJSONArray("dns_address").toString())
+        val resolver = config.getJSONObject("dns").getJSONArray("servers").getJSONObject(0)
+        assertEquals("tcp", resolver.getString("type"))
+        assertEquals("1.1.1.1", resolver.getString("server"))
+        assertEquals(53, resolver.getInt("server_port"))
+        assertEquals("proxy", resolver.getString("detour"))
     }
 
     @Test

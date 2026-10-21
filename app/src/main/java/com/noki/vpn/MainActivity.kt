@@ -90,6 +90,16 @@ class MainActivity : ComponentActivity() {
         viewModel.beginAvatarCrop(uri)
     }
 
+    private val supportAttachmentPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        viewModel.selectSupportAttachments(uris.map { it.toString() })
+    }
+    private val supportMediaPicker = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { uris ->
+        viewModel.selectSupportAttachments(uris.map { it.toString() })
+    }
+    private val supportAttachmentSavePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        viewModel.saveSupportAttachmentTo(result.data?.data?.toString().takeIf { result.resultCode == Activity.RESULT_OK })
+    }
+
     private val vpnStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(
             context: Context?,
@@ -112,6 +122,7 @@ class MainActivity : ComponentActivity() {
                 connectedAtMillis = connectedAtMillis.takeIf { it > 0L },
                 runtimeMode = runtimeMode,
                 latencyMs = intent.getIntExtra(AppVpnService.EXTRA_LATENCY_MS, 0).takeIf { it > 0 },
+                nokiNvCarrier = intent.getStringExtra(AppVpnService.EXTRA_NOKINV_CARRIER).orEmpty(),
             )
         }
     }
@@ -174,6 +185,23 @@ class MainActivity : ComponentActivity() {
                         avatarPickerLauncher.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                         )
+                    },
+                    onPickSupportAttachmentClicked = {
+                        android.app.AlertDialog.Builder(this)
+                            .setItems(if (viewModel.uiState.personalizationSettings.language == com.noki.vpn.data.AppLanguage.RU)
+                                arrayOf("Фото и видео", "Файлы") else arrayOf("Photos and videos", "Files")) { _, index ->
+                                if (viewModel.beginSupportAttachmentPick()) {
+                                    if (index == 0) supportMediaPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                                    else supportAttachmentPicker.launch(arrayOf("*/*"))
+                                }
+                            }.show()
+                    },
+                    onSaveSupportAttachment = { request ->
+                        supportAttachmentSavePicker.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = request.mime
+                            putExtra(Intent.EXTRA_TITLE, SupportChatFiles.suggestedName(request.name))
+                        })
                     },
                 )
             }
@@ -412,15 +440,9 @@ class MainActivity : ComponentActivity() {
         val nonce = intent.getStringExtra(EXTRA_APP_NOTIFICATION_ACTION_NONCE)?.trim()
         intent.removeExtra(EXTRA_APP_NOTIFICATION_ACTION)
         intent.removeExtra(EXTRA_APP_NOTIFICATION_ACTION_NONCE)
-        val accepted = AppNotificationActionNonceStore.validateAndConsume(this, action, nonce) ?: return
         lifecycleScope.launch {
             viewModel.awaitReady()
-            when (accepted) {
-                AppNotificationAction.OpenSecurityUpdate -> {
-                    viewModel.markAndroidUpdateAvailable()
-                    viewModel.openScreen(AppDestination.SECURITY)
-                }
-            }
+            viewModel.handleAppNotificationAction(action, nonce)
         }
     }
 
@@ -482,6 +504,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_APP_NOTIFICATION_ACTION = "noki_app_notification_action"
         const val EXTRA_APP_NOTIFICATION_ACTION_NONCE = "noki_app_notification_action_nonce"
         const val APP_NOTIFICATION_ACTION_OPEN_SECURITY_UPDATE = "open_security_update"
+        const val APP_NOTIFICATION_ACTION_OPEN_SUPPORT_CHAT = "open_support_chat"
         private const val KEY_STARTUP_NOTIFICATION_PERMISSION_REQUESTED =
             "startup_notification_permission_requested"
         private const val KEY_STARTUP_NOTIFICATION_PERMISSION_PENDING =
