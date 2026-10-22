@@ -12,6 +12,10 @@ import com.noki.vpn.data.VpnStartCoordinator
 import java.net.SocketTimeoutException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -39,13 +43,54 @@ class VpnConnectionPreparerTest {
         suspend fun prepare() = coordinator.prepareInAdvance("prepared-test", settings, emptyList())
         suspend fun connect(input: StoredSettings = settings, token: String = "prepared-test") = coordinator.resolveStart(token, input, emptyList(), false)
         prepare(); prepare(); assertEquals(1, calls)
-        assertTrue(connect() is VpnStartCoordinator.StartDecision.FreshSession); assertEquals(1, calls)
+        val refreshedUi = settings.copy(
+            userProfile = settings.userProfile.copy(trafficUsedGb = 12.0, sharedTrafficUsedGb = 1.0,
+                trialTrafficRemainingGb = 2.0, avatarUri = "https://example.invalid/avatar"),
+            personalizationSettings = settings.personalizationSettings.copy(vpnStatusNotificationEnabled = false),
+        )
+        val ready = connect(refreshedUi) as VpnStartCoordinator.StartDecision.FreshSession
+        assertEquals(refreshedUi.userProfile.trafficUsedGb, ready.result.settings.userProfile.trafficUsedGb)
+        assertEquals(refreshedUi.personalizationSettings, ready.result.settings.personalizationSettings)
+        assertEquals(1, calls)
         connect(); assertEquals(2, calls)
         prepare(); clock += 60_001; connect(); assertEquals(4, calls)
         prepare(); network = "mobile/prepared-test"; connect(); assertEquals(6, calls)
         prepare(); connect(token = "another-account-token"); assertEquals(8, calls)
         prepare(); connect(settings.copy(advancedSettings = settings.advancedSettings.copy(killSwitchEnabled = true)))
         assertEquals(9, calls)
+    }
+
+    @Test fun `connect awaits matching in flight preparation once instead of restarting the challenge`() = runBlocking {
+        val settings = cachedSettings().copy(isAuthenticated = true, backendAccessToken = "in-flight-test")
+        val release = CompletableDeferred<Unit>()
+        var calls = 0
+        val coordinator = VpnStartCoordinator(VpnStartCoordinator.VpnSessionPreparer { _, input, _, _ ->
+            calls++
+            release.await()
+            val session = com.noki.vpn.data.BackendVpnSession(
+                true, "auto", "lv", "Latvia", "lv-1", "vpn.example", 443, "vpn.example", "vless", "xhttp", "stream-up",
+                "reality", null, null, "/noki", null, false, false, false, "public", "abcd", "test",
+                input.profile.uuid, null, null, emptyList())
+            val device = com.noki.vpn.data.BackendDevice(id = "device", deviceKey = "key", deviceName = "Phone",
+                platform = "android", accessRole = "owner", isActive = true, lastSeenAt = null)
+            com.noki.vpn.data.VpnSessionCoordinator.Result(input, session, device,
+                com.noki.vpn.data.EndpointSelector.EndpointSelectionResult(input.profile, "lv-1", ""))
+        }, networkSignature = { "wifi/in-flight" })
+        val warmup = async(start = CoroutineStart.UNDISPATCHED) {
+            coordinator.prepareInAdvance("in-flight-test", settings, emptyList())
+        }
+        val cancelledConnect = async(start = CoroutineStart.UNDISPATCHED) {
+            coordinator.resolveStart("in-flight-test", settings, emptyList(), false)
+        }
+        cancelledConnect.cancelAndJoin()
+        assertTrue(warmup.isActive)
+        val connect = async(start = CoroutineStart.UNDISPATCHED) {
+            coordinator.resolveStart("in-flight-test", settings, emptyList(), false)
+        }
+        release.complete(Unit)
+        warmup.await()
+        assertTrue(connect.await() is VpnStartCoordinator.StartDecision.FreshSession)
+        assertEquals(1, calls)
     }
     @Test
     fun `required client update never retries or starts the usable cached profile`() = runBlocking {

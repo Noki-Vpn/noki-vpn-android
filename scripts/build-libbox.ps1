@@ -74,8 +74,8 @@ if mode=='extract':
     assert inputs['version']=='1.14.1-extended-2.7.2-nokinv-2'
     assert inputs['android_api']==26
     assert inputs['tags']==['with_gvisor','with_quic','with_wireguard','with_utls']
-    assert sha((source/'src/go.mod').read_bytes())=='c627b1fc34add42bd7c35cc487bea142de0ee77aa32566de365bb4be3f18e912'
-    assert sha((source/'src/go.sum').read_bytes())=='a1f7623b0a94f7295e3d75fc5c71eb54110a628bcb84e53fa8dfbb1c1d604272'
+    assert sha((source/'src/go.mod').read_bytes())=='ad1ea8c28c0831b50d9cc6cd1b74a5e47f38489bde6f2ca21d4c3ca1de08dcb3'
+    assert sha((source/'src/go.sum').read_bytes())=='919b44294c69cc8ae17dc7b84911feaf54a7e5f653fae2a05d6a61e59bf4c02d'
     for tree in inputs['trees']:
         root=source/tree['source']
         members=[p for p in sorted(root.rglob('*'),key=lambda p:p.relative_to(root).as_posix()) if p.is_file()]
@@ -179,8 +179,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Pinned module download failed' }
         [IO.File]::WriteAllText((Join-Path $OutputDirectory 'module-downloads.json'), ($downloads -join "`n"), (New-Object Text.UTF8Encoding($false)))
         Invoke-Checked -FilePath $PythonPath -Arguments @('-I', $helperPath, 'downloads', $SourceArchive, $OutputDirectory)
-        if ((Get-Sha256 (Join-Path $sourceRoot 'src\go.mod')) -ne 'c627b1fc34add42bd7c35cc487bea142de0ee77aa32566de365bb4be3f18e912' -or
-            (Get-Sha256 (Join-Path $sourceRoot 'src\go.sum')) -ne 'a1f7623b0a94f7295e3d75fc5c71eb54110a628bcb84e53fa8dfbb1c1d604272') { throw 'Pinned upstream module inputs changed' }
+        if ((Get-Sha256 (Join-Path $sourceRoot 'src\go.mod')) -ne 'ad1ea8c28c0831b50d9cc6cd1b74a5e47f38489bde6f2ca21d4c3ca1de08dcb3' -or
+            (Get-Sha256 (Join-Path $sourceRoot 'src\go.sum')) -ne '919b44294c69cc8ae17dc7b84911feaf54a7e5f653fae2a05d6a61e59bf4c02d') { throw 'Pinned upstream module inputs changed' }
         Invoke-Checked -FilePath $go -Arguments @('mod','verify')
         $env:GOWORK = 'off'
         Invoke-Checked -FilePath $go -Arguments @('install','github.com/sagernet/gomobile/cmd/gomobile@v0.1.13')

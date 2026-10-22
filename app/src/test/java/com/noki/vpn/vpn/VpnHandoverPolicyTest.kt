@@ -5,10 +5,10 @@ import org.junit.Test
 
 class VpnHandoverPolicyTest {
     @Test
-    fun changedUnderlyingWithTunnelRequiresRestartAndTransientCacheFallback() {
+    fun changedUnderlyingWithTunnelRebindsTheExistingRuntime() {
         assertEquals(
             VpnHandoverPolicy.Plan(
-                action = VpnHandoverPolicy.Action.RestartTunnel,
+                action = VpnHandoverPolicy.Action.RebindNetwork,
                 strategy = VpnPreparationStrategy.CachedFirst,
             ),
             VpnHandoverPolicy.plan(

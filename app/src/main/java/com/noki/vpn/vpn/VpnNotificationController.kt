@@ -1,5 +1,11 @@
 package com.noki.vpn.vpn
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
+
 internal object VpnNotificationContract {
     const val CHANNEL_ID = "noki_vpn_channel"
     const val ONGOING = true
@@ -8,8 +14,21 @@ internal object VpnNotificationContract {
     const val RESTART_LABEL = "Рестарт"
     val ACTION_LABELS = listOf(DISCONNECT_LABEL, RESTART_LABEL)
 
-    fun content(title: String, text: String, statusEnabled: Boolean): Pair<String, String> =
-        if (statusEnabled) title to text else "Noki VPN" to "Служба VPN"
+    fun ensureChannel(context: Context) {
+        context.getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "Noki VPN", NotificationManager.IMPORTANCE_LOW),
+        )
+    }
+
+    fun isVisible(context: Context): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        return manager.areNotificationsEnabled() &&
+            manager.getNotificationChannel(CHANNEL_ID)?.importance != NotificationManager.IMPORTANCE_NONE
+    }
+
+    fun settingsIntent(context: Context): Intent = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        .putExtra(Settings.EXTRA_CHANNEL_ID, CHANNEL_ID)
 }
 
 internal fun interface CancelableTask {

@@ -1007,87 +1007,60 @@ class AppVpnServiceCommandTest {
     }
 
     @Test
-    fun handoverCommitsTheSelectedUnderlayBeforeSidecarsAndBlockedTelemetry(): Unit = runBlocking {
+    fun directNetworkHandoverKeepsTunnelCoreOwnerAndTimerWithoutPreparingAgain(): Unit = runBlocking {
         val fixture = Fixture(this, probeFallback = true, workingEndpoint = "tcp1")
-        fixture.saveSettings(fixture.savedSettings().let {
-            it.copy(advancedSettings = it.advancedSettings.copy(endpointSelectionMode = EndpointSelectionMode.MANUAL))
-        })
         fixture.startPrepared(EndpointSelectionMode.MANUAL)
-        val repository = SettingsRepository(fixture.service)
-        val settings = checkNotNull(fixture.orchestrator.currentSettings()).let {
-            it.copy(isAuthenticated = true, backendAccessToken = "handover-test",
-                advancedSettings = it.advancedSettings.copy(anonymousLogsEnabled = true))
-        }
-        fixture.saveSettings(settings)
+        fixture.useOfflinePreparation(java.io.IOException("API must not be used")) { error("unexpected API preparation") }
+        val tunnel = fixture.orchestrator.currentTunnel()
+        val owner = fixture.orchestrator.snapshot().owner
+        val generation = fixture.orchestrator.currentGenerationId()
+        val starts = fixture.startedEndpoints.size
+        val stops = fixture.runtimeStops
         fixture.orchestrator.updateUnderlay(UnderlyingNetworkSnapshot(
             EndpointRankingPolicy.NetworkKind.CELLULAR, "previous-cellular", true, "previous"))
-        fixture.setNetworkAvailability(UnderlyingNetworkAvailability.Validated)
-        val next = checkNotNull(AndroidUnderlyingNetworkSource(fixture.service).currentSnapshot())
-        val uploadEntered = kotlinx.coroutines.CompletableDeferred<Unit>()
-        val releaseUpload = kotlinx.coroutines.CompletableDeferred<Unit>()
-        val telemetry = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
-            com.noki.vpn.data.EndpointHealthEventReporter(repository, upload = { _, _ ->
-                uploadEntered.complete(Unit)
-                releaseUpload.await()
-            }, loadSettings = repository::load).recordEvent(settings,
-                com.noki.vpn.data.EndpointHealthEvent("tcp1", EndpointRankingPolicy.NetworkKind.CELLULAR,
-                    com.noki.vpn.data.EndpointHealthEventType.CONNECT_SUCCESS, true, false,
-                    com.noki.vpn.data.EndpointScoreBucket.GOOD))
-        }
-        var activations = 0
-        var observedUnderlay: UnderlyingNetworkSnapshot? = null
-        fixture.onConnected = { _, _ ->
-            activations++
-            observedUnderlay = fixture.orchestrator.currentUnderlay()
-        }
-        try {
-            uploadEntered.await()
-            fixture.observeNetwork(UnderlyingNetworkAvailability.Validated)
-            yield()
-            assertEquals("handover must reach activation before telemetry waits", 1, activations)
-            val handover = checkNotNull(fixture.orchestrator.activeTransitionJob())
-            org.junit.Assert.assertTrue(handover.isActive)
-            val generation = fixture.orchestrator.currentGenerationId()
-            fixture.observeNetwork(UnderlyingNetworkAvailability.Validated)
-            yield()
-            assertEquals("one physical handover must not restart itself while telemetry waits", 1, activations)
-            assertEquals(generation, fixture.orchestrator.currentGenerationId())
-            assertEquals(handover, fixture.orchestrator.activeTransitionJob())
-            assertEquals(next, observedUnderlay)
-            assertEquals(next, fixture.orchestrator.currentUnderlay())
-        } finally {
-            fixture.saveSettings(settings.copy(advancedSettings = settings.advancedSettings.copy(anonymousLogsEnabled = false)))
-            releaseUpload.complete(Unit)
-            telemetry.join()
-            fixture.orchestrator.activeTransitionJob()?.join()
-            fixture.stop(1)
-            fixture.orchestrator.activeTransitionJob()?.join()
-        }
+        fixture.observeNetwork(UnderlyingNetworkAvailability.Validated)
+        yield()
+        assertEquals(VpnConnectionState.CONNECTED, fixture.orchestrator.currentState())
+        assertEquals(tunnel, fixture.orchestrator.currentTunnel())
+        assertEquals(owner, fixture.orchestrator.snapshot().owner)
+        assertEquals(generation, fixture.orchestrator.currentGenerationId())
+        assertEquals(starts, fixture.startedEndpoints.size)
+        assertEquals(stops, fixture.runtimeStops)
+        assertEquals(1, fixture.runtimeRebinds)
+        org.junit.Assert.assertNotNull(fixture.orchestrator.currentUnderlay())
+        fixture.observeNetwork(UnderlyingNetworkAvailability.Validated)
+        yield()
+        assertEquals(1, fixture.runtimeRebinds)
+        fixture.stop(1)
+        fixture.orchestrator.activeTransitionJob()?.join()
     }
 
     @Test
-    fun failedHandoverRestoresThePreviousUnderlayOnRollback(): Unit = runBlocking {
+    fun directFailedSocketRebindRetriesWithoutReplacingTheRuntime(): Unit = runBlocking {
         val fixture = Fixture(this, probeFallback = true, workingEndpoint = "tcp1")
-        fixture.saveSettings(fixture.savedSettings().let {
-            it.copy(advancedSettings = it.advancedSettings.copy(endpointSelectionMode = EndpointSelectionMode.MANUAL))
-        })
         fixture.startPrepared(EndpointSelectionMode.MANUAL)
-        fixture.saveSettings(checkNotNull(fixture.orchestrator.currentSettings()))
-        val previous = UnderlyingNetworkSnapshot(
-            EndpointRankingPolicy.NetworkKind.CELLULAR, "previous-cellular", true, "previous")
-        fixture.orchestrator.updateUnderlay(previous)
-        fixture.workingEndpoint = null
-        fixture.onProbe = { if (fixture.startedEndpoints.size == 3) fixture.workingEndpoint = "tcp1" }
-        var observedUnderlay: UnderlyingNetworkSnapshot? = null
-        fixture.onConnected = { _, _ -> observedUnderlay = fixture.orchestrator.currentUnderlay() }
-        fixture.observeNetwork(UnderlyingNetworkAvailability.Validated)
-        fixture.orchestrator.activeTransitionJob()?.join()
-        assertEquals(VpnConnectionState.CONNECTED, fixture.orchestrator.currentState())
-        assertEquals(ConnectedActivationKind.ROLLBACK, fixture.orchestrator.snapshot().activationKind)
-        assertEquals(previous, observedUnderlay)
-        assertEquals(previous, fixture.orchestrator.currentUnderlay())
-        fixture.stop(1)
-        fixture.orchestrator.activeTransitionJob()?.join()
+        val tunnel = fixture.orchestrator.currentTunnel()
+        val starts = fixture.startedEndpoints.size
+        val stops = fixture.runtimeStops
+        fixture.orchestrator.updateUnderlay(null)
+        fixture.runtimeRebindSucceeds = false
+        try {
+            fixture.observeNetwork(UnderlyingNetworkAvailability.Validated)
+            yield()
+            assertEquals(1, fixture.runtimeRebinds)
+            assertNull(fixture.orchestrator.currentUnderlay())
+            assertEquals(VpnConnectionState.CONNECTED, fixture.orchestrator.currentState())
+            fixture.runtimeRebindSucceeds = true
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(2))
+            yield()
+            assertEquals(2, fixture.runtimeRebinds)
+            assertEquals(tunnel, fixture.orchestrator.currentTunnel())
+            assertEquals(starts, fixture.startedEndpoints.size)
+            assertEquals(stops, fixture.runtimeStops)
+            org.junit.Assert.assertNotNull(fixture.orchestrator.currentUnderlay())
+        } finally {
+            fixture.invoke("cancelDelayedVpnCallbacks")
+        }
     }
 
     @Test
@@ -1294,41 +1267,6 @@ class AppVpnServiceCommandTest {
     }
 
     @Test
-    fun requiredClientUpdatePreventsCachedProfileDuringNetworkHandover() = runBlocking {
-        for (killSwitch in listOf(false, true)) {
-            val fixture = Fixture(this, probeFallback = true, workingEndpoint = "tcp1")
-            fixture.startPrepared()
-            var prepares = 0
-            fixture.useOfflinePreparation(BackendException("client_update_required", 426)) { prepares++ }
-            fixture.saveSettings(fixture.savedSettings().let {
-                it.copy(isAuthenticated = true, backendAccessToken = "access", backendRefreshToken = "refresh",
-                    endpointOptions = it.endpointOptions.map { endpoint -> endpoint.copy(nodeId = "exit-node") },
-                    advancedSettings = it.advancedSettings.copy(killSwitchEnabled = killSwitch))
-            })
-            fixture.orchestrator.updateUnderlay(UnderlyingNetworkSnapshot(
-                EndpointRankingPolicy.NetworkKind.CELLULAR, "previous-cellular", true, "previous"))
-            val tunnel = fixture.orchestrator.currentTunnel()
-            val starts = fixture.startedEndpoints.size
-
-            fixture.observeNetwork(UnderlyingNetworkAvailability.Validated)
-            fixture.orchestrator.activeTransitionJob()!!.join()
-
-            assertEquals(1, prepares)
-            assertEquals(VpnConnectionState.FAILED, fixture.orchestrator.currentState())
-            assertEquals(false, fixture.runtimeRunning)
-            assertEquals(if (killSwitch) tunnel else null, fixture.orchestrator.currentTunnel())
-            assertEquals(starts, fixture.startedEndpoints.size)
-            assertEquals(0, fixture.recoveryAttempt())
-            assertEquals(true, fixture.savedSettings().isAuthenticated)
-            assertEquals("access", fixture.savedSettings().backendAccessToken)
-            assertEquals("refresh", fixture.savedSettings().backendRefreshToken)
-            assertEquals("client_update_required", shadowOf(fixture.service).broadcastIntents.last {
-                it.action == AppVpnService.ACTION_STATE_CHANGED
-            }.getStringExtra(AppVpnService.EXTRA_REASON))
-        }
-    }
-
-    @Test
     fun requiredClientUpdateStopsNextNodeFallbackWithoutReplacingItsReason() = runBlocking {
         for (killSwitch in listOf(false, true)) {
             val fixture = Fixture(this, probeFallback = true, workingEndpoint = null)
@@ -1402,8 +1340,7 @@ class AppVpnServiceCommandTest {
         val fixture = Fixture(this, probeFallback = true)
         fixture.startPrepared()
 
-        assertEquals(setOf("tcp1", "tcp2", "tcp3", "tcp4", "hy2"), fixture.startedEndpoints.toSet())
-        assertEquals(5, fixture.startedEndpoints.size)
+        assertEquals(listOf("tcp1", "hy2"), fixture.startedEndpoints)
         assertEquals("hy2", fixture.startedEndpoints.last())
         assertEquals(VpnConnectionState.CONNECTED, fixture.orchestrator.currentState())
         assertEquals("hy2", fixture.orchestrator.currentSettings()?.profile?.endpointCode)
@@ -1414,17 +1351,29 @@ class AppVpnServiceCommandTest {
     }
 
     @Test
-    fun losingValidatedUnderlayStopsReportingConnectedAndPreservesRecovery() = runBlocking {
+    fun losingValidatedUnderlayKeepsTunnelUntilNetworkReturnsOrUserStops() = runBlocking {
         for (killSwitch in listOf(false, true)) {
-            val fixture = Fixture(this)
+            val fixture = Fixture(this, probeFallback = true, workingEndpoint = "tcp1")
             if (killSwitch) fixture.enableKillSwitch()
+            fixture.startPrepared(EndpointSelectionMode.MANUAL)
             val tunnel = fixture.orchestrator.currentTunnel()
+            val owner = fixture.orchestrator.snapshot().owner
+            val stops = fixture.runtimeStops
             fixture.observeNetwork(UnderlyingNetworkAvailability.None)
-            fixture.orchestrator.activeTransitionJob()?.join()
-            assertEquals(VpnConnectionState.FAILED, fixture.orchestrator.currentState())
-            if (killSwitch) assertEquals(tunnel, fixture.orchestrator.currentTunnel())
-            else assertNull(fixture.orchestrator.currentTunnel())
+            yield()
+            assertEquals(VpnConnectionState.CONNECTED, fixture.orchestrator.currentState())
+            assertEquals(tunnel, fixture.orchestrator.currentTunnel())
+            assertEquals(owner, fixture.orchestrator.snapshot().owner)
+            assertEquals(stops, fixture.runtimeStops)
+            assertNull(fixture.orchestrator.currentUnderlay())
             assertFalse(shadowOf(fixture.service).isStoppedBySelf)
+            fixture.observeNetwork(UnderlyingNetworkAvailability.Unvalidated)
+            yield()
+            assertEquals(0, fixture.runtimeRebinds)
+            fixture.observeNetwork(UnderlyingNetworkAvailability.Validated)
+            yield()
+            assertEquals(1, fixture.runtimeRebinds)
+            assertEquals(tunnel, fixture.orchestrator.currentTunnel())
             fixture.stop(1)
             fixture.orchestrator.activeTransitionJob()!!.join()
             fixture.observeNetwork(UnderlyingNetworkAvailability.Validated)
@@ -1873,7 +1822,7 @@ class AppVpnServiceCommandTest {
                     return true
                 }
                 override fun stop() { runtimeStops++; runtimeRunning = false }
-                override fun rebindWireGuard(): Boolean {
+                override fun rebindNetwork(): Boolean {
                     runtimeRebinds++
                     return runtimeRebindSucceeds
                 }

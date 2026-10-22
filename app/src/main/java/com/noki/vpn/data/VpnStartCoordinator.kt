@@ -2,6 +2,9 @@ package com.noki.vpn.data
 
 import android.content.Context
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 class VpnStartCoordinator internal constructor(
     private val sessionPreparer: VpnSessionPreparer,
@@ -88,16 +91,38 @@ class VpnStartCoordinator internal constructor(
         if (settings.advancedSettings.ruRelayEnabled || settings.advancedSettings.multiHop.enabled) return
         val selection = VpnSessionSelection(countryCode = settings.userProfile.selectedCountryCode)
         val key = preparationKey(token, settings, selection) ?: return
-        synchronized(preparedLock) {
+        val pending = synchronized(preparedLock) {
             if (prepared?.let { it.key == key && nowMillis() - it.createdAt in 0 until 60_000L } == true) return
+            if (preparing?.key == key) return
+            PendingPreparation(key, CompletableDeferred<Result>()).also { preparing = it }
         }
-        val result = prepare(token, settings, knownDevices, selection)
-        if (networkSignature() != key.network || !VpnProfileValidator.isUsable(result.settings)) return
-        synchronized(preparedLock) { prepared = Prepared(key, nowMillis(), result) }
+        try {
+            val result = prepare(token, settings, knownDevices, selection)
+            if (networkSignature() != key.network || !VpnProfileValidator.isUsable(result.settings)) {
+                throw UnusableFreshProfileException()
+            }
+            synchronized(preparedLock) {
+                if (preparing === pending) prepared = Prepared(key, nowMillis(), result)
+            }
+            pending.result.complete(result)
+        } catch (error: Throwable) {
+            pending.result.completeExceptionally(error)
+            throw error
+        } finally {
+            synchronized(preparedLock) { if (preparing === pending) preparing = null }
+        }
     }
 
-    private fun consumePrepared(token: String, settings: StoredSettings, selection: VpnSessionSelection): Result? {
+    private suspend fun consumePrepared(token: String, settings: StoredSettings, selection: VpnSessionSelection): Result? {
         val key = preparationKey(token, settings, selection) ?: return null
+        val pending = synchronized(preparedLock) { preparing?.takeIf { it.key == key } }
+        if (pending != null) {
+            onDiagnostic("stage=prepared_cache; wait=in_flight")
+            try { pending.result.await() } catch (_: CancellationException) {
+                currentCoroutineContext().ensureActive()
+            }
+            if (networkSignature() != key.network) return null
+        }
         val hit = synchronized(preparedLock) {
             prepared?.takeIf { it.key == key && nowMillis() - it.createdAt in 0 until 60_000L }
                 ?.also { prepared = null }
@@ -120,7 +145,14 @@ class VpnStartCoordinator internal constructor(
     private fun preparationKey(token: String, settings: StoredSettings, selection: VpnSessionSelection): PreparationKey? {
         if (settings.advancedSettings.ruRelayEnabled || settings.advancedSettings.multiHop.enabled) return null
         val network = networkSignature()?.takeIf(String::isNotBlank) ?: return null
-        return PreparationKey(network, token, settings.copy(profile = VlessProfile()), selection)
+        return PreparationKey(network, token, settings.copy(
+            profile = VlessProfile(),
+            personalizationSettings = PersonalizationSettings(),
+            userProfile = settings.userProfile.copy(
+                username = "", email = "", avatarUri = null, trafficUsedGb = null, sharedTrafficUsedGb = null,
+                trialTrafficRemainingGb = settings.userProfile.trialTrafficRemainingGb?.takeIf { it <= 0.0 },
+            ),
+        ), selection)
     }
 
     suspend fun prepare(
@@ -158,8 +190,10 @@ class VpnStartCoordinator internal constructor(
     private companion object {
         data class PreparationKey(val network: String, val token: String, val settings: StoredSettings, val selection: VpnSessionSelection)
         data class Prepared(val key: PreparationKey, val createdAt: Long, val result: Result)
+        data class PendingPreparation(val key: PreparationKey, val result: CompletableDeferred<Result>)
         val preparedLock = Any()
         var prepared: Prepared? = null
+        var preparing: PendingPreparation? = null
         fun mergeCurrentDevice(
             knownDevices: List<BackendDevice>,
             currentDevice: BackendDevice,

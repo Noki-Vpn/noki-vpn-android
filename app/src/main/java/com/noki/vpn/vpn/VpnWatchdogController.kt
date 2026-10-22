@@ -75,6 +75,20 @@ internal class VpnWatchdogController(
     }
 
     @Synchronized
+    fun resetNetworkEvidence() {
+        activeProbe?.cancel()
+        activeProbe = null
+        failureCount = 0
+        lastHealthyMillis = null
+        lastVpnEvidenceMillis = null
+        val owner = activeOwner ?: return
+        val updated = owner.copy(networkRevision = owner.networkRevision + 1)
+        activeOwner = updated
+        scheduler.cancel(scheduleOwner)
+        scheduleNext(updated)
+    }
+
+    @Synchronized
     fun completeProbe(
         owner: ConnectedWatchdogPolicy.Owner,
         latencyMs: Long?,

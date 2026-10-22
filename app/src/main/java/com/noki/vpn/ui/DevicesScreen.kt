@@ -75,6 +75,8 @@ fun DevicesScreen(
     deviceRowsBackdrop: PrismalGlassLayer? = null,
     liveGlassEnabled: Boolean = true,
 ) {
+    val effectiveLiveGlassEnabled = liveGlassEnabled &&
+        LocalSharedDestinationVisibility.current != SharedDestinationVisibility.Precomposing
     CompositionLocalProvider(LocalTextStyle provides DevicesNoFontPaddingTextStyle) {
         val hasDeviceModal = state.dialog == AppDialog.LogoutOthers ||
             state.dialog is AppDialog.RemoveDevice ||
@@ -83,7 +85,7 @@ fun DevicesScreen(
             !state.inviteDeviceForm.generatedInviteCode.isNullOrBlank() ||
             state.incyDevices.isCreateDialogVisible ||
             state.incyDevices.isManageDialogVisible
-        val modalBackdrop = if (liveGlassEnabled && hasDeviceModal) {
+        val modalBackdrop = if (effectiveLiveGlassEnabled && hasDeviceModal) {
             rememberPrismalGlassLayer {
                 drawRect(DevicesBgBase)
                 drawContent()
@@ -91,7 +93,7 @@ fun DevicesScreen(
         } else {
             null
         }
-        val backdrop = if (showBackground || liveGlassEnabled) sharedBackdrop else null
+        val backdrop = if (showBackground || effectiveLiveGlassEnabled) sharedBackdrop else null
         val cardBackdrop = deviceRowsBackdrop ?: backdrop
         BoxWithConstraints(
             modifier = Modifier
@@ -119,7 +121,7 @@ fun DevicesScreen(
             }
 
             if (showBackground) {
-                HomeBackground(liveGlassEnabled = liveGlassEnabled)
+                HomeBackground(liveGlassEnabled = effectiveLiveGlassEnabled)
             }
 
             LazyColumn(
@@ -127,7 +129,7 @@ fun DevicesScreen(
                     .fillMaxSize()
                     .statusBarsPadding()
                     .then(
-                        if (liveGlassEnabled && modalBackdrop != null) {
+                        if (effectiveLiveGlassEnabled && modalBackdrop != null) {
                             Modifier.prismalGlassLayer(modalBackdrop)
                         } else {
                             Modifier
@@ -156,7 +158,7 @@ fun DevicesScreen(
                                 scale = scale,
                                 isAdditional = true,
                             )
-                            SharedDeviceTraffic(state, language, scale, cardBackdrop, liveGlassEnabled)
+                            SharedDeviceTraffic(state, language, scale, cardBackdrop, effectiveLiveGlassEnabled)
                             OtherDevicesSection(
                                 devices = sharedDevices,
                                 inviteIsLoading = false,
@@ -165,7 +167,7 @@ fun DevicesScreen(
                                 scale = scale,
                                 onInviteClick = {},
                                 backdrop = cardBackdrop,
-                                liveGlassEnabled = liveGlassEnabled,
+                                liveGlassEnabled = effectiveLiveGlassEnabled,
                                 onDeviceClick = { id ->
                                     if (sharedDevices.firstOrNull { it.id == id }?.isCurrent == true) {
                                         viewModel.requestRenameDevice(id)
@@ -178,7 +180,7 @@ fun DevicesScreen(
                                 language = language,
                                 scale = scale,
                                 backdrop = cardBackdrop,
-                                liveGlassEnabled = liveGlassEnabled,
+                                liveGlassEnabled = effectiveLiveGlassEnabled,
                                 onAddClick = {},
                                 onDeviceClick = viewModel::openIncyDevice,
                                 onRetryClick = viewModel::refreshIncyDevices,
@@ -217,7 +219,7 @@ fun DevicesScreen(
                                             device = currentDevice,
                                             language = language,
                                             backdrop = cardBackdrop,
-                                            liveGlassEnabled = liveGlassEnabled,
+                                            liveGlassEnabled = effectiveLiveGlassEnabled,
                                             scale = scale,
                                             onRenameClick = { currentDevice?.id?.let(viewModel::requestRenameDevice) },
                                         )
@@ -227,7 +229,7 @@ fun DevicesScreen(
                                     language = language,
                                     scale = scale,
                                     backdrop = cardBackdrop,
-                                    liveGlassEnabled = liveGlassEnabled,
+                                    liveGlassEnabled = effectiveLiveGlassEnabled,
                                     onClick = viewModel::requestLogoutOthers,
                                 )
                             }
@@ -240,7 +242,7 @@ fun DevicesScreen(
                                 scale = scale,
                                 onInviteClick = viewModel::createDeviceInvite,
                                 backdrop = cardBackdrop,
-                                liveGlassEnabled = liveGlassEnabled,
+                                liveGlassEnabled = effectiveLiveGlassEnabled,
                                 onDeviceClick = viewModel::requestRemoveDevice,
                             )
 
@@ -249,7 +251,7 @@ fun DevicesScreen(
                                 language = language,
                                 scale = scale,
                                 backdrop = cardBackdrop,
-                                liveGlassEnabled = liveGlassEnabled,
+                                liveGlassEnabled = effectiveLiveGlassEnabled,
                                 onAddClick = viewModel::showCreateIncyDevice,
                                 onDeviceClick = viewModel::openIncyDevice,
                                 onRetryClick = viewModel::refreshIncyDevices,
@@ -265,7 +267,7 @@ fun DevicesScreen(
                                 enabled = true,
                                 modifier = Modifier.fillMaxWidth().height(devicesDp(50f, scale)),
                                 backdrop = cardBackdrop,
-                                liveGlassEnabled = liveGlassEnabled,
+                                liveGlassEnabled = effectiveLiveGlassEnabled,
                                 onClick = { viewModel.openScreen(AppDestination.EXTRA_DEVICES) },
                             )
                         }
@@ -284,7 +286,7 @@ fun DevicesScreen(
                     confirmText = tr(language, "Удалить", "Remove"),
                     dismissText = tr(language, "Отмена", "Cancel"),
                     backdrop = modalBackdrop,
-                    liveGlassEnabled = liveGlassEnabled,
+                    liveGlassEnabled = effectiveLiveGlassEnabled,
                     scale = scale,
                     onDismiss = viewModel::dismissDialog,
                     onConfirm = viewModel::confirmDialog,
@@ -298,7 +300,7 @@ fun DevicesScreen(
                     language = language,
                     scale = scale,
                     backdrop = modalBackdrop,
-                    liveGlassEnabled = liveGlassEnabled,
+                    liveGlassEnabled = effectiveLiveGlassEnabled,
                     onDismiss = viewModel::dismissDialog,
                     onFullAccessChanged = viewModel::setDeviceFullAccess,
                     onMove = { device?.let { viewModel.requestDeviceTrafficPoolChange(it.id) } },
@@ -318,7 +320,7 @@ fun DevicesScreen(
                     confirmText = tr(language, "Сохранить", "Save"),
                     scale = scale,
                     backdrop = modalBackdrop,
-                    liveGlassEnabled = liveGlassEnabled,
+                    liveGlassEnabled = effectiveLiveGlassEnabled,
                     maxLength = 80,
                     onDismiss = viewModel::dismissDialog,
                     onConfirm = { viewModel.renameDevice(dialog.deviceId, name) },
@@ -343,7 +345,7 @@ fun DevicesScreen(
                     language = language,
                     scale = scale,
                     backdrop = modalBackdrop,
-                    liveGlassEnabled = liveGlassEnabled,
+                    liveGlassEnabled = effectiveLiveGlassEnabled,
                     onDismiss = viewModel::dismissGeneratedDeviceInvite,
                 )
             }
@@ -353,7 +355,7 @@ fun DevicesScreen(
                 language = language,
                 scale = scale,
                 backdrop = modalBackdrop,
-                liveGlassEnabled = liveGlassEnabled,
+                liveGlassEnabled = effectiveLiveGlassEnabled,
                 onNameChanged = viewModel::updateIncyDeviceName,
                 onMove = { state.incyDevices.selectedDeviceId?.let { viewModel.requestDeviceTrafficPoolChange(it, isIncy = true) } },
                 onCreate = viewModel::createIncyDevice,
@@ -377,7 +379,7 @@ fun DevicesScreen(
                     confirmText = tr(language, if (dialog.isLoading) "Перенос…" else "Перенести", if (dialog.isLoading) "Moving…" else "Move"),
                     dismissText = tr(language, "Отмена", "Cancel"),
                     backdrop = modalBackdrop,
-                    liveGlassEnabled = liveGlassEnabled,
+                    liveGlassEnabled = effectiveLiveGlassEnabled,
                     scale = scale,
                     isLoading = dialog.isLoading,
                     error = dialog.error,
@@ -401,13 +403,16 @@ private fun SharedDeviceTraffic(
     val used = com.noki.vpn.data.TrafficFormat.gigabytes(profile.sharedTrafficUsedGb, language).label
     val limit = profile.sharedTrafficLimitGb?.let { com.noki.vpn.data.TrafficFormat.gigabytes(it, language).label } ?: "∞"
     Column(
-        modifier = Modifier.fillMaxWidth().nokiSettingsPanelGlassSurface(
+        modifier = Modifier.fillMaxWidth().nokiGlassSurface(
             shape = RoundedCornerShape(devicesDp(24f, scale)),
             backdrop = backdrop,
             liveGlassEnabled = liveGlassEnabled,
             scale = scale,
             elevationDp = 8f,
-            shadowAlpha = 0.25f,
+            shadowAlpha = if (liveGlassEnabled) 0.05f else NokiUiKitPolicy.simpleSurfaceShadowAlpha,
+                        blurAndLensEnabled = false,
+                        backdropShadowsEnabled = false,
+                        dropShadowRadiusDp = 4f,
             surfaceColor = DevicesBgLighter.copy(alpha = 0.80f),
         ).padding(devicesDp(20f, scale)),
         verticalArrangement = Arrangement.spacedBy(devicesDp(10f, scale)),
@@ -506,13 +511,16 @@ private fun CurrentDeviceCard(
                         .clip(shape)
                         .background(DevicesTextMuted.copy(alpha = 0.5f), shape)
                 } else {
-                    Modifier.nokiSettingsPanelGlassSurface(
+                    Modifier.nokiGlassSurface(
                         shape = shape,
                         backdrop = backdrop,
                         liveGlassEnabled = liveGlassEnabled,
                         scale = scale,
                         elevationDp = 8f,
-                        shadowAlpha = 0.25f,
+                        shadowAlpha = if (liveGlassEnabled) 0.05f else NokiUiKitPolicy.simpleSurfaceShadowAlpha,
+                        blurAndLensEnabled = false,
+                        backdropShadowsEnabled = false,
+                        dropShadowRadiusDp = 4f,
                         surfaceColor = DevicesBgLighter.copy(alpha = 0.80f),
                     )
                 }

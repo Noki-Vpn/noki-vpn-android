@@ -719,6 +719,44 @@ class AdaptiveScreenLayoutTest {
         }
     }
 
+    @Test
+    fun gamingToggleFollowsRuRelayAndRemainsReachableWhenEnabled() {
+        val viewModel = layoutViewModel()
+        val normal = russianState()
+        var state by androidx.compose.runtime.mutableStateOf(normal)
+        render {
+            AdvancedSettingsScreen(state, viewModel, rememberPrismalGlassLayer(),
+                liveGlassEnabled = false, showBackground = false)
+        }.use {
+            compose.onNodeWithText("Автовыбор протокола").assertIsDisplayed()
+            compose.onNodeWithText("Игровой режим").performScrollTo().assertIsDisplayed()
+            val gaming = compose.onNodeWithText("Игровой режим").fetchSemanticsNode().boundsInRoot
+            val relay = compose.onNodeWithText("RU-реле").fetchSemanticsNode().boundsInRoot
+            assertTrue(gaming.top > relay.bottom)
+            compose.runOnIdle { state = normal.copy(advancedSettings = normal.advancedSettings.copy(gamingModeEnabled = true)) }
+            compose.onNodeWithText("Игровой режим").assertIsDisplayed()
+            compose.onNodeWithText("Автовыбор протокола").performScrollTo().assertIsDisplayed()
+        }
+        renderHome(normal).use {
+            compose.onNodeWithText("Игровой режим").assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun notificationPreferenceIsAnActionWithoutToggle() {
+        render {
+            PersonalizationScreen(russianState(), {}, {}, {}, {}, {}, {},
+                rememberPrismalGlassLayer(), liveGlassEnabled = false, showBackground = false)
+        }.use {
+            val row = compose.onNode(hasText("Статус в уведомлении") and hasClickAction())
+            row.performScrollTo().assertIsDisplayed().performClick()
+            val intent = org.robolectric.Shadows.shadowOf(activity).nextStartedActivity
+            assertEquals(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS, intent.action)
+            compose.onNodeWithContentDescription("Системные настройки").assertExists()
+            saveImage("personalization-notification-action")
+        }
+    }
+
     private fun russianState() = com.noki.vpn.SettingsPreparedStatePolicy.withPreparedSettingsState(
         AppUiState(personalizationSettings = PersonalizationSettings(language = AppLanguage.RU)),
     )
@@ -761,8 +799,8 @@ class AdaptiveScreenLayoutTest {
                 androidx.compose.ui.semantics.Role.Switch,
             )).performClick()
             compose.onNodeWithText("Нода a").assertDoesNotExist()
-            compose.onNodeWithText(if (ruRelayEnabled) "RU-реле включено. Выберите разные зарубежные вход и выход."
-                else "RU-реле выключено. Протокол выбирается автоматически. Выберите разные вход и выход.").assertExists()
+            compose.onNodeWithContentDescription("Входной сервер: Выбрать").assertExists()
+            compose.onNodeWithContentDescription("Выходной сервер: Выбрать").assertExists()
             compose.onNodeWithText("Сохранить").performScrollTo().performClick()
             compose.onNodeWithText("Выберите вход").assertExists()
             compose.runOnIdle { assertFalse(viewModel.uiState.advancedSettings.multiHop.enabled) }
@@ -1256,7 +1294,7 @@ class AdaptiveScreenLayoutTest {
     }
 
     @Test
-    fun automaticServerCardUsesItsOwnIconOnlyWithoutConnection() {
+    fun automaticServerCardShowsDestinationOnlyWithConnection() {
         for (ruRelay in listOf(false, true)) {
             val base = russianState().let { it.copy(
                 advancedSettings = it.advancedSettings.copy(ruRelayEnabled = ruRelay),
@@ -1271,10 +1309,8 @@ class AdaptiveScreenLayoutTest {
                 renderHome(state).use {
                     compose.onNodeWithText("Автовыбор").assertIsDisplayed()
                     if (connected) {
-                        compose.onNodeWithContentDescription("Автовыбор").assertDoesNotExist()
                         compose.onNodeWithText(if (ruRelay) "RU-реле → Латвия 2" else "Латвия").assertIsDisplayed()
                     } else {
-                        compose.onNodeWithContentDescription("Автовыбор").assertIsDisplayed()
                         compose.onNodeWithText("Латвия", substring = true).assertDoesNotExist()
                     }
                     saveImage("automatic-server-card-$ruRelay-$connected")

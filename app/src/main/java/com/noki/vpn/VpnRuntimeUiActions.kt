@@ -200,7 +200,6 @@ internal fun AppUiRuntime.getVpnPermissionIntent(context: Context): Intent? {
 }
 
 internal fun AppUiRuntime.startVpn() {
-    vpnPreparationJob?.cancel()
     if (uiState.androidUpdate.requiresUpdate) {
         uiState = uiState.copy(inlineMessage = null)
         refreshAndroidUpdateStatus()
@@ -230,6 +229,7 @@ internal fun AppUiRuntime.startVpn() {
 }
 
 internal fun AppUiRuntime.prepareVpnInAdvance() {
+    if (uiState.isAuthenticated && uiState.connectionState != VpnConnectionState.DISCONNECTED) return
     vpnPreparationJob?.cancel()
     if (uiState.androidUpdate.requiresUpdate || !uiState.isAuthenticated || uiState.connectionState != VpnConnectionState.DISCONNECTED ||
         uiState.advancedSettings.ruRelayEnabled || uiState.advancedSettings.multiHop.enabled) return

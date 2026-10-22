@@ -172,13 +172,16 @@ private fun IncyDeviceRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(devicesDp(72f, scale))
-            .nokiSettingsPanelGlassSurface(
+            .nokiGlassSurface(
                 shape = shape,
                 backdrop = backdrop,
                 liveGlassEnabled = liveGlassEnabled,
                 scale = scale,
                 elevationDp = 8f,
-                shadowAlpha = 0.25f,
+                shadowAlpha = if (liveGlassEnabled) 0.05f else NokiUiKitPolicy.simpleSurfaceShadowAlpha,
+                        blurAndLensEnabled = false,
+                        backdropShadowsEnabled = false,
+                        dropShadowRadiusDp = 4f,
                 surfaceColor = DevicesBgLighter.copy(alpha = 0.80f),
             )
             .clickable(onClick = onClick)

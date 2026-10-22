@@ -146,29 +146,7 @@ fun AdvancedSettingsScreen(
 
                 Spacer(modifier = Modifier.height(metrics.dp(20f)))
 
-                AdvancedToggleCard(
-                    enabled = state.advancedSettings.ruRelayEnabled,
-                    title = tr(language, "RU-реле", "RU relay"),
-                    backdrop = surfaceBackdrop,
-                    liveGlassEnabled = liveGlassEnabled,
-                    modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
-                        .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp)),
-                    onEnabledChanged = viewModel::setRuRelayEnabled,
-                )
-                if (state.advancedSettings.multiHop.enabled) {
-                    AdvancedText(
-                        text = if (state.advancedSettings.ruRelayEnabled) tr(language,
-                            "MultiHop работает через RU-реле.", "MultiHop uses RU relay.") else tr(language,
-                            "MultiHop работает через выбранный вход и выход.",
-                            "MultiHop uses the selected entry and exit."),
-                        fontSize = 12f, lineHeight = 16f, color = AdvancedTextSecondary,
-                        modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
-                            .padding(horizontal = metrics.dp(18f), vertical = metrics.dp(8f)),
-                    )
-                }
-                if (!state.advancedSettings.multiHop.enabled && !state.advancedSettings.ruRelayEnabled &&
-                    !state.advancedSettings.gamingModeEnabled) {
-                    Spacer(modifier = Modifier.height(metrics.dp(25f)))
+                if (!state.advancedSettings.multiHop.enabled && !state.advancedSettings.ruRelayEnabled) {
                     AdvancedToggleCard(
                         enabled = autoEndpointSelection,
                         title = tr(language, "Автовыбор протокола", "Auto protocol selection"),
@@ -210,35 +188,6 @@ fun AdvancedSettingsScreen(
                 }
 
                 Spacer(modifier = Modifier.height(metrics.dp(25f)))
-                AdvancedPanelSurface(
-                    backdrop = surfaceBackdrop,
-                    liveGlassEnabled = liveGlassEnabled,
-                    modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
-                        .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp))
-                        .clickable(onClick = onMultiHopClicked),
-                ) {
-                    AdvancedText(
-                        text = "MultiHop",
-                        fontSize = 16f,
-                        lineHeight = 20f,
-                        color = AdvancedTextPrimary,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = metrics.dp(20f)),
-                    )
-                }
-                Spacer(modifier = Modifier.height(metrics.dp(25f)))
-                AdvancedToggleCard(
-                    enabled = state.advancedSettings.killSwitchEnabled,
-                    title = "Kill-switch",
-                    backdrop = surfaceBackdrop,
-                    liveGlassEnabled = liveGlassEnabled,
-                    modifier = Modifier
-                        .widthIn(max = metrics.dp(370f))
-                        .fillMaxWidth()
-                        .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp)),
-                    onEnabledChanged = viewModel::setKillSwitchEnabled,
-                )
-
-                Spacer(modifier = Modifier.height(metrics.dp(25f)))
 
                 AdvancedFilterCard(
                     mode = state.filterMode,
@@ -251,19 +200,6 @@ fun AdvancedSettingsScreen(
                     onModeChanged = viewModel::updateFilterMode,
                     onConfigure = onAppFilterClicked,
                 )
-
-                if (!state.userProfile.isFreePlan) {
-                    Spacer(modifier = Modifier.height(metrics.dp(25f)))
-                    AdvancedToggleCard(
-                        enabled = state.advancedSettings.youtubeNoAdsEnabled,
-                        title = tr(language, "YouTube без рекламы", "YouTube without ads"),
-                        backdrop = surfaceBackdrop,
-                        liveGlassEnabled = liveGlassEnabled,
-                        modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
-                            .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp)),
-                        onEnabledChanged = viewModel::setYoutubeNoAdsEnabled,
-                    )
-                }
 
                 Spacer(modifier = Modifier.height(metrics.dp(25f)))
 
@@ -326,6 +262,80 @@ fun AdvancedSettingsScreen(
                     onConfigure = onBypassRulesClicked,
                 )
                 }
+                if (!state.userProfile.isFreePlan) {
+                    Spacer(modifier = Modifier.height(metrics.dp(25f)))
+                    AdvancedToggleCard(
+                        enabled = state.advancedSettings.youtubeNoAdsEnabled,
+                        title = tr(language, "YouTube без рекламы", "YouTube without ads"),
+                        backdrop = surfaceBackdrop,
+                        liveGlassEnabled = liveGlassEnabled,
+                        modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
+                            .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp)),
+                        onEnabledChanged = viewModel::setYoutubeNoAdsEnabled,
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(metrics.dp(25f)))
+                AdvancedToggleCard(
+                    enabled = state.advancedSettings.killSwitchEnabled,
+                    title = "Kill-switch",
+                    backdrop = surfaceBackdrop,
+                    liveGlassEnabled = liveGlassEnabled,
+                    modifier = Modifier
+                        .widthIn(max = metrics.dp(370f))
+                        .fillMaxWidth()
+                        .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp)),
+                    onEnabledChanged = viewModel::setKillSwitchEnabled,
+                )
+
+                Spacer(modifier = Modifier.height(metrics.dp(25f)))
+                AdvancedPanelSurface(
+                    backdrop = surfaceBackdrop,
+                    liveGlassEnabled = liveGlassEnabled,
+                    modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
+                        .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp))
+                        .clickable(onClick = onMultiHopClicked),
+                ) {
+                    AdvancedText(
+                        text = "MultiHop",
+                        fontSize = 16f,
+                        lineHeight = 20f,
+                        color = AdvancedTextPrimary,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = metrics.dp(20f)),
+                    )
+                }
+                if (state.advancedSettings.multiHop.enabled) {
+                    AdvancedText(
+                        text = if (state.advancedSettings.ruRelayEnabled) tr(language,
+                            "MultiHop работает через RU-реле.", "MultiHop uses RU relay.") else tr(language,
+                            "MultiHop работает через выбранный вход и выход.",
+                            "MultiHop uses the selected entry and exit."),
+                        fontSize = 12f, lineHeight = 16f, color = AdvancedTextSecondary,
+                        modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
+                            .padding(horizontal = metrics.dp(18f), vertical = metrics.dp(8f)),
+                    )
+                }
+                Spacer(modifier = Modifier.height(metrics.dp(25f)))
+                AdvancedToggleCard(
+                    enabled = state.advancedSettings.ruRelayEnabled,
+                    title = tr(language, "RU-реле", "RU relay"),
+                    backdrop = surfaceBackdrop,
+                    liveGlassEnabled = liveGlassEnabled,
+                    modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
+                        .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp)),
+                    onEnabledChanged = viewModel::setRuRelayEnabled,
+                )
+                Spacer(modifier = Modifier.height(metrics.dp(25f)))
+                AdvancedToggleCard(
+                    enabled = state.advancedSettings.gamingModeEnabled,
+                    title = tr(language, "Игровой режим", "Gaming mode"),
+                    backdrop = surfaceBackdrop,
+                    liveGlassEnabled = liveGlassEnabled,
+                    modifier = Modifier.widthIn(max = metrics.dp(370f)).fillMaxWidth()
+                        .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp)),
+                    onEnabledChanged = viewModel::setGamingModeEnabled,
+                )
+
                 }
 
                 if (showProtocolNotice) {

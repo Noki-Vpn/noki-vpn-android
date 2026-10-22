@@ -3,7 +3,7 @@ package com.noki.vpn.vpn
 internal interface VpnCoreRuntime {
     fun start(config: String, tunFd: Int): Boolean
 
-    fun rebindWireGuard(): Boolean
+    fun rebindNetwork(): Boolean
 
     fun stop()
 

@@ -29,6 +29,7 @@ internal class VpnCoreController(
     @Volatile private var server: CommandServer? = null
     @Volatile private var tunFd = -1
     @Volatile private var interfaceListener: InterfaceUpdateListener? = null
+    @Volatile private var defaultInterface: Pair<String, Int>? = null
 
     @Synchronized
     override fun start(config: String, tunFd: Int): Boolean = try {
@@ -61,6 +62,7 @@ internal class VpnCoreController(
             try { core.closeService() } finally { core.close() }
         }.onFailure { SafeLog.e(TAG, "Failed to stop VPN core", it) }
         tunFd = -1
+        defaultInterface = null
     }
 
     override fun cancelMeasureDelay() {
@@ -78,11 +80,12 @@ internal class VpnCoreController(
         VpnProbeResult(null, VpnCoreIssue.fromThrowable(error))
     }
 
-    override fun rebindWireGuard(): Boolean = try {
+    @Synchronized
+    override fun rebindNetwork(): Boolean = try {
         checkNotNull(server).also { core ->
             physicalNetwork()
-            updateInterface()
-            core.resetNetwork()
+            // A changed Android interface resets sockets through the native monitor.
+            if (!updateInterface()) core.resetNetwork()
         }
         true
     } catch (error: Throwable) {
@@ -93,13 +96,18 @@ internal class VpnCoreController(
     private fun physicalNetwork(): Network =
         checkNotNull(underlay.currentObservation().candidate?.network) { "underlay_unavailable" }
 
-    private fun updateInterface() {
+    private fun updateInterface(): Boolean {
         val network = underlay.currentObservation().candidate?.network
         val name = network?.let(connectivity::getLinkProperties)?.interfaceName
         val index = name?.let { JavaNetworkInterface.getByName(it)?.index }
         val metered = network?.let(connectivity::getNetworkCapabilities)
             ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) != true
-        interfaceListener?.updateDefaultInterface(name.orEmpty(), index ?: -1, metered, false)
+        val listener = checkNotNull(interfaceListener) { "vpn_interface_monitor_unavailable" }
+        val next = name.orEmpty() to (index ?: -1)
+        val changed = defaultInterface != next
+        listener.updateDefaultInterface(next.first, next.second, metered, false)
+        defaultInterface = next
+        return changed
     }
 
     private fun bindSocket(fd: Int) {

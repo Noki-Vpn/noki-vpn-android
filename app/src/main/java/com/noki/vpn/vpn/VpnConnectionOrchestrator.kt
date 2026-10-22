@@ -187,7 +187,7 @@ internal class VpnConnectionOrchestrator(
     @Synchronized
     fun nokiNvCarrier(): String = if (currentState == VpnConnectionState.CONNECTED) core.nokiNvCarrier() else ""
 
-    fun rebindWireGuard(): Boolean = core.rebindWireGuard()
+    fun rebindNetwork(): Boolean = core.rebindNetwork()
 
     fun cancelReadinessProbe() {
         core.cancelMeasureDelay()

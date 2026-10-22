@@ -17,6 +17,7 @@ object ConnectedWatchdogPolicy {
         val generationId: Long,
         val tunnelIdentity: Int,
         val coreIdentity: Long,
+        val networkRevision: Long = 0L,
     )
 
     fun canApplyResult(

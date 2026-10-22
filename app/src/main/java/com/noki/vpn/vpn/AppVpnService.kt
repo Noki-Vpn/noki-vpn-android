@@ -32,6 +32,7 @@ import com.noki.vpn.data.EndpointHealthEventReporter
 import com.noki.vpn.data.EndpointHealthEventType
 import com.noki.vpn.data.EndpointHealthEvents
 import com.noki.vpn.data.EndpointRankingPolicy
+import com.noki.vpn.data.EndpointGroupPolicy
 import com.noki.vpn.data.EndpointSelector
 import com.noki.vpn.data.EndpointSelectionMode
 import com.noki.vpn.data.EndpointTransportPolicy
@@ -354,7 +355,6 @@ class AppVpnService : VpnService() {
     }
 
     override fun onDestroy() {
-        notificationFactory.close()
         screenStateMonitor.stop()
         stopNetworkChangeMonitor()
         pendingStartOptions = null
@@ -1122,6 +1122,7 @@ class AppVpnService : VpnService() {
         val excludedCodes = preparedMetadata?.pendingWarmupSession?.selection
             ?.precheckFailedEndpointCodes.orEmpty().toMutableSet()
         val excludedNodeIds = mutableSetOf<String>()
+        val attemptedTransportGroups = mutableSetOf<String>()
         var excludeNokiNv = false
         var attemptSettings = settings
         while (true) {
@@ -1133,6 +1134,7 @@ class AppVpnService : VpnService() {
                 return@withLifecycleLock
             }
             excludedCodes += attemptSettings.profile.endpointCode
+            attemptedTransportGroups += EndpointGroupPolicy.groupKey(attemptSettings.profile)
             val config = VpnConfigFactory.build(
                 attemptSettings.profile,
                 attemptSettings.advancedSettings,
@@ -1221,10 +1223,11 @@ class AppVpnService : VpnService() {
                 attemptSettings.profile.proxyType.equals("nokinv", true)) excludeNokiNv = true
             val remaining = fallbackSession?.endpointCandidates.orEmpty()
                 .filterNot { it.code in excludedCodes || excludeNokiNv && it.proxyType.equals("nokinv", true) }
+            val untriedTransports = remaining.filter { EndpointGroupPolicy.groupKey(it) !in attemptedTransportGroups }
             val nextSelection = if (remaining.isNotEmpty() && fallbackSession != null) {
                 EndpointSelector.selectionForSession(
                     context = this@AppVpnService,
-                    session = fallbackSession.copy(endpointCandidates = remaining),
+                    session = fallbackSession.copy(endpointCandidates = untriedTransports.ifEmpty { remaining }),
                     settings = settings.advancedSettings,
                     endpointHealth = repository.loadEndpointHealth(activeEndpointNetworkKind),
                     rotationIndex = repository::nextEndpointRotationIndex,
@@ -1271,6 +1274,7 @@ class AppVpnService : VpnService() {
                     attemptSettings = normalizeInstalledPackages(nextNode.candidateSettings)
                     fallbackSession = nextNode.pendingWarmupSession?.session
                     excludedCodes.clear()
+                    attemptedTransportGroups.clear()
                     excludedCodes += nextNode.pendingWarmupSession?.selection?.precheckFailedEndpointCodes.orEmpty()
                     acceptPreparedMetadata(repository, nextNode)
                     notificationServerLabel = runtimeServerLabel(attemptSettings)
@@ -2070,6 +2074,8 @@ class AppVpnService : VpnService() {
     ): CancelableTask? {
         if (currentState != VpnConnectionState.CONNECTED ||
             tunnel == null ||
+            lastUnderlyingAvailability == UnderlyingNetworkAvailability.None ||
+            lastUnderlyingAvailability == UnderlyingNetworkAvailability.Unvalidated ||
             connectionOrchestrator.transitionSnapshot().active ||
             watchdogController.currentSettings()?.profile?.endpointCode != settings.profile.endpointCode ||
             !watchdogController.accepts(owner)
@@ -2289,28 +2295,12 @@ class AppVpnService : VpnService() {
             )
         }
         if (observation.availability != UnderlyingNetworkAvailability.Validated &&
-            currentRuntimeMode == VpnRuntimeMode.ACCOUNT &&
             currentState == VpnConnectionState.CONNECTED
         ) {
-            if (ruSession != null) {
-                // Keep the authorized WG Device/netstack and TUN while the OS has no usable route.
-                connectionOrchestrator.updateUnderlay(null)
-                delayedTaskScheduler.cancel(transientRecoveryOwner)
-                return
-            }
-            if (connectionOrchestrator.transitionSnapshot().active) return
-            val repository = SettingsRepository(this)
-            val settings = activeSettings ?: repository.load()
-            launchConnectionTransition(repository) { generationId ->
-                connectionOrchestrator.withLifecycleLock {
-                    if (connectionOrchestrator.isCurrent(generationId) &&
-                        currentState == VpnConnectionState.CONNECTED &&
-                        underlyingNetworkSource.currentSnapshot() == null
-                    ) {
-                        failClosedAfterReplacementFailure(repository, settings, "underlay_unavailable")
-                    }
-                }
-            }
+            // Network loss pauses payload, not the authorized runtime or Android TUN.
+            connectionOrchestrator.updateUnderlay(null)
+            watchdogController.resetNetworkEvidence()
+            delayedTaskScheduler.cancel(transientRecoveryOwner)
             return
         }
         if (observation.availability == UnderlyingNetworkAvailability.Validated) {
@@ -2334,10 +2324,6 @@ class AppVpnService : VpnService() {
             nextSignature = nextUnderlyingSnapshot.signature,
         )
         if (plan.action == VpnHandoverPolicy.Action.NoAction) return
-        if (ruSession != null) {
-            rebindRuUnderlyingNetwork(nextUnderlyingSnapshot)
-            return
-        }
         activeEndpointNetworkKind = nextKind
         SettingsRepository(this).recordAppLog(
             category = "vpn",
@@ -2363,144 +2349,43 @@ class AppVpnService : VpnService() {
                     )
                 }
             }
-            VpnHandoverPolicy.Action.RestartTunnel -> {
-                if (currentState == VpnConnectionState.CONNECTED && tunnel != null) {
-                    if (currentRuntimeMode == VpnRuntimeMode.AUTH_TEMP) {
-                        restartTemporaryVpn()
-                    } else {
-                        handoverUnderlyingNetwork(nextUnderlyingSnapshot)
-                    }
-                }
+            VpnHandoverPolicy.Action.RebindNetwork -> {
+                watchdogController.resetNetworkEvidence()
+                rebindUnderlyingNetwork(nextUnderlyingSnapshot)
             }
         }
     }
 
-    private fun rebindRuUnderlyingNetwork(next: UnderlyingNetworkSnapshot) {
+    private fun rebindUnderlyingNetwork(next: UnderlyingNetworkSnapshot) {
         val generation = connectionOrchestrator.currentGenerationId()
         val activeTunnel = tunnel ?: return
-        val sessionId = ruSession?.identity?.sessionId ?: return
+        val sessionId = ruSession?.identity?.sessionId
+        val mode = currentRuntimeMode
         fun admitted(): Boolean = connectionOrchestrator.isCurrent(generation) &&
-            tunnel === activeTunnel && ruSession?.identity?.sessionId == sessionId &&
+            tunnel === activeTunnel && currentRuntimeMode == mode && ruSession?.identity?.sessionId == sessionId &&
             currentState == VpnConnectionState.CONNECTED &&
             underlyingNetworkSource.currentSnapshot()?.signature == next.signature
         backgroundScope.launch {
             connectionOrchestrator.withLifecycleLock {
                 if (!admitted() || activeUnderlyingNetworkSignature == next.signature) return@withLifecycleLock
-                val reopened = connectionOrchestrator.rebindWireGuard()
+                val reopened = connectionOrchestrator.rebindNetwork()
                 val ready = if (reopened) measureRuntimeReadiness(recovery = true) else null
                 if (reopened && VpnReadinessPolicy.accept(ready)) {
                     if (!admitted()) return@withLifecycleLock
                     connectionOrchestrator.updateUnderlay(next)
                     activeEndpointNetworkKind = next.kind
                     delayedTaskScheduler.cancel(transientRecoveryOwner)
-                    backgroundScope.launch { checkRuAuthorization(force = true) }
+                    watchdogController.recordEvidence(WatchdogEvidence.VPN_PROBE)
+                    if (sessionId != null) backgroundScope.launch { checkRuAuthorization(force = true) }
                     SettingsRepository(this@AppVpnService).recordAppLog("vpn",
-                        message = "ru_wireguard_underlay_rebound",
+                        message = if (sessionId != null) "ru_wireguard_underlay_rebound" else "underlay_rebound",
                         details = "tun_preserved=true; runtime_preserved=true")
                 } else if (admitted()) {
                     // Socket reopen failure never replaces an otherwise authorized runtime.
                     delayedTaskScheduler.schedule(transientRecoveryOwner, 2_000L) {
-                        if (admitted()) rebindRuUnderlyingNetwork(next)
+                        if (admitted()) rebindUnderlyingNetwork(next)
                     }
                 }
-            }
-        }
-    }
-
-    private fun handoverUnderlyingNetwork(next: UnderlyingNetworkSnapshot) {
-        val previous = connectionOrchestrator.snapshot()
-        val settings = previous.activeSettings ?: return
-        val activeTunnel = tunnel ?: return
-        if (previous.owner == null) return
-        val repository = SettingsRepository(this)
-        launchConnectionTransition(repository) { generationId ->
-            val baseline = repository.load()
-            fun admitted(): Boolean {
-                val persisted = repository.load()
-                return connectionOrchestrator.isCurrent(generationId) && tunnel === activeTunnel &&
-                    currentRuntimeMode == VpnRuntimeMode.ACCOUNT &&
-                    underlyingNetworkSource.currentSnapshot()?.signature == next.signature &&
-                    persisted.hasSameAuthSessionAs(settings) &&
-                    settings.advancedSettings.gamingModeEnabled == baseline.advancedSettings.gamingModeEnabled &&
-                    !VpnSettingsTransactionPolicy.candidateBecameStale(baseline, persisted) &&
-                    persisted.advancedSettings.protocol == baseline.advancedSettings.protocol
-            }
-            if (!admitted()) return@launchConnectionTransition
-            val nodeId = settings.endpointOptions.firstOrNull {
-                it.code == settings.profile.endpointCode
-            }?.nodeId
-            // Reuse session preparation; endpoint options alone lack transport credentials.
-            val prepared = if (baseline.advancedSettings.endpointSelectionMode == EndpointSelectionMode.AUTO &&
-                !nodeId.isNullOrBlank()
-            ) {
-                connectionPreparer.prepare(
-                    strategy = VpnPreparationStrategy.FreshWithCachedFallback,
-                    sessionSelection = VpnSessionSelection(
-                        countryCode = settings.userProfile.actualCountryCode.ifBlank { settings.userProfile.selectedCountryCode },
-                        nodeId = nodeId,
-                    ),
-                ).let { outcome ->
-                    when (outcome) {
-                        is VpnConnectionPreparer.Outcome.Success -> outcome.session
-                        is VpnConnectionPreparer.Outcome.Failure -> {
-                            if (!admitted()) return@launchConnectionTransition
-                            if (prepareFailureReason(outcome.error) == "client_update_required" ||
-                                (outcome.error is BackendException && outcome.error.statusCode in setOf(401, 403))
-                            ) {
-                                connectionOrchestrator.withLifecycleLock {
-                                    if (admitted()) handlePrepareFailure(repository, prepareFailureReason(outcome.error),
-                                        outcome.error, destructiveOnFailure = true)
-                                }
-                                return@launchConnectionTransition
-                            }
-                            repository.recordAppLog("vpn", message = "handover_selection_unavailable")
-                            null
-                        }
-                    }
-                }
-            } else null
-            if (!admitted()) return@launchConnectionTransition
-            val session = prepared?.pendingWarmupSession?.session
-            val selected = session?.let {
-                EndpointRankingPolicy.select(
-                    candidates = it.endpointCandidates.filter { candidate ->
-                        candidate.nodeId == nodeId &&
-                            EndpointSelector.matchesProtocol(candidate, baseline.advancedSettings.effectiveProtocol) &&
-                            (baseline.advancedSettings.multiHop.enabled || EndpointTransportPolicy.isDirectCandidate(candidate))
-                    },
-                    health = repository.loadEndpointHealth(next.kind),
-                    networkKind = next.kind,
-                    nowMillis = System.currentTimeMillis(),
-                    rotationIndex = { 0 },
-                    excludedCodes = prepared.pendingWarmupSession?.selection?.precheckFailedEndpointCodes.orEmpty().toSet(),
-                    preferredCode = settings.profile.endpointCode,
-                )?.candidate
-            }
-            val profile = if (session != null && selected != null) EndpointSelector.profileFromCandidate(session, selected) else settings.profile
-            val candidate = settings.copy(profile = profile)
-            val switched = replaceCoreOnExistingTunnel(
-                repository = repository,
-                settings = candidate,
-                preparationBaseline = baseline,
-                previousSettings = settings,
-                previousNetworkKind = next.kind,
-                activeTunnel = activeTunnel,
-                generationId = generationId,
-                preparedMetadata = prepared,
-                underlay = next,
-                canActivate = ::admitted,
-            )
-            connectionOrchestrator.withLifecycleLock {
-                if (switched && admitted() && activeUnderlyingNetworkSignature == next.signature) {
-                    repository.recordAppLog("vpn", message = "underlay_runtime_reconnected",
-                        details = "tun_preserved=true; from=${settings.profile.endpointCode}; to=${activeSettings?.profile?.endpointCode}",
-                        connectionSuccess = true)
-                }
-            }
-            if (!switched && connectionOrchestrator.isCurrent(generationId) &&
-                currentCoroutineContext().isActive
-            ) {
-                restartVpn(VpnPreparationStrategy.CachedFirst)
             }
         }
     }

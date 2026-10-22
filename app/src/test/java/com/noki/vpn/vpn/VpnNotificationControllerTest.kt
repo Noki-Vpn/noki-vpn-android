@@ -5,18 +5,41 @@ import com.noki.vpn.data.DefaultStoredSettingsFactory
 import com.noki.vpn.data.ServerSelectionMode
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.provider.Settings
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class VpnNotificationControllerTest {
     @Test
-    fun `hidden status keeps only the required notice and restoring shows current details`() {
-        for ((title, text) in listOf(
-            "Соединен" to "Latvia 2   ↓ 12 / ↑ 3 Мбит/с",
-            "Подключение" to "France 2",
-            "Переподключение" to "Ожидание сети",
-        )) {
-            assertEquals("Noki VPN" to "Служба VPN", VpnNotificationContract.content(title, text, false))
-            assertEquals(title to text, VpnNotificationContract.content(title, text, true))
-        }
+    fun `system channel hides the whole vpn notice and service never reopens it`() {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(NotificationChannel(VpnNotificationContract.CHANNEL_ID,
+            "Noki VPN", NotificationManager.IMPORTANCE_NONE))
+        VpnNotificationContract.ensureChannel(context)
+        assertEquals(false, VpnNotificationContract.isVisible(context))
+        VpnNotificationFactory(context, 1001).createActive("Latvia 2")
+        assertEquals(NotificationManager.IMPORTANCE_NONE,
+            manager.getNotificationChannel(VpnNotificationContract.CHANNEL_ID).importance)
+        val intent = VpnNotificationContract.settingsIntent(context)
+        assertEquals(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS, intent.action)
+        assertEquals(context.packageName, intent.getStringExtra(Settings.EXTRA_APP_PACKAGE))
+        assertEquals(VpnNotificationContract.CHANNEL_ID, intent.getStringExtra(Settings.EXTRA_CHANNEL_ID))
+    }
+
+    @Test
+    fun `vpn channel starts enabled independently of chat notifications`() {
+        val context = RuntimeEnvironment.getApplication()
+        VpnNotificationContract.ensureChannel(context)
+        assertEquals(true, VpnNotificationContract.isVisible(context))
+        assertEquals(NotificationManager.IMPORTANCE_LOW, context.getSystemService(NotificationManager::class.java)
+            .getNotificationChannel(VpnNotificationContract.CHANNEL_ID).importance)
     }
 
     @Test

@@ -146,13 +146,16 @@ internal fun DeviceRow(
                         .clip(shape)
                         .background(DevicesTextMuted.copy(alpha = 0.5f), shape)
                 } else {
-                    Modifier.nokiSettingsPanelGlassSurface(
+                    Modifier.nokiGlassSurface(
                         shape = shape,
                         backdrop = backdrop,
                         liveGlassEnabled = liveGlassEnabled,
                         scale = scale,
                         elevationDp = 8f,
-                        shadowAlpha = 0.25f,
+                        shadowAlpha = if (liveGlassEnabled) 0.05f else NokiUiKitPolicy.simpleSurfaceShadowAlpha,
+                        blurAndLensEnabled = false,
+                        backdropShadowsEnabled = false,
+                        dropShadowRadiusDp = 4f,
                         surfaceColor = DevicesBgLighter.copy(alpha = 0.80f),
                         layerBlock = {
                             scaleX = rowScale
@@ -481,13 +484,16 @@ internal fun EmptyDevicesCard(
         modifier = Modifier
             .fillMaxWidth()
             .height(devicesDp(72f, scale))
-            .nokiSettingsPanelGlassSurface(
+            .nokiGlassSurface(
                 shape = shape,
                 backdrop = backdrop,
                 liveGlassEnabled = liveGlassEnabled,
                 scale = scale,
                 elevationDp = 8f,
-                shadowAlpha = 0.25f,
+                shadowAlpha = if (liveGlassEnabled) 0.05f else NokiUiKitPolicy.simpleSurfaceShadowAlpha,
+                        blurAndLensEnabled = false,
+                        backdropShadowsEnabled = false,
+                        dropShadowRadiusDp = 4f,
                 surfaceColor = DevicesBgLighter.copy(alpha = 0.80f),
             )
             .padding(horizontal = devicesDp(20f, scale)),

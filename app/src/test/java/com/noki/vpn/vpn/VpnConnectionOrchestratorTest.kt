@@ -408,7 +408,7 @@ private class RecordingVpnCoreRuntime(
     private val events: MutableList<String>,
 ) : VpnCoreRuntime {
     override fun nokiNvCarrier(): String = ""
-    override fun rebindWireGuard(): Boolean = true
+    override fun rebindNetwork(): Boolean = true
 
     override fun start(config: String, tunFd: Int): Boolean {
         events += "start_core"
@@ -432,7 +432,7 @@ private class BlockingFirstCancellationVpnCoreRuntime(
     private val release: CountDownLatch,
 ) : VpnCoreRuntime {
     override fun nokiNvCarrier(): String = ""
-    override fun rebindWireGuard(): Boolean = true
+    override fun rebindNetwork(): Boolean = true
 
     private val cancellationCalls = AtomicInteger(0)
 

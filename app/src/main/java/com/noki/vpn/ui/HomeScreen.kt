@@ -139,7 +139,7 @@ fun HomeScreen(
                 actionToNavigationGap
             val minimumContentHeight = topGap + homeTopShift + locationHeight + sectionGap +
                 metricsHeight + designDp(24f, scale) +
-                designDp(NokiUiKitPolicy.homeQuickPillHeightDp * 3f + 16f + 17f, scale) +
+                designDp(NokiUiKitPolicy.homeQuickPillHeightDp * 2f + 8f + 17f, scale) +
                 actionHeight + bottomContentReserve
             Box(
                 modifier = Modifier
@@ -198,16 +198,6 @@ fun HomeScreen(
                         backdrop = backdrop,
                         liveGlassEnabled = effectiveLiveGlassEnabled,
                         onClick = { viewModel.openScreen(AppDestination.ADVANCED_SETTINGS) },
-                    )
-                    Spacer(modifier = Modifier.height(designDp(8f, scale)))
-                    AdvancedToggleCard(
-                        enabled = state.advancedSettings.gamingModeEnabled,
-                        title = tr(language, "Игровой режим", "Gaming mode"),
-                        modifier = Modifier.fillMaxWidth()
-                            .height(designDp(NokiUiKitPolicy.homeQuickPillHeightDp, scale)),
-                        backdrop = backdrop,
-                        liveGlassEnabled = effectiveLiveGlassEnabled,
-                        onEnabledChanged = viewModel::setGamingModeEnabled,
                     )
                     Spacer(modifier = Modifier.height(designDp(8f, scale)))
                     HomeQuickSettingsPill(

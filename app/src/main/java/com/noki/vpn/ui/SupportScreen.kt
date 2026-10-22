@@ -33,6 +33,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -50,8 +51,6 @@ import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.DropdownMenu
@@ -70,6 +69,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalContext
@@ -373,9 +373,9 @@ private fun SupportChatContent(
         }
         Row(
             Modifier.fillMaxWidth().padding(bottom = 12.dp, top = 8.dp)
-                .nokiSettingsPanelGlassSurface(RoundedCornerShape(26.dp), backdrop, liveGlassEnabled = liveGlassEnabled,
+                .nokiSettingsPanelGlassSurface(RoundedCornerShape(50), backdrop, liveGlassEnabled = liveGlassEnabled,
                     surfaceColor = SettingsBgLighter.copy(alpha = 0.94f), blurAndLensEnabled = false)
-                .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                .padding(4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -383,19 +383,23 @@ private fun SupportChatContent(
                 modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Rounded.AttachFile, tr(language, "Прикрепить медиа или файл", "Attach media or a file"), tint = SettingsTextSecondary, modifier = Modifier.size(23.dp))
             }
-            OutlinedTextField(
+            BasicTextField(
                 value = chat.draft, onValueChange = onDraftChanged,
-                modifier = Modifier.weight(1f).heightIn(min = 52.dp, max = 160.dp),
-                placeholder = { SupportLabel(tr(language, "Ваше сообщение", "Your message"), 16, color = SettingsTextMuted) },
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp, max = 136.dp)
+                    .padding(horizontal = 4.dp, vertical = 12.dp),
                 enabled = !chat.isSending, minLines = 1, maxLines = 5,
-                textStyle = TextStyle(fontFamily = ManropeFontFamily, fontSize = 16.sp, lineHeight = 23.sp, color = SettingsTextPrimary),
+                textStyle = TextStyle(fontFamily = ManropeFontFamily, fontSize = 15.sp, lineHeight = 22.sp,
+                    platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false), color = SettingsTextPrimary),
+                cursorBrush = SolidColor(SettingsAccentPrimary),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                shape = RoundedCornerShape(22.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent,
-                    disabledBorderColor = Color.Transparent, cursorColor = SettingsAccentPrimary,
-                    disabledTextColor = SettingsTextPrimary,
-                ),
+                decorationBox = { input ->
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                        if (chat.draft.isEmpty()) {
+                            SupportLabel(tr(language, "Ваше сообщение", "Your message"), 15, color = SettingsTextMuted)
+                        }
+                        input()
+                    }
+                },
             )
             IconButton(
                 onClick = onSend, enabled = canSend,

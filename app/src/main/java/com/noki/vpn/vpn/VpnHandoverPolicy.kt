@@ -4,7 +4,7 @@ object VpnHandoverPolicy {
     enum class Action {
         NoAction,
         FreshStart,
-        RestartTunnel,
+        RebindNetwork,
     }
 
     data class Plan(
@@ -27,7 +27,7 @@ object VpnHandoverPolicy {
                 strategy = VpnPreparationStrategy.CachedFirst,
             )
             else -> Plan(
-                Action.RestartTunnel,
+                Action.RebindNetwork,
                 strategy = VpnPreparationStrategy.CachedFirst,
             )
         }

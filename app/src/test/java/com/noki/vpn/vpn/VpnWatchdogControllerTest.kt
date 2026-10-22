@@ -8,6 +8,47 @@ import org.junit.Test
 
 class VpnWatchdogControllerTest {
     @Test
+    fun `network handover cancels old evidence without losing the runtime owner`() {
+        var cancelled = 0
+        val controller = VpnWatchdogController(
+            scheduler = WatchdogScheduler(), nowMillis = { 1_000L },
+            launchProbe = { _, _ -> CancelableTask { cancelled++ } }, isLockdown = { false },
+        )
+        val owner = watchdogOwner(7L)
+        controller.start(owner, DefaultStoredSettingsFactory.create(), initialVpnEvidence = true)
+        controller.forceProbe()
+        controller.resetNetworkEvidence()
+        assertEquals(1, cancelled)
+        val updated = owner.copy(networkRevision = 1L)
+        assertEquals(updated, controller.currentOwner())
+        assertFalse(controller.accepts(owner))
+        assertFalse(controller.hasFreshVpnEvidence())
+        assertEquals(WatchdogProbeOutcome.Ignored, controller.completeProbe(owner, null))
+        assertEquals(WatchdogAction.None, failedProbe(controller, updated))
+        controller.recordEvidence(WatchdogEvidence.VPN_PROBE)
+        assertTrue(controller.hasFreshVpnEvidence())
+    }
+
+    @Test
+    fun `completed recovery decision from the old network cannot replace the rebound runtime`() {
+        val controller = VpnWatchdogController(
+            scheduler = WatchdogScheduler(), nowMillis = { 1_000L },
+            launchProbe = { _, _ -> CancelableTask {} }, isLockdown = { false },
+        )
+        val owner = watchdogOwner(8L)
+        controller.start(owner, DefaultStoredSettingsFactory.create(), initialVpnEvidence = true)
+        assertEquals(WatchdogAction.None, failedProbe(controller, owner))
+        assertEquals(WatchdogAction.Refresh, failedProbe(controller, owner))
+        controller.resetNetworkEvidence()
+        assertFalse(controller.accepts(owner))
+        val current = checkNotNull(controller.currentOwner())
+        assertEquals(owner.generationId, current.generationId)
+        assertEquals(owner.coreIdentity, current.coreIdentity)
+        assertEquals(owner.tunnelIdentity, current.tunnelIdentity)
+        assertEquals(WatchdogAction.None, failedProbe(controller, current))
+    }
+
+    @Test
     fun `forced and scheduled requests coalesce to one in-flight VPN probe`() {
         var now = 0L
         val scheduler = WatchdogScheduler()
