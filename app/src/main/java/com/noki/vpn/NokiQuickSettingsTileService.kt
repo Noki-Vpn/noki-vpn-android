@@ -1,18 +1,52 @@
 package com.noki.vpn
 
 import android.content.ComponentName
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.VpnService
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import androidx.core.content.ContextCompat
 import com.noki.vpn.data.VpnConnectionState
 import com.noki.vpn.vpn.AppVpnService
 
 class NokiQuickSettingsTileService : TileService() {
+    private var observingRuntime = false
+    private val runtimeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == AppVpnService.ACTION_STATE_CHANGED) {
+                updateTile(AppVpnService.liveRuntimeState().state)
+            }
+        }
+    }
+
     override fun onStartListening() {
         super.onStartListening()
+        if (!observingRuntime) {
+            ContextCompat.registerReceiver(this, runtimeReceiver,
+                IntentFilter(AppVpnService.ACTION_STATE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
+            observingRuntime = true
+        }
         updateTile(AppVpnService.liveRuntimeState().state)
+    }
+
+    override fun onStopListening() {
+        stopObservingRuntime()
+        super.onStopListening()
+    }
+
+    override fun onDestroy() {
+        stopObservingRuntime()
+        super.onDestroy()
+    }
+
+    private fun stopObservingRuntime() {
+        if (!observingRuntime) return
+        unregisterReceiver(runtimeReceiver)
+        observingRuntime = false
     }
 
     override fun onClick() {

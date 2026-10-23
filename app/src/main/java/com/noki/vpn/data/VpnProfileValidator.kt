@@ -52,7 +52,7 @@ object VpnProfileValidator {
         if (if (expectedSecurity == "nokinv") !nokinv else (nokinv && expectedSecurity != "auto") ||
             (expectedSecurity != "auto" && normalizedSecurity != expectedSecurity)) return "protocol_mismatch"
 
-        if (!advancedSettings.multiHop.enabled && !advancedSettings.gamingModeEnabled &&
+        if (!advancedSettings.gamingModeEnabled &&
             advancedSettings.endpointSelectionMode == EndpointSelectionMode.MANUAL) {
             val manualGroupKey = EndpointGroupPolicy.resolveManualGroupKey(
                 settings = advancedSettings,
@@ -60,10 +60,13 @@ object VpnProfileValidator {
                 profile = profile,
             )
             if (manualGroupKey.isNotBlank()) {
-                val profileGroupKey = endpointOptions.firstOrNull { it.code == profile.endpointCode }
+                val endpointOption = endpointOptions.firstOrNull { it.code == profile.endpointCode }
+                val profileGroupKey = if (nokinv) EndpointGroupPolicy.groupKey(profile) else endpointOption
                     ?.let(EndpointGroupPolicy::groupKey)
                     ?: EndpointGroupPolicy.groupKey(profile)
                 if (profileGroupKey != manualGroupKey) return "manual_group_mismatch"
+                if (nokinv && endpointOption != null && EndpointGroupPolicy.manualOptions(listOf(endpointOption))
+                        .none { EndpointGroupPolicy.groupKey(it) == profileGroupKey }) return "manual_group_mismatch"
             } else {
                 val manualCode = advancedSettings.manualEndpointCode.trim()
                 if (manualCode.isNotBlank() && profile.endpointCode != manualCode) return "manual_endpoint_mismatch"

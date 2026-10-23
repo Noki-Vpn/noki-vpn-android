@@ -16,6 +16,42 @@ import org.junit.Test
 
 class EndpointOptionsRefreshPolicyTest {
     @Test
+    fun `automatic country still allows choosing a loaded protocol`() {
+        val option = VpnEndpointOption(code = "nv", host = "node.example", proxyType = "nokinv",
+            security = "tls", transport = "nokinv")
+        val state = AppUiState(userProfile = UserProfile(selectedCountryCode = ""),
+            endpointOptions = listOf(option), endpointOptionsCountryCode = "")
+        val choices = manualEndpointOptionsForCurrentCountry(state)
+        assertEquals(2, choices.size)
+        assertTrue(choices.all { isManualEndpointSelectable(it, state.endpointOptions, "", "") })
+        assertFalse(isManualEndpointSelectable(choices.first(), state.endpointOptions, null, ""))
+    }
+
+    @Test
+    fun `MultiHop options belong to the selected pair and preserve the manual carrier`() {
+        val selection = com.noki.vpn.data.MultiHopSettings(true,
+            com.noki.vpn.data.HopSelection(com.noki.vpn.data.ServerSelectionMode.SERVER, nodeId = "entry"),
+            com.noki.vpn.data.HopSelection(com.noki.vpn.data.ServerSelectionMode.SERVER, nodeId = "exit"))
+        val option = VpnEndpointOption(code = "nv", host = "192.0.2.1", proxyType = "nokinv",
+            security = "tls", transport = "nokinv", port = 20001)
+        val state = AppUiState(advancedSettings = com.noki.vpn.data.AdvancedSettings(
+            protocol = VpnProtocol.NOKINV, endpointSelectionMode = EndpointSelectionMode.MANUAL,
+            manualEndpointGroupKey = "tls|nokinv|tcp", multiHop = selection))
+        val direct = endpointResult(listOf(option))
+        val routed = direct.copy(session = direct.session.copy(multiHop = com.noki.vpn.data.BackendMultiHopSession(
+            selection, "entry", "exit", "192.0.2.1", "a".repeat(64))))
+        val result = EndpointOptionsStateReducer.applyEndpointOptions(state, routed, emptyList())!!.state
+        assertEquals("tls|nokinv|tcp", result.advancedSettings.manualEndpointGroupKey)
+        assertEquals("tcp", result.profile.transportMode)
+        assertNull(result.profile.multiHop)
+        assertEquals("", result.profile.nokinvToken)
+        assertNull(EndpointOptionsStateReducer.applyEndpointOptions(state, direct, emptyList()))
+        assertNull(EndpointOptionsStateReducer.applyEndpointOptions(AppUiState(), routed, emptyList()))
+        assertNull(EndpointOptionsStateReducer.applyEndpointOptions(state.copy(advancedSettings = state.advancedSettings.copy(
+            multiHop = selection.copy(entry = selection.exit, exit = selection.entry))), routed, emptyList()))
+    }
+
+    @Test
     fun transportIdentitySurvivesNodePriorityAndPortChanges() {
         val lv = VpnEndpointOption(code = "lv-nv", locationCode = "lv-2", host = "lv.example",
             proxyType = "nokinv", security = "tls", transport = "nokinv", priority = 100, port = 10443,
@@ -26,7 +62,7 @@ class EndpointOptionsRefreshPolicyTest {
         assertEquals(EndpointGroupPolicy.groupKey(lv), EndpointGroupPolicy.groupKey(pl))
         val selected = com.noki.vpn.data.AdvancedSettings(protocol = VpnProtocol.NOKINV,
             endpointSelectionMode = EndpointSelectionMode.MANUAL, manualEndpointGroupKey = lv.endpointGroupKey)
-        assertEquals(EndpointGroupPolicy.groupKey(pl), EndpointGroupPolicy.resolveManualGroupKey(
+        assertEquals("tls|nokinv|quic", EndpointGroupPolicy.resolveManualGroupKey(
             selected, listOf(pl), com.noki.vpn.data.VlessProfile()))
         val refreshed = EndpointOptionsStateReducer.applyEndpointOptions(AppUiState(advancedSettings = selected),
             endpointResult(listOf(pl.copy(code = "first-tls", proxyType = "vless", transport = "tcp"), pl)), emptyList())!!.state
@@ -51,7 +87,7 @@ class EndpointOptionsRefreshPolicyTest {
     }
 
     @Test
-    fun `manual picker retains three direct profiles and rejects retired or unknown transports`() {
+    fun `manual picker exposes both NokiNV carriers and rejects retired or unknown transports`() {
         val reality = VpnEndpointOption(code = "vision", locationCode = "lv", host = "example.test",
             proxyType = "vless", security = "reality", transport = "tcp")
         val stream = reality.copy(code = "stream", transport = "xhttp", transportMode = "stream-up")
@@ -65,6 +101,7 @@ class EndpointOptionsRefreshPolicyTest {
 
         assertEquals(setOf("nokinv", "stream", "hy2"),
             EndpointGroupPolicy.manualOptions(listOf(nokinv, stream, hy2) + rejected).map { it.code }.toSet())
+        assertEquals(4, EndpointGroupPolicy.manualOptions(listOf(nokinv, stream, hy2) + rejected).size)
     }
 
     @Test

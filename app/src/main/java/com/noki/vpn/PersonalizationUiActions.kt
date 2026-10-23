@@ -6,6 +6,10 @@ import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.BootstrapStateMapper
 import com.noki.vpn.data.GlassMode
 import com.noki.vpn.data.HomeLayoutVariant
+import com.noki.vpn.data.PersonalizationBackgroundStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -57,6 +61,36 @@ internal fun AppUiRuntime.setGlassMode(mode: GlassMode) {
             personalizationSettings = uiState.personalizationSettings.copy(glassMode = mode),
         ),
     )
+}
+
+internal fun AppUiRuntime.setCustomBackground(uri: Uri?) {
+    if (backgroundMutationJob != null) return
+    val store = PersonalizationBackgroundStore(application)
+    val previous = uiState.personalizationSettings.customBackground
+    val job = scope.launch(start = CoroutineStart.LAZY) {
+        var imported: String? = null
+        var committed = false
+        try {
+            imported = uri?.let { store.stage(it) }
+            applyAndPersist(uiState.copy(personalizationSettings =
+                uiState.personalizationSettings.copy(customBackground = imported)))
+            committed = true
+            withContext(Dispatchers.IO) { store.remove(previous) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            if (!committed) uiState = uiState.copy(
+                personalizationSettings = uiState.personalizationSettings.copy(customBackground = previous),
+                inlineMessage = tr(uiState.personalizationSettings.language,
+                    "Не удалось изменить фон. Выберите фото или видео до 128 МБ.",
+                    "Could not change the background. Choose a photo or video up to 128 MB."))
+        } finally {
+            if (!committed) withContext(NonCancellable + Dispatchers.IO) { store.remove(imported) }
+            backgroundMutationJob = null
+        }
+    }
+    backgroundMutationJob = job
+    job.start()
 }
 
 internal fun AppUiRuntime.setVpnStatusNotificationEnabled(enabled: Boolean) {

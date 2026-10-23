@@ -2072,8 +2072,10 @@ class AppVpnService : VpnService() {
         owner: ConnectedWatchdogPolicy.Owner,
         settings: StoredSettings,
     ): CancelableTask? {
+        val networkSignature = underlyingNetworkSource.currentSnapshot()?.signature ?: return null
         if (currentState != VpnConnectionState.CONNECTED ||
             tunnel == null ||
+            activeUnderlyingNetworkSignature != networkSignature ||
             lastUnderlyingAvailability == UnderlyingNetworkAvailability.None ||
             lastUnderlyingAvailability == UnderlyingNetworkAvailability.Unvalidated ||
             connectionOrchestrator.transitionSnapshot().active ||
@@ -2085,8 +2087,6 @@ class AppVpnService : VpnService() {
         val job = backgroundScope.launch {
             val latencyMs = measureRuntimeReadiness(recovery = false)
             if (!currentCoroutineContext().isActive) return@launch
-            val outcome = watchdogController.completeProbe(owner, latencyMs)
-            if (outcome == WatchdogProbeOutcome.Ignored) return@launch
             connectionOrchestrator.withLifecycleLock {
                 if (!currentCoroutineContext().isActive ||
                     !connectionOrchestrator.isCurrent(owner.generationId) ||
@@ -2095,6 +2095,13 @@ class AppVpnService : VpnService() {
                 ) {
                     return@withLifecycleLock
                 }
+                // The physical network can change before its debounced callback arrives.
+                if (underlyingNetworkSource.currentSnapshot()?.signature != networkSignature) {
+                    watchdogController.resetNetworkEvidence()
+                    return@withLifecycleLock
+                }
+                val outcome = watchdogController.completeProbe(owner, latencyMs)
+                if (outcome == WatchdogProbeOutcome.Ignored) return@withLifecycleLock
                 if (outcome == WatchdogProbeOutcome.Healthy) {
                     latencyMs?.let { latency ->
                         SettingsRepository(this@AppVpnService).recordEndpointResult(
@@ -2186,12 +2193,14 @@ class AppVpnService : VpnService() {
         val totalTimeout = if (fastStartup) VpnProbePlanPolicy.STARTUP_TOTAL_TIMEOUT_MILLIS else VpnProbePlanPolicy.TOTAL_TIMEOUT_MILLIS
         val targetTimeout = if (fastStartup) VpnProbePlanPolicy.STARTUP_PER_TARGET_TIMEOUT_MILLIS else VpnProbePlanPolicy.PER_TARGET_TIMEOUT_MILLIS
         val deadline = SystemClock.elapsedRealtime() + totalTimeout
-        for (target in connectedTargets) {
+        for ((index, target) in connectedTargets.withIndex()) {
             currentCoroutineContext().ensureActive()
             val remainingMillis = deadline - SystemClock.elapsedRealtime()
             if (remainingMillis <= 0L) break
             val startedAt = SystemClock.elapsedRealtime()
-            val timeoutMillis = remainingMillis.coerceAtMost(targetTimeout)
+            // Reserve a probe slot for every independent target inside the same startup deadline.
+            val budget = if (fastStartup) remainingMillis / (connectedTargets.size - index) else remainingMillis
+            val timeoutMillis = budget.coerceAtMost(targetTimeout).coerceAtLeast(1L)
             val measure = { connectionOrchestrator.measureDelay(target.url, timeoutMillis) }
             val result = if (fastStartup) withTimeoutOrNull(timeoutMillis) {
                 EndpointProbeRunner.awaitNativeProbe(

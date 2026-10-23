@@ -12,6 +12,8 @@ import com.noki.vpn.data.ServerLocation
 import com.noki.vpn.data.clientLatencyTargetKey
 import com.noki.vpn.data.RuRelayCatalog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 
 internal data class BackendSyncRequest(
     val token: String,
@@ -37,7 +39,7 @@ internal class BackendSyncCoordinator(
     private val profileAvatarLoader: ProfileAvatarLoader,
     private val ruCatalogLoader: suspend (String, String, String?) -> RuRelayCatalog,
 ) {
-    suspend fun syncState(request: BackendSyncRequest): BackendSyncResult {
+    suspend fun syncState(request: BackendSyncRequest): BackendSyncResult = coroutineScope {
         val bootstrap = bootstrapLoader.bootstrap(
             token = request.token,
             deviceId = request.currentDeviceId.ifBlank { null },
@@ -51,15 +53,18 @@ internal class BackendSyncCoordinator(
             }
         }
         if (currentDevice?.isActive != true) throw CurrentDeviceAccessRevokedException()
-        val ruForeignNodes = try {
-            ruCatalogLoader(request.token, currentDevice.id,
-                request.currentDeviceKey.ifBlank { currentDevice.deviceKey }).foreignNodes
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            if (error is BackendException && (error.statusCode == 401 || error.statusCode == 403)) throw error
-            // Optional route discovery must not discard the authenticated base inventory.
-            emptyList()
+        val ruForeignNodes = async {
+            if (!request.baseState.advancedSettings.ruRelayEnabled) return@async emptyList()
+            try {
+                ruCatalogLoader(request.token, currentDevice.id,
+                    request.currentDeviceKey.ifBlank { currentDevice.deviceKey }).foreignNodes
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (error is BackendException && (error.statusCode == 401 || error.statusCode == 403)) throw error
+                // Optional route discovery must not discard the authenticated base inventory.
+                emptyList()
+            }
         }
         val language = request.baseState.personalizationSettings.language
         val mapped = BootstrapStateMapper.mapBootstrap(
@@ -74,30 +79,34 @@ internal class BackendSyncCoordinator(
             previousDeviceAccessRole = request.previousDeviceAccessRole,
             clientLatencyByTarget = request.clientLatencyByTarget,
         )
-        val androidUpdate = androidUpdateLoader.loadStateWithToken(
-            token = request.token,
-            fallbackState = request.baseState.androidUpdate,
-            language = language,
-        )
-        val userProfile = mapped.userProfile.copy(
-            avatarUri = profileAvatarLoader.cachedBackendAvatarUri(
+        val androidUpdate = async {
+            androidUpdateLoader.loadStateWithToken(
                 token = request.token,
-                backendAvatarUrl = bootstrap.user.avatarUrl,
-                fallbackAvatarUri = request.baseState.userProfile.avatarUri,
-            ),
-        )
+                fallbackState = request.baseState.androidUpdate,
+                language = language,
+            )
+        }
+        val userProfile = async {
+            mapped.userProfile.copy(
+                avatarUri = profileAvatarLoader.cachedBackendAvatarUri(
+                    token = request.token,
+                    backendAvatarUrl = bootstrap.user.avatarUrl,
+                    fallbackAvatarUri = request.baseState.userProfile.avatarUri,
+                ),
+            )
+        }
         val patch = BackendSyncPatch(
-            userProfile = userProfile,
+            userProfile = userProfile.await(),
             devices = mapped.devices,
             locations = mapped.locations,
             plans = mapped.plans,
             profile = mapped.profile,
             currentDeviceAccessRole = mapped.currentDeviceAccessRole,
-            androidUpdate = androidUpdate,
-            ruForeignNodes = ruForeignNodes,
+            androidUpdate = androidUpdate.await(),
+            ruForeignNodes = ruForeignNodes.await(),
         )
 
-        return BackendSyncResult(
+        BackendSyncResult(
             patch = patch,
             backendDevices = bootstrap.devices,
             backendLocations = bootstrap.locations,

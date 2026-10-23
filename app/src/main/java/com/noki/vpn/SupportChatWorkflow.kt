@@ -56,6 +56,7 @@ internal class SupportChatWorkflow(
     private val openAttachment: (String, String) -> Unit,
     private val exportAttachment: suspend (String, String) -> Unit,
     private val deleteFile: (String) -> Unit,
+    private val isFileAvailable: (String) -> Boolean,
 ) {
     private var generation = 0L
     private var accountEpoch: Long? = null
@@ -138,7 +139,8 @@ internal class SupportChatWorkflow(
         update(state.copy(attachmentLoading = state.attachmentLoading + attachment.id, attachmentErrors = state.attachmentErrors - attachment.id))
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
-                val path = state.attachmentFiles[attachment.id] ?: downloadAttachment(attempt, attachment)
+                val path = state.attachmentFiles[attachment.id]?.takeIf(isFileAvailable)
+                    ?: downloadAttachment(attempt, attachment)
                 if (owner != generation || !isCurrent(attempt)) { deleteFile(path); return@launch }
                 update(state.copy(attachmentFiles = state.attachmentFiles + (attachment.id to path), attachmentLoading = state.attachmentLoading - attachment.id))
                 when (action) {
@@ -183,7 +185,6 @@ internal class SupportChatWorkflow(
     }
 
     fun updateDraft(value: String) {
-        if (state.isSending) return
         update(state.copy(draft = value.take(4_000), sendError = null))
     }
 
@@ -223,7 +224,8 @@ internal class SupportChatWorkflow(
     }
 
     fun submit() {
-        val content = state.draft.trim()
+        val submittedDraft = state.draft
+        val content = submittedDraft.trim()
         val attachments = state.pendingAttachments
         if (sendJob != null || state.isPreparingAttachment || (content.isEmpty() && attachments.isEmpty())) return
         val attempt = currentAuthAttempt() ?: return
@@ -242,7 +244,8 @@ internal class SupportChatWorkflow(
                     .filter { (remote, local) -> remote.size == local.size && remote.mime == local.mime }
                     .associate { (remote, local) -> remote.id to local.path } else emptyMap()
                 attachments.filter { it.path !in files.values }.forEach { deleteFile(it.path) }
-                update(state.copy(messages = merge(state.messages, listOf(message)), draft = "", isSending = false, sendError = null,
+                update(state.copy(messages = merge(state.messages, listOf(message)),
+                    draft = if (state.draft == submittedDraft) "" else state.draft, isSending = false, sendError = null,
                     pendingAttachments = emptyList(), attachmentFiles = state.attachmentFiles + files))
             } catch (cancelled: CancellationException) {
                 throw cancelled

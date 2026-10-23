@@ -30,12 +30,12 @@ internal fun isManualEndpointSelectable(
     loadedCountryCode: String?,
     selectedCountryCode: String?,
     ruRelayEnabled: Boolean = false,
-): Boolean = !ruRelayEnabled && !selectedCountryCode.isNullOrBlank() &&
+): Boolean = !ruRelayEnabled && loadedCountryCode != null &&
     loadedCountryCode.equals(selectedCountryCode, ignoreCase = true) &&
     option in EndpointGroupPolicy.manualOptions(endpointOptions)
 
 internal fun manualEndpointOptionsForCurrentCountry(state: AppUiState): List<VpnEndpointOption> {
-    if (!state.endpointOptionsCountryCode.equals(
+    if (state.endpointOptionsCountryCode == null || !state.endpointOptionsCountryCode.equals(
             state.userProfile.selectedCountryCode,
             ignoreCase = true,
         )
@@ -98,6 +98,7 @@ internal fun AppUiRuntime.setGamingModeEnabled(enabled: Boolean) {
 
 private fun AppUiRuntime.applyRouteSelection(next: AppUiState) {
     if (next == uiState) return
+    val ruModeChanged = next.advancedSettings.ruRelayEnabled != uiState.advancedSettings.ruRelayEnabled
     endpointOptionsRefreshJob?.cancel()
     endpointOptionsRefreshJob = null
     endpointOptionsRefreshCountryCode = null
@@ -112,6 +113,11 @@ private fun AppUiRuntime.applyRouteSelection(next: AppUiState) {
         profile = persisted.profile,
         endpointOptions = persisted.endpointOptions,
     ), emptyMap()))
+    if (ruModeChanged) {
+        cancelBackendRefresh()
+        uiState = uiState.copy(isRefreshingData = false)
+        launchBackendRefresh(BackendRefreshTrigger.Initial)
+    }
     prepareVpnInAdvance()
     refreshClientLatenciesAsync(uiState.locations)
     if (uiState.connectionState == VpnConnectionState.CONNECTED ||
@@ -138,7 +144,7 @@ internal fun AppUiRuntime.toggleProtectNewDevices(enabled: Boolean) {
 }
 
 internal fun AppUiRuntime.changeProtocol(protocol: VpnProtocol) {
-    if (uiState.advancedSettings.multiHop.enabled || uiState.advancedSettings.ruRelayEnabled ||
+    if (uiState.advancedSettings.ruRelayEnabled ||
         uiState.advancedSettings.gamingModeEnabled ||
         protocol == VpnProtocol.WIREGUARD) return
     val next = AdvancedSettingsStateReducer.changeProtocol(uiState, protocol)
@@ -148,7 +154,7 @@ internal fun AppUiRuntime.changeProtocol(protocol: VpnProtocol) {
 }
 
 internal fun AppUiRuntime.toggleAutoEndpointSelection(enabled: Boolean) {
-    if (uiState.advancedSettings.multiHop.enabled || uiState.advancedSettings.ruRelayEnabled ||
+    if (uiState.advancedSettings.ruRelayEnabled ||
         uiState.advancedSettings.gamingModeEnabled) return
     val next = AdvancedSettingsStateReducer.setAutoEndpointSelection(uiState, enabled)
     val persisted = settingsMutationCoordinator.persistAutoEndpointSelection(next)
@@ -167,12 +173,13 @@ internal fun AppUiRuntime.refreshEndpointOptions(
     context: Context,
     force: Boolean = false,
 ) {
-    if (uiState.advancedSettings.multiHop.enabled || uiState.advancedSettings.ruRelayEnabled ||
+    if (uiState.advancedSettings.ruRelayEnabled ||
         uiState.advancedSettings.gamingModeEnabled) return
     val attempt = authSessionCoordinator.attempt() ?: return
     val selectedCountryCode = uiState.userProfile.selectedCountryCode
     val selectedMode = uiState.userProfile.serverSelectionMode
     val selectedNodeId = uiState.userProfile.selectedNodeId
+    val selectedMultiHop = uiState.advancedSettings.multiHop
     if (!shouldRefreshEndpointOptions(
             force = force,
             optionsCount = uiState.endpointOptions.size,
@@ -212,7 +219,7 @@ internal fun AppUiRuntime.refreshEndpointOptions(
                 uiState.userProfile.serverSelectionMode != selectedMode ||
                 uiState.userProfile.selectedNodeId != selectedNodeId ||
                 uiState.advancedSettings.ruRelayEnabled ||
-                uiState.advancedSettings.multiHop.enabled || uiState.advancedSettings.gamingModeEnabled
+                uiState.advancedSettings.multiHop != selectedMultiHop || uiState.advancedSettings.gamingModeEnabled
             ) {
                 return@launch
             }
@@ -257,7 +264,7 @@ internal fun AppUiRuntime.refreshEndpointOptions(
 }
 
 internal fun AppUiRuntime.selectManualEndpoint(option: VpnEndpointOption) {
-    if (uiState.advancedSettings.multiHop.enabled || uiState.advancedSettings.ruRelayEnabled ||
+    if (uiState.advancedSettings.ruRelayEnabled ||
         uiState.advancedSettings.gamingModeEnabled) return
     if (!isManualEndpointSelectable(
             option = option,

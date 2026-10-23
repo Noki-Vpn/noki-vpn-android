@@ -387,7 +387,7 @@ private fun SupportChatContent(
                 value = chat.draft, onValueChange = onDraftChanged,
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp, max = 136.dp)
                     .padding(horizontal = 4.dp, vertical = 12.dp),
-                enabled = !chat.isSending, minLines = 1, maxLines = 5,
+                minLines = 1, maxLines = 5,
                 textStyle = TextStyle(fontFamily = ManropeFontFamily, fontSize = 15.sp, lineHeight = 22.sp,
                     platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false), color = SettingsTextPrimary),
                 cursorBrush = SolidColor(SettingsAccentPrimary),
@@ -463,7 +463,7 @@ private fun SupportAttachmentTile(attachment: BackendSupportAttachment, path: St
     val context = LocalContext.current
     var imageFailed by remember(path) { mutableStateOf(false) }
     LaunchedEffect(attachment.id) {
-        if (attachment.hasImagePreview && path == null && !loading && error == null) onPreview(attachment)
+        if (attachment.hasImagePreview && !loading && error == null) onPreview(attachment)
     }
     Column(Modifier.width(220.dp).padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (attachment.hasImagePreview && path != null && !imageFailed) {
@@ -474,7 +474,10 @@ private fun SupportAttachmentTile(attachment: BackendSupportAttachment, path: St
                 ImageRequest.Builder(context).data(SupportChatFiles.uri(context, path)).size(widthPx, heightPx)
                     .memoryCachePolicy(CachePolicy.DISABLED).diskCachePolicy(CachePolicy.DISABLED).build()
             }
-            AsyncImage(model = request, contentDescription = attachment.name, onError = { imageFailed = true },
+            AsyncImage(model = request, contentDescription = attachment.name, onError = {
+                imageFailed = true
+                if (!SupportChatFiles.isAvailable(context, path)) onPreview(attachment)
+            },
                 contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(10.dp))
                     .clickable(enabled = !loading) { onOpen(attachment) })
         }

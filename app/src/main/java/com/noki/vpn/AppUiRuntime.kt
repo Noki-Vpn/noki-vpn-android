@@ -41,6 +41,7 @@ internal class AppUiRuntime(
         get() = pendingVpnStartModeState.mode
 
     internal val repository = SettingsRepository(application)
+    internal var backgroundMutationJob: Job? = null
     internal val backendApi = BackendApiClient()
     internal val vpnCommands = AndroidVpnServiceCommandGateway(application)
     internal val accountRecoveryWorkflow = AccountRecoveryCoordinator(backendApi)
@@ -245,7 +246,8 @@ internal class AppUiRuntime(
         openAttachment = { path, mime -> SupportChatFiles.open(application, path, mime) },
         exportAttachment = { path, uri -> SupportChatFiles.export(application, path, uri) },
         deleteFile = { path -> SupportChatFiles.delete(application, path) },
-    )
+        isFileAvailable = { path -> SupportChatFiles.isAvailable(application, path) },
+    ).also { SupportChatFiles.prepareCache(application) }
 
     internal val paymentCheckoutWorkflow = PaymentCheckoutWorkflow(
         scope = scope,

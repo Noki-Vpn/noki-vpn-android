@@ -79,9 +79,8 @@ fun AdvancedSettingsScreen(
             val bypassCount = state.advancedSettings.bypassDomains.size
             var showProtocolSheet by rememberSaveable { mutableStateOf(false) }
             var showProtocolNotice by rememberSaveable { mutableStateOf(false) }
-            LaunchedEffect(state.advancedSettings.ruRelayEnabled, state.advancedSettings.multiHop.enabled,
-                state.advancedSettings.gamingModeEnabled) {
-                if (state.advancedSettings.ruRelayEnabled || state.advancedSettings.multiHop.enabled ||
+            LaunchedEffect(state.advancedSettings.ruRelayEnabled, state.advancedSettings.gamingModeEnabled) {
+                if (state.advancedSettings.ruRelayEnabled ||
                     state.advancedSettings.gamingModeEnabled) showProtocolSheet = false
             }
 
@@ -92,9 +91,11 @@ fun AdvancedSettingsScreen(
                 }
             }
             LaunchedEffect(state.isAuthenticated, state.userProfile.selectedCountryCode,
-                state.advancedSettings.multiHop.enabled, state.advancedSettings.ruRelayEnabled) {
-                if (state.isAuthenticated && !state.advancedSettings.multiHop.enabled &&
-                    !state.advancedSettings.ruRelayEnabled) {
+                state.userProfile.selectedNodeId, state.userProfile.serverSelectionMode,
+                state.advancedSettings.multiHop, state.advancedSettings.ruRelayEnabled,
+                state.advancedSettings.gamingModeEnabled) {
+                if (state.isAuthenticated && !state.advancedSettings.ruRelayEnabled &&
+                    !state.advancedSettings.gamingModeEnabled) {
                     viewModel.refreshEndpointOptions(context)
                 }
             }
@@ -146,7 +147,7 @@ fun AdvancedSettingsScreen(
 
                 Spacer(modifier = Modifier.height(metrics.dp(20f)))
 
-                if (!state.advancedSettings.multiHop.enabled && !state.advancedSettings.ruRelayEnabled) {
+                if (!state.advancedSettings.ruRelayEnabled) {
                     AdvancedToggleCard(
                         enabled = autoEndpointSelection,
                         title = tr(language, "Автовыбор протокола", "Auto protocol selection"),
@@ -165,7 +166,7 @@ fun AdvancedSettingsScreen(
                     )
                 }
 
-                if (!autoEndpointSelection && !state.advancedSettings.multiHop.enabled &&
+                if (!autoEndpointSelection &&
                     !state.advancedSettings.ruRelayEnabled && !state.advancedSettings.gamingModeEnabled) {
                     Spacer(modifier = Modifier.height(metrics.dp(25f)))
 

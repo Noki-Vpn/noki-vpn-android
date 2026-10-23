@@ -71,11 +71,11 @@ if mode=='extract':
     actual={'python':sys.version.split()[0],'zlib':zlib.ZLIB_VERSION,'zlib_runtime':zlib.ZLIB_RUNTIME_VERSION}
     assert actual==inputs['packaging'], 'Packaging runtime mismatch: expected '+str(inputs['packaging'])+', actual '+str(actual)
     assert inputs['source_commit']=='55faa763f986f4ca8a492d9b2719bc6330d2bef5'
-    assert inputs['version']=='1.14.1-extended-2.7.2-nokinv-2'
+    assert inputs['version']=='1.14.1-extended-2.7.2-nokinv-5'
     assert inputs['android_api']==26
     assert inputs['tags']==['with_gvisor','with_quic','with_wireguard','with_utls']
-    assert sha((source/'src/go.mod').read_bytes())=='ad1ea8c28c0831b50d9cc6cd1b74a5e47f38489bde6f2ca21d4c3ca1de08dcb3'
-    assert sha((source/'src/go.sum').read_bytes())=='919b44294c69cc8ae17dc7b84911feaf54a7e5f653fae2a05d6a61e59bf4c02d'
+    assert sha((source/'src/go.mod').read_bytes())=='9f176e32c5bc5789e21b6ab5708dbf9e8d26eaf61bd6968885887d54e22f64e9'
+    assert sha((source/'src/go.sum').read_bytes())=='7aebd46dd3d5c6d61dd479ae7297c8c35b569b54745fe0ca68c5466f7f7ed38a'
     for tree in inputs['trees']:
         root=source/tree['source']
         members=[p for p in sorted(root.rglob('*'),key=lambda p:p.relative_to(root).as_posix()) if p.is_file()]
@@ -179,8 +179,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Pinned module download failed' }
         [IO.File]::WriteAllText((Join-Path $OutputDirectory 'module-downloads.json'), ($downloads -join "`n"), (New-Object Text.UTF8Encoding($false)))
         Invoke-Checked -FilePath $PythonPath -Arguments @('-I', $helperPath, 'downloads', $SourceArchive, $OutputDirectory)
-        if ((Get-Sha256 (Join-Path $sourceRoot 'src\go.mod')) -ne 'ad1ea8c28c0831b50d9cc6cd1b74a5e47f38489bde6f2ca21d4c3ca1de08dcb3' -or
-            (Get-Sha256 (Join-Path $sourceRoot 'src\go.sum')) -ne '919b44294c69cc8ae17dc7b84911feaf54a7e5f653fae2a05d6a61e59bf4c02d') { throw 'Pinned upstream module inputs changed' }
+        if ((Get-Sha256 (Join-Path $sourceRoot 'src\go.mod')) -ne '9f176e32c5bc5789e21b6ab5708dbf9e8d26eaf61bd6968885887d54e22f64e9' -or
+            (Get-Sha256 (Join-Path $sourceRoot 'src\go.sum')) -ne '7aebd46dd3d5c6d61dd479ae7297c8c35b569b54745fe0ca68c5466f7f7ed38a') { throw 'Pinned upstream module inputs changed' }
         Invoke-Checked -FilePath $go -Arguments @('mod','verify')
         $env:GOWORK = 'off'
         Invoke-Checked -FilePath $go -Arguments @('install','github.com/sagernet/gomobile/cmd/gomobile@v0.1.13')

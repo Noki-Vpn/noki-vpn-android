@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.service.quicksettings.TileService
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -88,6 +89,10 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
         viewModel.beginAvatarCrop(uri)
+    }
+
+    private val backgroundPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) viewModel.setCustomBackground(uri)
     }
 
     private val supportAttachmentPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -186,6 +191,13 @@ class MainActivity : ComponentActivity() {
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                         )
                     },
+                    onCustomBackgroundRequested = {
+                        if (viewModel.uiState.personalizationSettings.customBackground != null) {
+                            viewModel.setCustomBackground(null)
+                        } else {
+                            backgroundPickerLauncher.launch(arrayOf("image/*", "video/*"))
+                        }
+                    },
                     onPickSupportAttachmentClicked = {
                         android.app.AlertDialog.Builder(this)
                             .setItems(if (viewModel.uiState.personalizationSettings.language == com.noki.vpn.data.AppLanguage.RU)
@@ -208,6 +220,7 @@ class MainActivity : ComponentActivity() {
         }
         handleTelegramLoginCallback(intent)
         handleAppNotificationActionIntent(intent)
+        handleQuickSettingsIntent(intent)
         maybeRequestStartupPermissions()
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -230,6 +243,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handleTelegramLoginCallback(intent)
         handleAppNotificationActionIntent(intent)
+        handleQuickSettingsIntent(intent)
     }
 
     override fun onStart() {
@@ -443,6 +457,17 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             viewModel.awaitReady()
             viewModel.handleAppNotificationAction(action, nonce)
+        }
+    }
+
+    private fun handleQuickSettingsIntent(intent: Intent?) {
+        if (intent?.action != TileService.ACTION_QS_TILE_PREFERENCES) return
+        intent.action = null
+        lifecycleScope.launch {
+            viewModel.awaitReady()
+            if (viewModel.uiState.isAuthenticated) {
+                viewModel.openTopLevelScreen(AppDestination.HOME)
+            }
         }
     }
 

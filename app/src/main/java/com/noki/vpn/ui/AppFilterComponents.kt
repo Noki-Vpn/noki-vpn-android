@@ -138,6 +138,8 @@ internal fun AppFilterRow(
                 saturation = 1.18f,
                 contrast = 1.06f,
                 brightness = 0.05f,
+                blurAndLensEnabled = false,
+                backdropShadowsEnabled = false,
             )
             .clickable(onClick = onClick)
             .padding(start = metrics.dp(14f), end = metrics.dp(26f)),

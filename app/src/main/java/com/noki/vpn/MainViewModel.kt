@@ -242,6 +242,8 @@ class MainViewModel(
 
     fun setGlassMode(mode: GlassMode) = runtime.setGlassMode(mode)
 
+    fun setCustomBackground(uri: android.net.Uri?) = runtime.setCustomBackground(uri)
+
     fun setVpnStatusNotificationEnabled(enabled: Boolean) = runtime.setVpnStatusNotificationEnabled(enabled)
 
     fun setGamingModeEnabled(enabled: Boolean) = runtime.setGamingModeEnabled(enabled)

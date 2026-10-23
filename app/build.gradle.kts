@@ -43,9 +43,9 @@ val googleWebClientId = providers.gradleProperty("noki.googleWebClientId")
     .orElse("")
     .get()
 val libboxAarFile = layout.projectDirectory.file("libs/libbox.aar")
-val libboxAarSha256 = "7D28EAF41C21204C9E40FA18C437693A0F1B08191351DA57D1893BB0C8C77811"
+val libboxAarSha256 = "975A19408195F86CFA07CF93F81EAE078213715943188966C43E27CC64FBFA55"
 val libboxSourceFile = layout.projectDirectory.file("libs/libbox.SOURCE.zip")
-val libboxSourceSha256 = "974AC7408CC76F3B091E77E0E1BAD4797244F72E485AE7F3CC2DC8973392DD53"
+val libboxSourceSha256 = "00AD9F798DFF53DEFE17DA836EF6C8F5D84747C66FA186BEF49D1410BF83AC3F"
 val geositeFile = layout.projectDirectory.file("src/main/assets/geosite.dat")
 val geositeSha256 = "1B9012AB376E142DA68506385E4B0590ABEB20A0DEAC0169293E1057FCE8D949"
 val geositeSourceFile = layout.projectDirectory.file("../third_party/geosite/SOURCE.zip")
@@ -54,8 +54,8 @@ val geositeLicenseFile = layout.projectDirectory.file("src/main/assets/licenses/
 val prismalAarFile = layout.projectDirectory.file("libs/prismal-1.0.3.aar")
 val prismalAarSha256 = "40D5EAFC3B68554E0D5E159EA02ECDA8CA86EB32A43DC1B3BAE5C65344C08C2A"
 val supportedAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
-val expectedReleaseVersionCode = 291
-val expectedReleaseVersionName = "2.0.5"
+val expectedReleaseVersionCode = 298
+val expectedReleaseVersionName = "2.0.12"
 
 fun String.toBuildConfigString(): String =
     "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
@@ -365,6 +365,7 @@ dependencies {
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("com.google.zxing:core:3.5.3")
     implementation("io.coil-kt.coil3:coil-compose:3.4.0")
+    implementation("io.coil-kt.coil3:coil-gif:3.4.0")
     implementation("com.caverock:androidsvg-aar:1.4")
     implementation("com.squareup.okhttp3:okhttp:5.3.0")
     implementation("com.google.firebase:firebase-messaging")

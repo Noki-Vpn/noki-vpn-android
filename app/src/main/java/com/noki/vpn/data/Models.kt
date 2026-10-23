@@ -279,6 +279,7 @@ data class PersonalizationSettings(
     val homeLayoutVariant: HomeLayoutVariant = HomeLayoutVariant.MAIN,
     val glassMode: GlassMode = GlassMode.FULL,
     val vpnStatusNotificationEnabled: Boolean = true,
+    val customBackground: String? = null,
 )
 
 @Immutable
@@ -312,7 +313,7 @@ data class AdvancedSettings(
             if (ruRelayEnabled) return VpnProtocol.WIREGUARD
             if (gamingModeEnabled) return VpnProtocol.NOKINV
             require(protocol != VpnProtocol.WIREGUARD) { "wireguard_requires_ru_relay" }
-            return if (multiHop.enabled) VpnProtocol.AUTO else protocol
+            return protocol
         }
 }
 

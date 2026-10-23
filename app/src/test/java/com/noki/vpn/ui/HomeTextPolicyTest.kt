@@ -21,6 +21,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeTextPolicyTest {
+    @Test fun connectedNokiNVUsesTheProtocolPickerNamesWhileGamingKeepsItsStatus() {
+        for (language in AppLanguage.entries) {
+            for ((carrier, mode) in listOf("quic" to "quic", "tls" to "tcp")) {
+                val endpoint = VpnEndpointOption(code = "nv", host = "nv.example.com", label = "custom label",
+                    proxyType = "nokinv", transport = "nokinv", transportMode = mode)
+                val expected = EndpointGroupPolicy.manualOptions(listOf(endpoint)).single().label
+                val state = AppUiState(connectionState = VpnConnectionState.CONNECTED,
+                    nokiNvCarrier = carrier, endpointOptions = listOf(endpoint),
+                    personalizationSettings = PersonalizationSettings(language = language),
+                    advancedSettings = AdvancedSettings(ruRelayEnabled = false,
+                        manualEndpointGroupKey = EndpointGroupPolicy.groupKey(endpoint)),
+                    profile = VlessProfile(endpointCode = endpoint.code, proxyType = "nokinv", transport = "nokinv", transportMode = mode))
+                for (auto in listOf(false, true)) assertEquals(expected, protocolCardLabel(state, auto))
+                val gaming = state.copy(advancedSettings = state.advancedSettings.copy(gamingModeEnabled = true))
+                assertTrue(protocolCardLabel(gaming, true).endsWith(if (language == AppLanguage.RU) "Игровой" else "Gaming"))
+            }
+        }
+    }
+
     @Test
     fun autoProtocolLabelFollowsRuntimeFallbackInsteadOfPreviousManualChoice() {
         val nv = VpnEndpointOption(code = "nv", host = "nv.example.com", label = "NokiNV / Auto",
@@ -35,8 +54,8 @@ class HomeTextPolicyTest {
                 transport = hy.transport, security = hy.security),
         )
         assertEquals("Auto (Hysteria2 / UDP)", protocolCardLabel(state, autoEndpointSelection = true))
-        assertEquals("NokiNV / Auto", protocolCardLabel(state, autoEndpointSelection = false))
-        assertEquals("Auto (NokiNV / Auto)", protocolCardLabel(state.copy(
+        assertEquals("NokiNV / QUIC", protocolCardLabel(state, autoEndpointSelection = false))
+        assertEquals("Auto (NokiNV / QUIC)", protocolCardLabel(state.copy(
             profile = state.profile.copy(endpointCode = "")), autoEndpointSelection = true))
     }
 

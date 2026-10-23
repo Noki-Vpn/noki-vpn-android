@@ -99,6 +99,7 @@ fun AppScreen(
     onPickAvatarClicked: () -> Unit,
     onPickSupportAttachmentClicked: () -> Unit = {},
     onSaveSupportAttachment: (com.noki.vpn.SupportAttachmentSaveRequest) -> Unit = {},
+    onCustomBackgroundRequested: () -> Unit = {},
 ) {
     LaunchedEffect(state.supportChat.saveRequest?.id, state.supportChat.savePickerPending) {
         val request = state.supportChat.saveRequest
@@ -281,6 +282,7 @@ fun AppScreen(
                         liveGlassEnabled = liveGlassEnabled,
                         showCenterShade = false,
                     )
+                    PersonalizationBackgroundMedia(state.personalizationSettings.customBackground)
                     if (liveGlassEnabled) AuroraOverlay(
                         scale = scale,
                         visible = shouldShowConnectedAurora(
@@ -435,6 +437,7 @@ fun AppScreen(
                             onPickAvatarClicked = onPickAvatarClicked,
                             onDeleteAvatarClicked = viewModel::deleteAvatar,
                             onAvatarEditDenied = viewModel::showCurrentDeviceAccessDenied,
+                            onCustomBackgroundRequested = onCustomBackgroundRequested,
                             sharedBackdrop = sharedBackgroundBackdrop,
                             liveGlassEnabled = liveGlassEnabled,
                             showBackground = false,

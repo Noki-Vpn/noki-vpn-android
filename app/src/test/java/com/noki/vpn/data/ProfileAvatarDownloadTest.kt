@@ -29,7 +29,41 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [35])
 class ProfileAvatarDownloadTest {
+    @Test
+    fun avatarCacheWaitIsBoundedButExternalCancellationStillPropagates() = runBlocking {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val coordinator = com.noki.vpn.ProfileAvatarCoordinator(context, backendApi(responseBody(byteArrayOf())))
+        val mutex = coordinator.javaClass.getDeclaredField("cacheMutex").apply { isAccessible = true }
+            .get(coordinator) as kotlinx.coroutines.sync.Mutex
+        mutex.lock()
+        try {
+            val fallback = "file:///cached-avatar.jpg"
+            assertEquals(fallback, kotlinx.coroutines.withTimeout(8_000) {
+                coordinator.cachedBackendAvatarUri("token", AVATAR_URL, fallback)
+            })
+            assertEquals(null, coordinator.cachedBackendAvatarUri("token", null, fallback))
+            val failure = runCatching { kotlinx.coroutines.withTimeout(50) {
+                coordinator.cachedBackendAvatarUri("token", AVATAR_URL, fallback)
+            } }.exceptionOrNull()
+            assertTrue(failure is kotlinx.coroutines.TimeoutCancellationException)
+        } finally { mutex.unlock() }
+    }
+
+    @Test
+    fun avatarUnauthorizedResponseReachesTheAuthOwner() = runBlocking {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(401).message("expired")
+                .body(okhttp3.ResponseBody.create("application/json".toMediaType(), "{\"detail\":\"expired\"}")).build()
+        }.build()
+        val api = BackendApiClient(client, BASE_URL)
+        val coordinator = com.noki.vpn.ProfileAvatarCoordinator(context, api)
+        val failure = runCatching { coordinator.cachedBackendAvatarUri("expired", AVATAR_URL, null) }.exceptionOrNull()
+        assertEquals(401, (failure as? BackendException)?.statusCode)
+    }
     @get:Rule
     val temporaryFolder = TemporaryFolder()
 

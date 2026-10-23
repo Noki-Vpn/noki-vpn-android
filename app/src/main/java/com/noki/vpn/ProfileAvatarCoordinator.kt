@@ -11,11 +11,13 @@ import androidx.core.net.toUri
 import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.AvatarCachePolicy
 import com.noki.vpn.data.BackendApiClient
+import com.noki.vpn.data.BackendException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
@@ -155,21 +157,24 @@ internal class ProfileAvatarCoordinator(
     ): String? {
         val avatarUrl = backendAvatarUrl?.takeIf { it.isNotBlank() } ?: return null
         return try {
-            cacheMutex.withLock {
-                val target = avatarCacheFile(avatarUrl)
-                if (target.length() <= 0L) {
-                    backendApi.downloadProfileAvatar(
-                        token = token,
-                        avatarUrl = avatarUrl,
-                        destination = target,
-                    )
+            withTimeoutOrNull(5_000L) {
+                cacheMutex.withLock {
+                    val target = avatarCacheFile(avatarUrl)
+                    if (target.length() <= 0L) {
+                        backendApi.downloadProfileAvatar(
+                            token = token,
+                            avatarUrl = avatarUrl,
+                            destination = target,
+                        )
+                    }
+                    target.takeIf { it.length() > 0L }?.toUri()?.toString()
+                        ?: throw IllegalStateException("avatar_open_failed")
                 }
-                target.takeIf { it.length() > 0L }?.toUri()?.toString()
-                    ?: throw IllegalStateException("avatar_open_failed")
-            }
+            } ?: fallbackAvatarUri?.takeIf { it.startsWith("file:", ignoreCase = true) }
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            if (error is BackendException && error.statusCode == 401) throw error
             fallbackAvatarUri?.takeIf { cached -> cached.startsWith("file:", ignoreCase = true) }
         }
     }

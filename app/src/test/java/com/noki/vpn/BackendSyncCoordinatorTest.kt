@@ -16,9 +16,10 @@ import com.noki.vpn.data.ServerSelectionMode
 import com.noki.vpn.data.VpnServer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
-import org.junit.Assert.assertSame
 import org.junit.Test
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -28,6 +29,29 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import org.json.JSONException
 
 class BackendSyncCoordinatorTest {
+    @Test
+    fun directRefreshSkipsRuDiscoveryAndLoadsIndependentDataConcurrently() = runBlocking {
+        val updateStarted = CompletableDeferred<Unit>()
+        val avatarStarted = CompletableDeferred<Unit>()
+        val coordinator = BackendSyncCoordinator(
+            bootstrapLoader = BackendBootstrapLoader { _, _, _ -> payload(listOf(device("device-1", "key-1"))) },
+            androidUpdateLoader = AndroidUpdateStateLoader { _, state, _ ->
+                updateStarted.complete(Unit)
+                avatarStarted.await()
+                state
+            },
+            profileAvatarLoader = ProfileAvatarLoader { _, _, cached ->
+                avatarStarted.complete(Unit)
+                updateStarted.await()
+                cached
+            },
+            ruCatalogLoader = { _, _, _ -> error("Disabled RU relay must never be queried") },
+        )
+        val result = withTimeout(1_000) { coordinator.syncState(request()) }
+        assertTrue(result.patch.ruForeignNodes.isEmpty())
+        assertEquals("user", result.patch.userProfile.username)
+    }
+
     @Test
     fun unavailableRuDiscoveryKeepsBootstrapAndSavedNodeSelection() = runBlocking {
         val node = VpnServer("lv-2", "Latvia 2", "LV", "lv2", "probe.example", 443, true)
@@ -70,7 +94,12 @@ class BackendSyncCoordinatorTest {
                 profileAvatarLoader = ProfileAvatarLoader { _, _, cached -> cached },
                 ruCatalogLoader = { _, _, _ -> throw failure },
             )
-            assertSame(failure, runCatching { coordinator.syncState(request()) }.exceptionOrNull())
+            val actual = runCatching { coordinator.syncState(request().copy(
+                baseState = AppUiState(advancedSettings = AdvancedSettings(ruRelayEnabled = true)),
+            )) }.exceptionOrNull()
+            assertEquals(failure.javaClass, actual?.javaClass)
+            assertEquals(failure.message, actual?.message)
+            assertEquals((failure as? BackendException)?.statusCode, (actual as? BackendException)?.statusCode)
         }
     }
 
@@ -118,7 +147,8 @@ class BackendSyncCoordinatorTest {
         val offline = java.io.IOException("offline")
         val coordinator = coordinator(BackendBootstrapLoader { _, _, _ -> throw offline })
         val result = runCatching { coordinator.syncState(request()) }
-        assertSame(offline, result.exceptionOrNull())
+        assertEquals(offline.javaClass, result.exceptionOrNull()?.javaClass)
+        assertEquals(offline.message, result.exceptionOrNull()?.message)
     }
 
     private suspend fun assertRevoked(devices: List<BackendDevice>, id: String, key: String) {
@@ -186,6 +216,7 @@ class BackendSyncCoordinatorTest {
             },
         )
         val requestState = AppUiState(
+            advancedSettings = AdvancedSettings(ruRelayEnabled = true),
             userProfile = UserProfile(username = "request-user", avatarUri = "file:///old-avatar.jpg"),
             inlineMessage = "request-only-message",
         )

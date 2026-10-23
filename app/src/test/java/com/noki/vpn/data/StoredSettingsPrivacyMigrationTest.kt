@@ -2,10 +2,22 @@ package com.noki.vpn.data
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class StoredSettingsPrivacyMigrationTest {
     private val codec = StoredSettingsCodec(DefaultStoredSettingsFactory::create)
+
+    @Test fun customBackgroundIsLocalOptionalAndRoundTripsWithoutChangingOtherPreferences() {
+        val defaults = DefaultStoredSettingsFactory.create()
+        assertNull(codec.decode(null).personalizationSettings.customBackground)
+        val name = "a41b08f0-426c-4ec1-93ae-e1ae549f535d.video"
+        val custom = defaults.copy(personalizationSettings = defaults.personalizationSettings.copy(customBackground = name))
+        assertEquals(custom.personalizationSettings, codec.decode(codec.encode(custom)).personalizationSettings)
+        assertNull(codec.decode("""{"customBackground":"../../private.video"}""").personalizationSettings.customBackground)
+        assertNull(codec.decode(codec.encode(defaults)).personalizationSettings.customBackground)
+    }
 
     @Test
     fun notificationStatusDefaultsOnAndExplicitChoiceSurvivesRoundTrip() {

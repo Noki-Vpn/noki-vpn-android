@@ -15,15 +15,23 @@ internal fun protocolCardLabel(
     autoEndpointSelection: Boolean,
 ): String {
     if (state.connectionState == VpnConnectionState.CONNECTED && state.profile.proxyType == "nokinv") {
+        if (!state.advancedSettings.gamingModeEnabled) {
+            val option = optionFromProfile(state).let { endpoint ->
+                endpoint.copy(transportMode = when (state.nokiNvCarrier) {
+                    "quic" -> "quic"
+                    "tls" -> "tcp"
+                    else -> endpoint.transportMode
+                })
+            }
+            return EndpointGroupPolicy.displayLabelFor(option)
+        }
         val carrier = when (state.nokiNvCarrier) {
             "quic" -> "QUIC (UDP)"
             "tls" -> "TCP/TLS"
             "mixed" -> "UDP + TCP"
             else -> null
         }
-        if (carrier != null) return "NokiNV · $carrier" + if (state.advancedSettings.gamingModeEnabled) {
-            " · " + tr(state.personalizationSettings.language, "Игровой", "Gaming")
-        } else ""
+        if (carrier != null) return "NokiNV · $carrier · " + tr(state.personalizationSettings.language, "Игровой", "Gaming")
     }
     if (state.advancedSettings.gamingModeEnabled) return "NokiNV / Gaming"
     if (state.advancedSettings.ruRelayEnabled) return "Auto"

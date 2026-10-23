@@ -20,11 +20,27 @@ data class SupportAttachmentSaveRequest(val path: String, val name: String, val 
 
 /** Only private temporary files; the workflow owns their account-bound lifetime. */
 internal object SupportChatFiles {
+    private var cachePrepared = false
+
+    @Synchronized
+    fun prepareCache(context: Context) {
+        if (cachePrepared) return
+        // The workflow's file references are memory-only; old process files have no owner.
+        runCatching {
+            val directory = directory(context).canonicalFile
+            directory.listFiles()?.filter { it.isFile && it.canonicalFile.parentFile == directory &&
+                it.name.matches(Regex("[0-9a-f-]{36}\\.bin(?:\\.part)?")) }?.forEach { it.delete() }
+        }
+        cachePrepared = true
+    }
+
     fun directory(context: Context): File = File(context.cacheDir, "support_chat").apply { mkdirs() }
 
     fun destination(context: Context): File = File(directory(context), "${UUID.randomUUID()}.bin")
 
     fun suggestedName(name: String): String = safeName(name)
+
+    fun isAvailable(context: Context, path: String): Boolean = runCatching { checkedFile(context, path) }.isSuccess
 
     fun uri(context: Context, path: String) = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(path))
 

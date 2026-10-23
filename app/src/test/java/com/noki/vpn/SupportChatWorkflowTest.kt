@@ -17,6 +17,31 @@ import org.junit.Test
 import java.io.IOException
 
 class SupportChatWorkflowTest {
+    @Test fun `typing while sending survives the acknowledgement and duplicate send stays blocked`() = runBlocking {
+        val f = Fixture(this)
+        val delivery = CompletableDeferred<BackendSupportMessage>()
+        var requests = 0
+        f.sendResponse = { content, _ ->
+            requests++
+            assertEquals("First", content)
+            delivery.await()
+        }
+        f.workflow.open()
+        f.workflow.updateDraft("First"); f.workflow.submit(); yield()
+        assertTrue(f.state.supportChat.isSending)
+        f.workflow.updateDraft("Next message")
+        assertEquals("Next message", f.state.supportChat.draft)
+        f.workflow.submit(); yield()
+        assertEquals(1, requests)
+        delivery.complete(message(4, "First")); yield()
+        assertEquals("Next message", f.state.supportChat.draft)
+        assertFalse(f.state.supportChat.isSending)
+        f.sendResponse = { content, _ -> message(5, content) }
+        f.workflow.submit(); yield()
+        assertEquals("Next message", f.state.supportChat.messages.last().content)
+        assertEquals("", f.state.supportChat.draft)
+    }
+
     @Test fun `immediate completion does not leave a finished request blocking future requests`() {
         val f = Fixture(CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
         f.workflow.open()
@@ -42,6 +67,7 @@ class SupportChatWorkflowTest {
         var sendFile: List<SupportAttachmentDraft> = emptyList()
         var staged: suspend (String) -> SupportAttachmentDraft = { SupportAttachmentDraft("private/picked.txt", "picked.txt", "text/plain", 3) }
         var downloaded: suspend (BackendSupportAttachment) -> String = { "private/${it.id}.txt" }
+        var fileAvailable: (String) -> Boolean = { true }
         val deleted = mutableListOf<String>()
         val opened = mutableListOf<String>()
         val exported = mutableListOf<Pair<String, String>>()
@@ -49,7 +75,7 @@ class SupportChatWorkflowTest {
             { AuthSessionAttempt("access", epoch) }, { it.epoch == epoch },
             { _, before -> loadResponse(before) }, { _, text, id, file -> sendFile = file; sendResponse(text, id) },
             { staged(it) }, { _, file -> downloaded(file) }, { path, _ -> opened += path },
-            { path, uri -> exported += path to uri }, { deleted += it })
+            { path, uri -> exported += path to uri }, { deleted += it }, { fileAvailable(it) })
     }
 
     @Test fun `history merges canonical IDs and older pages without duplicates`() = runBlocking {
@@ -215,6 +241,28 @@ class SupportChatWorkflowTest {
         assertEquals(10, f.state.supportChat.pendingAttachments.size)
         f.workflow.removeAttachment("content://file/1")
         assertEquals(9, f.state.supportChat.pendingAttachments.size)
+    }
+
+    @Test fun `evicted cached attachment downloads again before preview open or save`() = runBlocking {
+        for (action in SupportAttachmentAction.entries) {
+            val f = Fixture(this)
+            f.workflow.open()
+            val attachment = BackendSupportAttachment(8, 4, "file", "reply.txt", 3, "text/plain")
+            f.state = f.state.copy(supportChat = f.state.supportChat.copy(
+                messages = listOf(message(4).copy(attachments = listOf(attachment))),
+                attachmentFiles = mapOf(8L to "private/evicted.txt")))
+            f.fileAvailable = { it != "private/evicted.txt" }
+            var downloads = 0
+            f.downloaded = { downloads++; "private/new.txt" }
+            f.workflow.loadAttachment(attachment, action); yield()
+            assertEquals(1, downloads)
+            assertEquals("private/new.txt", f.state.supportChat.attachmentFiles[8])
+            when (action) {
+                SupportAttachmentAction.Open -> assertEquals(listOf("private/new.txt"), f.opened)
+                SupportAttachmentAction.Save -> assertEquals("private/new.txt", f.state.supportChat.saveRequest?.path)
+                SupportAttachmentAction.Preview -> assertTrue(f.opened.isEmpty())
+            }
+        }
     }
 
 }

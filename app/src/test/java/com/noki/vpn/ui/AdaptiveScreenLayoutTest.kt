@@ -720,6 +720,25 @@ class AdaptiveScreenLayoutTest {
     }
 
     @Test
+    fun multiHopWithoutRuKeepsProtocolControlsVisible() {
+        val viewModel = layoutViewModel()
+        val normal = russianState()
+        val pair = normal.copy(advancedSettings = normal.advancedSettings.copy(
+            multiHop = com.noki.vpn.data.MultiHopSettings(enabled = true),
+            ruRelayEnabled = false, protocol = com.noki.vpn.data.VpnProtocol.NOKINV,
+            endpointSelectionMode = com.noki.vpn.data.EndpointSelectionMode.MANUAL,
+        ))
+        render {
+            AdvancedSettingsScreen(pair, viewModel, rememberPrismalGlassLayer(),
+                liveGlassEnabled = false, showBackground = false)
+        }.use {
+            compose.onNodeWithText("Автовыбор протокола").assertIsDisplayed()
+            compose.onNodeWithText("Сменить").assertIsDisplayed()
+            saveImage("multihop-manual-protocol")
+        }
+    }
+
+    @Test
     fun gamingToggleFollowsRuRelayAndRemainsReachableWhenEnabled() {
         val viewModel = layoutViewModel()
         val normal = russianState()

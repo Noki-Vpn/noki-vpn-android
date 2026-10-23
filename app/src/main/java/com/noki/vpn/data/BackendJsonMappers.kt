@@ -637,7 +637,10 @@ internal object BackendVpnSessionJsonParser {
         require(json.getInt("version") == 2 && selection.getInt("version") == 2 &&
             selection.getJSONArray("excluded_pairs").length() == 0) { "multihop_version_invalid" }
         fun hop(value: JSONObject): HopSelection {
-            require(value.getString("kind") == "node" && value.length() == 2) { "multihop_selector_invalid" }
+            require(value.getString("kind") == "node" && value.isNull("country_code") &&
+                value.keys().asSequence().all { it in setOf("kind", "node_id", "country_code") }) {
+                "multihop_selector_invalid"
+            }
             return HopSelection(ServerSelectionMode.SERVER, nodeId = canonicalRuUuid(value.getString("node_id")))
         }
         val settings = MultiHopSettings(true, hop(selection.getJSONObject("entry")), hop(selection.getJSONObject("exit")))

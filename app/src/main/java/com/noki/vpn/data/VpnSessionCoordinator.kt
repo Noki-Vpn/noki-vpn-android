@@ -188,7 +188,7 @@ class VpnSessionCoordinator(
             onDiagnostic = onDiagnostic,
         )
         val endpointOptions = EndpointSelector.optionsFromSession(deviceSession.session)
-        val advancedSettings = if (multiHop) settings.advancedSettings else EndpointGroupPolicy.settingsAfterSelection(
+        val advancedSettings = EndpointGroupPolicy.settingsAfterSelection(
             settings = settings.advancedSettings,
             endpointCode = selection.endpointCode,
             endpointOptions = endpointOptions,

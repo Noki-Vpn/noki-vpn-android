@@ -18,6 +18,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BackendMultiHopContractTest {
+    @Test
+    fun `node selectors accept absent or null country but reject ambiguous selectors`() {
+        val expected = BackendVpnSessionJsonParser.parse(fixture())
+        val payload = fixture()
+        for (side in listOf("entry", "exit")) {
+            payload.getJSONObject("multihop").getJSONObject("selection").getJSONObject(side)
+                .put("country_code", JSONObject.NULL)
+        }
+        assertEquals(expected, BackendVpnSessionJsonParser.parse(payload))
+        for (side in listOf("entry", "exit")) {
+            for ((key, value) in listOf("country_code" to "LV", "country_code" to "", "unknown" to "field")) {
+                val invalid = JSONObject(payload.toString())
+                invalid.getJSONObject("multihop").getJSONObject("selection").getJSONObject(side).put(key, value)
+                assertThrows(IllegalArgumentException::class.java) { BackendVpnSessionJsonParser.parse(invalid) }
+            }
+        }
+    }
+
     private fun youtubeCascade(): JSONObject = JSONObject()
         .put("host", "cascade.example.test").put("port", 443)
         .put("uuid", "11111111-1111-4111-8111-111111111111").put("server_name", "cdn.example.test")

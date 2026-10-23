@@ -50,7 +50,7 @@ class SettingsMutationCoordinatorTest {
             val saved = coordinator.persistServerSelection("PL", mode, "pl-1")
             assertEquals(VpnProtocol.NOKINV, saved.advancedSettings.protocol)
             assertEquals(EndpointSelectionMode.MANUAL, saved.advancedSettings.endpointSelectionMode)
-            assertEquals("tls|nokinv|", saved.advancedSettings.manualEndpointGroupKey)
+            assertEquals("tls|nokinv|quic", saved.advancedSettings.manualEndpointGroupKey)
             assertEquals("", saved.advancedSettings.manualEndpointCode)
         }
     }

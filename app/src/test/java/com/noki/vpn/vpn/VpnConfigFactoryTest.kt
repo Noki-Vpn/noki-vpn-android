@@ -28,6 +28,7 @@ class VpnConfigFactoryTest {
         assertEquals(token, outbound.getString("token"))
         assertEquals(3, outbound.getInt("credential_generation"))
         assertEquals("auto", outbound.getString("transport"))
+        assertFalse(outbound.has("quic_version"))
         assertEquals("balanced", outbound.getString("mode"))
         assertEquals("stream", outbound.getString("tcp_exchange"))
         assertEquals("off", outbound.getString("shaping"))
@@ -36,6 +37,15 @@ class VpnConfigFactoryTest {
         assertEquals("/custom", JSONObject(VpnConfigFactory.buildProbe(profile.copy(path = "/custom")))
             .getJSONArray("outbounds").getJSONObject(0).getString("path"))
         assertFalse(outbound.has("uuid"))
+        for (mode in listOf("", "quic", "tcp")) {
+            val selected = profile.copy(transportMode = mode)
+            for (config in listOf(VpnConfigFactory.buildProbe(selected),
+                VpnConfigFactory.build(selected, settings, geosite))) {
+                val configured = JSONObject(config).getJSONArray("outbounds").getJSONObject(0)
+                assertFalse(configured.has("quic_version"))
+                assertEquals(mode.ifBlank { "auto" }, configured.getString("transport"))
+            }
+        }
         assertFalse(com.noki.vpn.data.VpnProfileValidator.isUsable(profile.copy(nokinvToken = ""), settings))
         assertTrue(com.noki.vpn.data.VpnProfileValidator.isUsable(profile, AdvancedSettings(ruRelayEnabled = false)))
     }
@@ -57,6 +67,14 @@ class VpnConfigFactoryTest {
             .getJSONArray("outbounds").getJSONObject(0)
         assertEquals("nokinv", outbound.getString("type"))
         assertEquals("gaming", outbound.getString("mode"))
+        assertFalse(outbound.has("quic_version"))
+        for (mode in listOf("quic", "tcp")) {
+            val cached = JSONObject(VpnConfigFactory.build(profile.copy(transportMode = mode), settings, geosite))
+                .getJSONArray("outbounds").getJSONObject(0)
+            assertEquals("auto", cached.getString("transport"))
+            assertEquals("gaming", cached.getString("mode"))
+            assertFalse(cached.has("quic_version"))
+        }
         assertThrows(IllegalArgumentException::class.java) {
             VpnConfigFactory.build(profile(), settings, geosite)
         }

@@ -63,7 +63,7 @@ class AdvancedSettingsStateReducerTest {
             ),
         )
 
-        assertEquals(VpnProtocol.AUTO, current.advancedSettings.effectiveProtocol)
+        assertEquals(VpnProtocol.REALITY, current.advancedSettings.effectiveProtocol)
         val enabled = AdvancedSettingsStateReducer.setRuRelayEnabled(current, true)
         assertEquals(VpnProtocol.WIREGUARD, enabled.advancedSettings.effectiveProtocol)
         assertEquals(VpnProtocol.REALITY, enabled.advancedSettings.protocol)
@@ -73,7 +73,7 @@ class AdvancedSettingsStateReducerTest {
         assertEquals("", enabled.profile.endpointCode)
 
         val disabled = AdvancedSettingsStateReducer.setRuRelayEnabled(enabled, false)
-        assertEquals(VpnProtocol.AUTO, disabled.advancedSettings.effectiveProtocol)
+        assertEquals(VpnProtocol.REALITY, disabled.advancedSettings.effectiveProtocol)
         assertEquals(true, disabled.advancedSettings.multiHop.enabled)
         assertEquals(manual.entry, disabled.advancedSettings.multiHop.entry)
         assertEquals("", disabled.profile.uuid)

@@ -8,6 +8,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PersonalizationGlassModeSelectorTest {
+    @Test fun `background easter egg requires ten taps within one burst and resets afterwards`() {
+        val taps = BackgroundEasterEggTaps()
+        repeat(9) { assertFalse(taps.tap(it * 100L)) }
+        assertTrue(taps.tap(900))
+        repeat(9) { assertFalse(taps.tap(1_000 + it * 100L)) }
+        assertTrue(taps.tap(1_900))
+        repeat(9) { assertFalse(taps.tap(2_000 + it * 100L)) }
+        assertFalse(taps.tap(8_000))
+        repeat(8) { assertFalse(taps.tap(8_100 + it * 100L)) }
+        assertTrue(taps.tap(8_900))
+    }
+
     @Test
     fun `full glass toggle maps to the two remaining modes`() {
         assertEquals(listOf(GlassMode.SIMPLE, GlassMode.FULL), GlassMode.entries)

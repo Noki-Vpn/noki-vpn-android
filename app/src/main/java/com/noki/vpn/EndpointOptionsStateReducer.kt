@@ -19,8 +19,9 @@ object EndpointOptionsStateReducer {
         result: VpnSessionCoordinator.EndpointOptionsResult,
         syncedDevices: List<BackendDevice>,
     ): Result? {
-        if (current.advancedSettings.ruRelayEnabled || current.advancedSettings.multiHop.enabled ||
+        if (current.advancedSettings.ruRelayEnabled ||
             current.advancedSettings.gamingModeEnabled) return null
+        if (result.session.multiHop?.selection != current.advancedSettings.multiHop.takeIf { it.enabled }) return null
         val options = result.endpointOptions
         if (options.isEmpty()) return null
 
@@ -67,10 +68,11 @@ object EndpointOptionsStateReducer {
             endpointOptions = options,
             profile = current.profile,
         )
-        if (currentGroupKey.isNotBlank()) return options.firstOrNull {
+        val manualOptions = EndpointGroupPolicy.manualOptions(options)
+        if (currentGroupKey.isNotBlank()) return manualOptions.firstOrNull {
             EndpointGroupPolicy.groupKey(it) == currentGroupKey
         }
-        return options.firstOrNull {
+        return manualOptions.firstOrNull {
             VpnProtocol.fromBackendCode(it.security, it.proxyType) == current.advancedSettings.protocol
         }
     }

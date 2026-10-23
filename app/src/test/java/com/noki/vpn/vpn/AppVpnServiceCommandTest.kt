@@ -862,13 +862,18 @@ class AppVpnServiceCommandTest {
                 it.action == AppVpnService.ACTION_STATE_CHANGED
             }
             assertEquals(carrier, broadcast.getStringExtra(AppVpnService.EXTRA_NOKINV_CARRIER))
-            assertEquals("NokiNV · $text", label())
+            val normalLabel = when (carrier) {
+                "quic" -> "NokiNV / QUIC"
+                "tls" -> "NokiNV / TCP"
+                else -> "NokiNV / Auto"
+            }
+            assertEquals(normalLabel, label())
             assertEquals("NokiNV · $text · Игровой", label(gaming = true))
         }
         fixture.runtimeCarrier = ""
         fixture.invoke("updateActiveNotification")
         assertEquals("", AppVpnService.liveRuntimeState().nokiNvCarrier)
-        assertEquals("Auto (NokiNV / Auto)", label())
+        assertEquals("NokiNV / Auto", label())
         fixture.runtimeCarrier = "quic"
         fixture.invoke("updateActiveNotification")
         fixture.stop(1)
@@ -879,6 +884,23 @@ class AppVpnServiceCommandTest {
             it.action == AppVpnService.ACTION_STATE_CHANGED
         }
         assertEquals("", stopped.getStringExtra(AppVpnService.EXTRA_NOKINV_CARRIER))
+    }
+
+    @Test
+    fun slowFirstTwoReadinessTargetsCannotStarveTheThirdStartupTarget() = runBlocking {
+        val fixture = Fixture(this, probeFallback = true, workingEndpoint = null)
+        fixture.runtimeRunning = true
+        fixture.startedEndpoints += "tcp1"
+        fixture.onProbe = {
+            if (fixture.probeTimeouts.size < 3) {
+                org.robolectric.shadows.ShadowSystemClock.advanceBy(
+                    java.time.Duration.ofMillis(fixture.probeTimeouts.last()))
+            } else fixture.workingEndpoint = "tcp1"
+        }
+        val start = android.os.SystemClock.elapsedRealtime()
+        assertEquals(30L, fixture.measureReadiness(fastStartup = true))
+        assertEquals(3, fixture.probeTimeouts.size)
+        org.junit.Assert.assertTrue(android.os.SystemClock.elapsedRealtime() - start <= VpnProbePlanPolicy.STARTUP_TOTAL_TIMEOUT_MILLIS)
     }
 
     @Test
@@ -925,6 +947,7 @@ class AppVpnServiceCommandTest {
         val workers = kotlinx.coroutines.SupervisorJob()
         val scope = CoroutineScope(workers + kotlinx.coroutines.Dispatchers.IO)
         val fixture = Fixture(scope, probeFallback = true, workingEndpoint = "tcp1")
+        fixture.setNetworkAvailability(UnderlyingNetworkAvailability.Validated)
         fixture.startPrepared()
         val settings = checkNotNull(fixture.orchestrator.currentSettings())
         val runtimeOwner = checkNotNull(fixture.orchestrator.snapshot().owner)
@@ -1033,6 +1056,41 @@ class AppVpnServiceCommandTest {
         assertEquals(1, fixture.runtimeRebinds)
         fixture.stop(1)
         fixture.orchestrator.activeTransitionJob()?.join()
+    }
+
+    @Test
+    fun networkLostDuringWatchdogProbeBeforeCallbackCannotStartRecovery(): Unit = runBlocking {
+        val fixture = Fixture(this, probeFallback = true, workingEndpoint = "tcp1")
+        fixture.setNetworkAvailability(UnderlyingNetworkAvailability.Validated)
+        fixture.startPrepared(EndpointSelectionMode.MANUAL)
+        fixture.useOfflinePreparation(java.io.IOException("network lost"))
+        val settings = checkNotNull(fixture.orchestrator.currentSettings())
+        val runtimeOwner = checkNotNull(fixture.orchestrator.snapshot().owner)
+        val generation = fixture.orchestrator.currentGenerationId()
+        val stops = fixture.runtimeStops
+        val watchdog = VpnWatchdogController(
+            HandlerDelayedTaskScheduler(android.os.Handler(Looper.getMainLooper())),
+            { 0L }, fixture::launchWatchdogProbe, { false })
+        fixture.set("watchdogController", watchdog)
+        watchdog.start(ConnectedWatchdogPolicy.Owner(generation,
+            System.identityHashCode(fixture.orchestrator.currentTunnel()), runtimeOwner.coreId),
+            settings, initialVpnEvidence = false)
+        fixture.workingEndpoint = null
+        try {
+            watchdog.forceProbe()
+            yield()
+            fixture.onProbe = { fixture.setNetworkAvailability(UnderlyingNetworkAvailability.None) }
+            watchdog.forceProbe()
+            yield()
+            assertEquals("underlay loss must not start endpoint recovery before the debounced callback",
+                generation, fixture.orchestrator.currentGenerationId())
+            assertEquals(stops, fixture.runtimeStops)
+            assertEquals(VpnConnectionState.CONNECTED, fixture.orchestrator.currentState())
+        } finally {
+            watchdog.stop(null)
+            fixture.stop(1)
+            fixture.orchestrator.activeTransitionJob()?.join()
+        }
     }
 
     @Test
@@ -2033,10 +2091,10 @@ class AppVpnServiceCommandTest {
             orchestrator.updateSettings(settings)
         }
 
-        suspend fun measureReadiness(): Long? = suspendCoroutineUninterceptedOrReturn { continuation ->
+        suspend fun measureReadiness(fastStartup: Boolean = false): Long? = suspendCoroutineUninterceptedOrReturn { continuation ->
             try {
                 AppVpnService::class.java.declaredMethods.single { it.name == "measureRuntimeReadiness" }
-                    .apply { isAccessible = true }.invoke(service, false, false, continuation)
+                    .apply { isAccessible = true }.invoke(service, false, fastStartup, continuation)
             } catch (error: java.lang.reflect.InvocationTargetException) { throw error.targetException }
         }
 

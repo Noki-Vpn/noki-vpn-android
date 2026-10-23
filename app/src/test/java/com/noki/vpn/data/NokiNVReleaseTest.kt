@@ -17,6 +17,53 @@ class NokiNVReleaseTest {
         publicKey = null, shortId = null, flow = null)
     private val hy = hysteriaCandidate("hy")
 
+    @Test fun manualNokiNvCarriersStayDistinctAcrossCatalogRefreshAndCountryChange() {
+        val option = VpnEndpointOption(code = nv.code, host = nv.entryHost, port = nv.entryPort,
+            proxyType = "nokinv", transport = "nokinv", security = "tls")
+        val options = EndpointGroupPolicy.manualOptions(listOf(option, option.copy(code = "other-node", locationCode = "other")))
+        assertEquals(listOf("NokiNV / QUIC", "NokiNV / TCP"), options.map { it.label })
+        for (mode in listOf("quic", "tcp")) {
+            val selected = options.single { it.transportMode == mode }
+            val settings = AdvancedSettings(protocol = VpnProtocol.NOKINV, endpointSelectionMode = EndpointSelectionMode.MANUAL,
+                manualEndpointCode = selected.code, manualEndpointGroupKey = selected.endpointGroupKey)
+            val candidate = EndpointGroupPolicy.manualCandidates(listOf(nv, hy), settings).single()
+            assertEquals(nv.code, candidate.code)
+            assertEquals(mode, candidate.transportMode)
+            val profile = EndpointSelector.profileFromCandidate(candidate, "").copy(
+                nokinvToken = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 1 }),
+                nokinvCredentialGeneration = 1)
+            assertTrue(VpnProfileValidator.isUsable(profile, settings, endpointOptions = listOf(option)))
+            assertFalse(VpnProfileValidator.isUsable(profile.copy(transportMode = if (mode == "quic") "tcp" else "quic"),
+                settings, endpointOptions = listOf(option)))
+            assertFalse(VpnProfileValidator.isUsable(profile, settings,
+                endpointOptions = listOf(option.copy(transportMode = if (mode == "quic") "tcp" else "quic"))))
+            assertEquals(settings.manualEndpointGroupKey,
+                EndpointGroupPolicy.settingsAfterSelection(settings, candidate.code, listOf(option)).manualEndpointGroupKey)
+            assertEquals(settings.manualEndpointGroupKey,
+                EndpointGroupPolicy.settingsAfterSelection(settings, "other-node",
+                    listOf(option, option.copy(code = "other-node"))).manualEndpointGroupKey)
+            assertEquals(mode, EndpointGroupPolicy.manualCandidates(listOf(nv.copy(code = "different-node")), settings).single().transportMode)
+            val config = org.json.JSONObject(com.noki.vpn.vpn.VpnConfigFactory.buildProbe(profile))
+            assertEquals(mode, config.getJSONArray("outbounds").getJSONObject(0).getString("transport"))
+            val session = BackendVpnSession(canConnect = true, profileCode = "auto", locationCode = "lv1", locationName = "Latvia",
+                endpointCode = nv.code, entryHost = nv.entryHost, entryPort = nv.entryPort, serverName = nv.serverName,
+                proxyType = "nokinv", transport = "nokinv", transportMode = null, security = "tls", fingerprint = null,
+                requestHost = null, path = "/tunnel", alpn = null, allowInsecure = false, enableMux = false,
+                randomUserAgent = false, publicKey = null, shortId = null, vpnUsername = "fixture", flow = null, planCode = "plus",
+                vpnSecret = "", endpointCandidates = listOf(nv))
+            val device = BackendDevice("fixture", "fixture", "fixture", platform = "android", accessRole = "primary",
+                isActive = true, lastSeenAt = null)
+            val refreshed = com.noki.vpn.EndpointOptionsStateReducer.applyEndpointOptions(
+                com.noki.vpn.AppUiState(advancedSettings = settings, profile = profile),
+                VpnSessionCoordinator.EndpointOptionsResult(session, listOf(option), device, "fixture", "fixture", "primary"),
+                emptyList())!!.state
+            assertEquals(mode, refreshed.profile.transportMode)
+            assertEquals(selected.endpointGroupKey, refreshed.advancedSettings.manualEndpointGroupKey)
+        }
+        assertEquals("quic", EndpointGroupPolicy.manualCandidates(listOf(nv), AdvancedSettings(
+            endpointSelectionMode = EndpointSelectionMode.MANUAL, manualEndpointGroupKey = "tls|nokinv|")).single().transportMode)
+    }
+
     @Test fun cachedHysteriaFallbackReconsidersPrimaryButRemainsUsableWhenApiIsOffline() = runBlocking {
         val hyProfile = EndpointSelector.profileFromCandidate(hy, "12345678-1234-1234-1234-123456789abc")
         var stored = DefaultStoredSettingsFactory.create().copy(
@@ -128,6 +175,6 @@ class NokiNVReleaseTest {
         val normalized = RuntimeProfilePolicy.normalizeAdvancedSettings(previous, UserProfile())
         assertEquals(previous, normalized)
         assertEquals(VpnProtocol.WIREGUARD, normalized.effectiveProtocol)
-        assertEquals(VpnProtocol.AUTO, normalized.copy(ruRelayEnabled = false).effectiveProtocol)
+        assertEquals(VpnProtocol.REALITY, normalized.copy(ruRelayEnabled = false).effectiveProtocol)
     }
 }

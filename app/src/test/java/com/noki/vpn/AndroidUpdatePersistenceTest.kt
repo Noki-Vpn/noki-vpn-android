@@ -7,6 +7,8 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.noki.vpn.data.BackendApiClient
+import com.noki.vpn.data.BackendException
+import com.noki.vpn.data.AppLanguage
 import com.noki.vpn.data.SettingsRepository
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -34,6 +36,30 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class AndroidUpdatePersistenceTest {
     private val app: Application get() = RuntimeEnvironment.getApplication()
+
+    @Test fun expiredUpdateTokenReachesTheAuthOwnerAndIsRetried() = runBlocking {
+        val tokens = mutableListOf<String?>()
+        val api = BackendApiClient(OkHttpClient.Builder().addInterceptor { chain ->
+            val token = chain.request().header("Authorization")
+            tokens += token
+            val expired = token == "Bearer expired"
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                .code(if (expired) 401 else 200).message("test")
+                .body((if (expired) "{\"detail\":\"expired\"}" else "{\"update_available\":false}").toResponseBody()).build()
+        }.build(), "https://updates.example")
+        val coordinator = AndroidUpdateCoordinator(app, SettingsRepository(app), api,
+            object : AuthenticatedCallRunner {
+                override suspend fun <T> run(block: suspend (String) -> T): T = try {
+                    block("expired")
+                } catch (error: BackendException) {
+                    assertEquals(401, error.statusCode)
+                    block("renewed")
+                }
+            }, {})
+        val state = coordinator.loadState(AndroidUpdateUiState(), AppLanguage.RU)
+        assertEquals(listOf("Bearer expired", "Bearer renewed"), tokens)
+        assertNull(state.error)
+    }
 
     @Before fun initializeWorkManager() {
         WorkManagerTestInitHelper.initializeTestWorkManager(app,

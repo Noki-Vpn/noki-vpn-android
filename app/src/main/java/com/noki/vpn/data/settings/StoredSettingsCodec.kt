@@ -96,6 +96,7 @@ internal class StoredSettingsCodec(
         .put("homeLayoutVariant", settings.personalizationSettings.homeLayoutVariant.name)
         .put("glassMode", settings.personalizationSettings.glassMode.name)
         .put("vpnStatusNotificationEnabled", settings.personalizationSettings.vpnStatusNotificationEnabled)
+        .put("customBackground", settings.personalizationSettings.customBackground ?: "")
         .put("biometricEnabled", settings.securitySettings.biometricEnabled)
         .put("loginAlertsEnabled", settings.securitySettings.loginAlertsEnabled)
         .put("protectNewDevices", settings.securitySettings.protectNewDevices)
@@ -201,6 +202,7 @@ internal class StoredSettingsCodec(
             subscriptionStatus = json.optString("subscriptionStatus", "active"),
         ),
         personalizationSettings = PersonalizationSettings(
+            customBackground = json.optString("customBackground").takeIf(PersonalizationBackgroundStore::isValidName),
             vpnStatusNotificationEnabled = json.optBoolean("vpnStatusNotificationEnabled", true),
             language = AppLanguage.fromTag(json.optString("language")),
             accentPalette = AccentPalette.fromKey(json.optString("accentPalette")),

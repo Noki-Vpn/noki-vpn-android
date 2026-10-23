@@ -283,6 +283,7 @@ internal class AndroidUpdateCoordinator(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
+            if (error is BackendException && error.statusCode == 401) throw error
             return fallbackState.copy(
                 isChecking = false,
                 currentVersionName = currentVersionName,

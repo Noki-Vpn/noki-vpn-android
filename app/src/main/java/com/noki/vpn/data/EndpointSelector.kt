@@ -108,7 +108,7 @@ object EndpointSelector {
             )
         }
         val network = networkKind ?: currentNetworkKind(context)
-        if (settings.endpointSelectionMode == EndpointSelectionMode.MANUAL && !settings.multiHop.enabled &&
+        if (settings.endpointSelectionMode == EndpointSelectionMode.MANUAL &&
             !settings.gamingModeEnabled) {
             val manualCandidates = EndpointGroupPolicy.manualCandidates(candidates, settings)
             onDiagnostic("stage=manual_group; candidates=${manualCandidates.size}")

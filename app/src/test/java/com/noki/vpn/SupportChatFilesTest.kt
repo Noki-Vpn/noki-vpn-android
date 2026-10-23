@@ -21,6 +21,21 @@ class SupportChatFilesTest {
     private val context: Application = RuntimeEnvironment.getApplication()
     private fun uri(file: File) = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
 
+    @Test fun `startup removes abandoned owned files once and preserves other cache directories`() {
+        val orphan = SupportChatFiles.destination(context).apply { writeText("old") }
+        val part = File(orphan.path + ".part").apply { writeText("partial") }
+        val unrelated = File(context.cacheDir, "other-cache").apply { writeText("keep") }
+        assertTrue(SupportChatFiles.isAvailable(context, orphan.path))
+        assertFalse(SupportChatFiles.isAvailable(context, unrelated.path))
+        SupportChatFiles.prepareCache(context)
+        assertFalse(SupportChatFiles.isAvailable(context, orphan.path))
+        assertFalse(part.exists())
+        assertTrue(unrelated.exists())
+        val active = SupportChatFiles.destination(context).apply { writeText("current") }
+        SupportChatFiles.prepareCache(context)
+        assertTrue(SupportChatFiles.isAvailable(context, active.path))
+    }
+
     @Test fun `picked content streams to a private file and export needs an explicit document URI`() = runBlocking {
         val source = File(SupportChatFiles.directory(context), "picked.txt").apply { writeText("private content") }
         val draft = SupportChatFiles.stage(context, uri(source).toString())

@@ -26,7 +26,11 @@ object EndpointGroupPolicy {
     fun manualOptions(options: List<VpnEndpointOption>): List<VpnEndpointOption> {
         val grouped = linkedMapOf<String, MutableList<VpnEndpointOption>>()
         options.filter { !it.canaryOnly && EndpointSecurityPolicy.isAllowedOption(it) &&
-            EndpointTransportPolicy.isDirectOption(it) }.forEach { option ->
+            EndpointTransportPolicy.isDirectOption(it) }.flatMap { option ->
+            if (option.proxyType == "nokinv" && option.transportMode.isBlank()) {
+                listOf(option.copy(transportMode = "quic"), option.copy(transportMode = "tcp"))
+            } else listOf(option)
+        }.forEach { option ->
             grouped.getOrPut(groupKey(option)) { mutableListOf() }.add(option)
         }
         return grouped.map { (key, group) ->
@@ -48,7 +52,7 @@ object EndpointGroupPolicy {
     ): String {
         settings.manualEndpointGroupKey.trim().takeIf { it.isNotBlank() }?.let { return normalizedGroupKey(it) }
         val code = settings.manualEndpointCode.ifBlank { profile.endpointCode }
-        return endpointOptions.firstOrNull { it.code == code }?.let(::groupKey).orEmpty()
+        return endpointOptions.firstOrNull { it.code == code }?.let { normalizedGroupKey(groupKey(it)) }.orEmpty()
     }
 
     fun settingsAfterSelection(
@@ -57,11 +61,14 @@ object EndpointGroupPolicy {
         endpointOptions: List<VpnEndpointOption>,
     ): AdvancedSettings {
         if (settings.gamingModeEnabled || settings.endpointSelectionMode != EndpointSelectionMode.MANUAL) return settings
-        val groupKey = endpointOptions.firstOrNull { it.code == endpointCode }?.let(::groupKey)
+        val savedGroup = normalizedGroupKey(settings.manualEndpointGroupKey)
+        val groupKey = manualOptions(endpointOptions.filter { it.code == endpointCode }).firstOrNull {
+            groupKey(it) == savedGroup
+        }?.let(::groupKey) ?: endpointOptions.firstOrNull { it.code == endpointCode }?.let(::groupKey)
             ?: settings.manualEndpointGroupKey
         return settings.copy(
             manualEndpointCode = endpointCode,
-            manualEndpointGroupKey = groupKey,
+            manualEndpointGroupKey = normalizedGroupKey(groupKey),
         )
     }
 
@@ -71,11 +78,16 @@ object EndpointGroupPolicy {
     ): List<BackendEndpointCandidate> {
         val targetGroup = normalizedGroupKey(settings.manualEndpointGroupKey).ifBlank {
             candidates.firstOrNull { it.code == settings.manualEndpointCode.trim() }
-                ?.let(::groupKey)
+                ?.let { normalizedGroupKey(groupKey(it)) }
                 .orEmpty()
         }
         if (targetGroup.isNotBlank()) {
-            return candidates.filter { groupKey(it) == targetGroup }
+            val mode = targetGroup.substringAfterLast('|')
+            return candidates.map {
+                if (it.proxyType == "nokinv" && it.transportMode.isNullOrBlank() && mode in setOf("quic", "tcp")) {
+                    it.copy(transportMode = mode)
+                } else it
+            }.filter { groupKey(it) == targetGroup }
         }
         val legacyCode = settings.manualEndpointCode.trim()
         return candidates.firstOrNull { it.code == legacyCode }?.let(::listOf) ?: candidates
@@ -116,12 +128,18 @@ object EndpointGroupPolicy {
             3 -> parts
             else -> return ""
         }
-        return groupKey(transport[0], normalizeTransport(transport[1]),
-            normalizeTransportMode(transport[1], transport[2]))
+        val normalizedTransport = normalizeTransport(transport[1])
+        val mode = normalizeTransportMode(transport[1], transport[2])
+        return groupKey(transport[0], normalizedTransport,
+            if (normalizedTransport == "nokinv" && mode.isBlank()) "quic" else mode)
     }
 
     fun displayLabelFor(option: VpnEndpointOption): String {
-        if (option.proxyType == "nokinv") return "NokiNV / Auto"
+        if (option.proxyType == "nokinv") return when (option.transportMode) {
+            "quic" -> "NokiNV / QUIC"
+            "tcp" -> "NokiNV / TCP"
+            else -> "NokiNV / Auto"
+        }
         if (option.proxyType.equals("hysteria", ignoreCase = true) || normalizeTransport(option.transport) == "hysteria") {
             return "Hysteria2 / UDP"
         }

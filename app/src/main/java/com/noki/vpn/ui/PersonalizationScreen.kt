@@ -1,6 +1,8 @@
 package com.noki.vpn.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -57,6 +59,19 @@ internal val PersonalizationNoFontPaddingTextStyle = TextStyle(
     platformStyle = PlatformTextStyle(includeFontPadding = false),
 )
 
+internal class BackgroundEasterEggTaps {
+    private var count = 0
+    private var startedAt = 0L
+    fun tap(now: Long): Boolean {
+        if (count == 0 || now < startedAt || now - startedAt > 5_000) {
+            startedAt = now
+            count = 0
+        }
+        count++
+        return (count == 10).also { if (it) count = 0 }
+    }
+}
+
 @Composable
 fun PersonalizationScreen(
     state: AppUiState,
@@ -69,8 +84,10 @@ fun PersonalizationScreen(
     sharedBackdrop: PrismalGlassLayer,
     liveGlassEnabled: Boolean = true,
     showBackground: Boolean = true,
+    onCustomBackgroundRequested: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val backgroundTaps = remember { BackgroundEasterEggTaps() }
     val onNotificationChanged by rememberUpdatedState(onVpnStatusNotificationChanged)
     LifecycleResumeEffect(context) {
         onNotificationChanged(VpnNotificationContract.isVisible(context))
@@ -152,7 +169,10 @@ fun PersonalizationScreen(
                     modifier = Modifier
                         .widthIn(max = metrics.dp(370f))
                         .fillMaxWidth()
-                        .padding(start = metrics.dp(18f), end = metrics.dp(18f)),
+                        .padding(start = metrics.dp(18f), end = metrics.dp(18f))
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                            if (backgroundTaps.tap(android.os.SystemClock.uptimeMillis())) onCustomBackgroundRequested()
+                        },
                 )
 
                 Spacer(modifier = Modifier.height(headerToFirstBlockGap))

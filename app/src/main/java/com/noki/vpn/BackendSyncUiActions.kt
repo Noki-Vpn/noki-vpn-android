@@ -291,10 +291,11 @@ internal fun clientLatencyRequestTarget(
     multiHop: MultiHopSettings = MultiHopSettings(),
     foreignNodes: List<RuForeignNode> = emptyList(),
 ): List<String> {
-    if (multiHop.enabled && !ruRelayEnabled) return emptyList()
-    val hops = runCatching { multiHop.explicitNodeIds() }.getOrElse { return emptyList() }
-    if (ruRelayEnabled) return foreignNodes.filter { hops == null || it.id == hops.second }
-        .map { "ru:1:${hops?.first ?: "null"}:${it.id}" }.distinct().sorted()
+    if (ruRelayEnabled) {
+        val hops = runCatching { multiHop.explicitNodeIds() }.getOrElse { return emptyList() }
+        return foreignNodes.filter { hops == null || it.id == hops.second }
+            .map { "ru:1:${hops?.first ?: "null"}:${it.id}" }.distinct().sorted()
+    }
     return locations
         .asSequence()
         .filter { it.isOnline }
@@ -403,9 +404,8 @@ internal suspend fun AppUiRuntime.measureClientLatencies(
     multiHop: MultiHopSettings = uiState.advancedSettings.multiHop,
     foreignNodes: List<RuForeignNode> = uiState.ruForeignNodes,
 ): Map<String, Int> {
-    if (multiHop.enabled && !ruRelayEnabled) return emptyMap()
-    val hops = runCatching { multiHop.explicitNodeIds() }.getOrElse { return emptyMap() }
     if (!ruRelayEnabled) return clientLatencySampler.measure(locations)
+    val hops = runCatching { multiHop.explicitNodeIds() }.getOrElse { return emptyMap() }
     val attempt = authSessionCoordinator.attempt() ?: return emptyMap()
     val network = com.noki.vpn.vpn.AndroidUnderlyingNetworkSource(application)
         .currentSnapshot()?.network ?: return emptyMap()

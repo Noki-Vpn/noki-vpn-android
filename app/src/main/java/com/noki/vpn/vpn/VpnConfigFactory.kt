@@ -183,7 +183,7 @@ object VpnConfigFactory {
         val security = profile.security.lowercase(Locale.ROOT)
         require(security in setOf("tls", "reality") && profile.serverName.isNotBlank()) { "vpn_profile_tls_required" }
         if (kind == "nokinv") {
-            require(security == "tls" && transport == "nokinv" && profile.transportMode.isBlank() &&
+            require(security == "tls" && transport == "nokinv" && profile.transportMode in setOf("", "quic", "tcp") &&
                 profile.publicKey.isBlank() && profile.shortId.isBlank() && profile.flow.isBlank() &&
                 profile.nokinvToken.matches(Regex("[A-Za-z0-9_-]{43}")) && profile.nokinvCredentialGeneration > 0) {
                 "vpn_profile_nokinv_invalid"
@@ -191,7 +191,8 @@ object VpnConfigFactory {
             return JSONObject().put("tag", "proxy").put("type", "nokinv")
                 .put("server", profile.host).put("server_port", port)
                 .put("token", profile.nokinvToken).put("credential_generation", profile.nokinvCredentialGeneration)
-                .put("transport", "auto").put("mode", if (gamingModeEnabled) "gaming" else "balanced").put("path", profile.path.ifBlank { "/tunnel" })
+                .put("transport", if (gamingModeEnabled) "auto" else profile.transportMode.ifBlank { "auto" })
+                .put("mode", if (gamingModeEnabled) "gaming" else "balanced").put("path", profile.path.ifBlank { "/tunnel" })
                 .put("tcp_exchange", "stream").put("shaping", "off").put("web_profile", "coherent")
                 .put("tls", JSONObject().put("enabled", true).put("server_name", profile.serverName)
                     .put("min_version", "1.3"))

@@ -41,7 +41,9 @@ class ClientLatencyRequestTargetTest {
         assertEquals(1, first.size)
         assertNotEquals(first, clientLatencyRequestTarget(emptyList(), true, chain(entryB), nodes))
         assertNotEquals(first, clientLatencyRequestTarget(emptyList(), true, foreignNodes = nodes))
-        assertTrue(clientLatencyRequestTarget(locations, false, chain(entryA)).isEmpty())
+        assertEquals(clientLatencyRequestTarget(locations), clientLatencyRequestTarget(locations, false, chain(entryA)))
+        assertEquals(clientLatencyRequestTarget(locations),
+            clientLatencyRequestTarget(locations, false, MultiHopSettings(enabled = true)))
         assertTrue(clientLatencyRequestTarget(locations, true, chain(exit)).isEmpty())
         assertTrue(clientLatencyRequestTarget(locations, true,
             chain(entryA).copy(exit = HopSelection(ServerSelectionMode.COUNTRY, countryCode = "LV"))).isEmpty())
