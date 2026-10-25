@@ -43,9 +43,9 @@ val googleWebClientId = providers.gradleProperty("noki.googleWebClientId")
     .orElse("")
     .get()
 val libboxAarFile = layout.projectDirectory.file("libs/libbox.aar")
-val libboxAarSha256 = "975A19408195F86CFA07CF93F81EAE078213715943188966C43E27CC64FBFA55"
+val libboxAarSha256 = "B6C84F3E57E301763B584EC09965549144D50334211FA8FA34D3E41D2F749675"
 val libboxSourceFile = layout.projectDirectory.file("libs/libbox.SOURCE.zip")
-val libboxSourceSha256 = "00AD9F798DFF53DEFE17DA836EF6C8F5D84747C66FA186BEF49D1410BF83AC3F"
+val libboxSourceSha256 = "4A576A9AF344BCCAA292604ECCBC549ADE4D166403E4E7FAB7EE134CB733F704"
 val geositeFile = layout.projectDirectory.file("src/main/assets/geosite.dat")
 val geositeSha256 = "1B9012AB376E142DA68506385E4B0590ABEB20A0DEAC0169293E1057FCE8D949"
 val geositeSourceFile = layout.projectDirectory.file("../third_party/geosite/SOURCE.zip")
@@ -53,9 +53,9 @@ val geositeSourceSha256 = "09E547AB2E7B76A24081243EF8E7EF0432D70C2551F2E7EFCA1A3
 val geositeLicenseFile = layout.projectDirectory.file("src/main/assets/licenses/geosite/LICENSE")
 val prismalAarFile = layout.projectDirectory.file("libs/prismal-1.0.3.aar")
 val prismalAarSha256 = "40D5EAFC3B68554E0D5E159EA02ECDA8CA86EB32A43DC1B3BAE5C65344C08C2A"
-val supportedAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
-val expectedReleaseVersionCode = 298
-val expectedReleaseVersionName = "2.0.12"
+val supportedAbis = listOf("arm64-v8a")
+val expectedReleaseVersionCode = 299
+val expectedReleaseVersionName = "2.0.13"
 
 fun String.toBuildConfigString(): String =
     "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
@@ -85,10 +85,6 @@ android {
         versionName = expectedReleaseVersionName
         manifestPlaceholders["nokiAppLabel"] = "Noki Vpn"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        ndk {
-            abiFilters += supportedAbis
-        }
-
         buildConfigField("String", "NOKI_API_BASE_URL", nokiApiBaseUrl.toBuildConfigString())
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", googleWebClientId.toBuildConfigString())
         buildConfigField("String", "NOKI_BACKEND_PROBE_HOST", nokiBackendProbeHost.toBuildConfigString())
@@ -114,7 +110,7 @@ android {
             isEnable = true
             reset()
             include(*supportedAbis.toTypedArray())
-            isUniversalApk = true
+            isUniversalApk = false
         }
     }
 
@@ -250,6 +246,23 @@ tasks.register("verifyGeositeSource") {
             val license = requireNotNull(archive.getEntry("src/LICENSE")) { "Geosite source license is missing" }
             require(archive.getInputStream(license).use { it.readBytes() }.contentEquals(geositeLicenseFile.asFile.readBytes())) {
                 "Geosite bundled license differs from source"
+            }
+        }
+    }
+}
+
+tasks.register("verifyContractFixtures") {
+    val names = listOf("multihop_session_v2.json", "ru_wireguard_session_v2.json")
+    val canonicalDirectory = rootProject.file("../contracts")
+    val packagedDirectory = file("src/test/resources/contracts")
+    inputs.files(names.flatMap { listOf(canonicalDirectory.resolve(it), packagedDirectory.resolve(it)) })
+    doLast {
+        for (name in names) {
+            val canonical = canonicalDirectory.resolve(name)
+            val packaged = packagedDirectory.resolve(name)
+            require(canonical.isFile) { "Canonical contracts/$name is required for fixture verification" }
+            require(packaged.isFile && canonical.readBytes().contentEquals(packaged.readBytes())) {
+                "Packaged $name must match canonical contracts/$name byte for byte"
             }
         }
     }

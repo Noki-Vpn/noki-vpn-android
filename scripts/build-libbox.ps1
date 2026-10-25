@@ -16,8 +16,8 @@ $ProgressPreference = 'SilentlyContinue'
 $SourceArchive = (Resolve-Path -LiteralPath $SourceArchive).Path
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $OutputDirectory) { throw "OutputDirectory already exists: $OutputDirectory" }
-if (-not $AndroidSdk -or -not $JavaHome) { throw 'AndroidSdk and JavaHome (JDK 17) are required' }
-if (-not $NdkRoot) { $NdkRoot = Join-Path $AndroidSdk 'ndk\28.0.13004108' }
+if (-not $AndroidSdk -or -not $JavaHome) { throw 'AndroidSdk and JavaHome (JDK 21) are required' }
+if (-not $NdkRoot) { $NdkRoot = Join-Path $AndroidSdk 'ndk\29.0.14206865' }
 $AndroidSdk = (Resolve-Path -LiteralPath $AndroidSdk).Path
 $NdkRoot = (Resolve-Path -LiteralPath $NdkRoot).Path
 $JavaHome = (Resolve-Path -LiteralPath $JavaHome).Path
@@ -26,8 +26,16 @@ New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
 
 function Invoke-Checked {
     param([string]$FilePath, [string[]]$Arguments)
-    & $FilePath @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "$FilePath failed with exit code $LASTEXITCODE" }
+    $savedPreference = $ErrorActionPreference
+    try {
+        # Native tools may write progress to stderr; only their exit code denotes failure.
+        $ErrorActionPreference = 'Continue'
+        if ([IO.Path]::GetFileName($FilePath) -eq 'gomobile.exe') {
+            & $PythonPath -I $helperPath invoke $FilePath @Arguments
+        } else { & $FilePath @Arguments }
+        $nativeExitCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $savedPreference }
+    if ($nativeExitCode -ne 0) { throw "$FilePath failed with exit code $nativeExitCode" }
 }
 
 function Get-Sha256 {
@@ -45,14 +53,18 @@ function Get-Sha256 {
 # Archive validation and deterministic AAR packaging use Python 3's standard library.
 $archiveHelper = @'
 from pathlib import Path
-import hashlib,json,stat,struct,sys,zipfile,zlib
+import hashlib,json,os,stat,struct,subprocess,sys,zipfile,zlib
 
 mode,archive_path,output=sys.argv[1:4]
 archive_path=Path(archive_path)
 output=Path(output)
 source=output/'source'
 def sha(data): return hashlib.sha256(data).hexdigest()
-if mode=='extract':
+if mode=='invoke':
+    # Windows drive-directory entries (=C:) are not application environment variables.
+    environment={k:v for k,v in os.environ.items() if not k.startswith('=')}
+    raise SystemExit(subprocess.run(sys.argv[2:],env=environment).returncode)
+elif mode=='extract':
     source.mkdir()
     with zipfile.ZipFile(archive_path) as archive:
         names=archive.namelist()
@@ -71,10 +83,13 @@ if mode=='extract':
     actual={'python':sys.version.split()[0],'zlib':zlib.ZLIB_VERSION,'zlib_runtime':zlib.ZLIB_RUNTIME_VERSION}
     assert actual==inputs['packaging'], 'Packaging runtime mismatch: expected '+str(inputs['packaging'])+', actual '+str(actual)
     assert inputs['source_commit']=='55faa763f986f4ca8a492d9b2719bc6330d2bef5'
-    assert inputs['version']=='1.14.1-extended-2.7.2-nokinv-5'
+    assert inputs['version']=='1.14.1-extended-2.7.2-nokinv-6'
+    assert inputs['local_source_commit']=='dc598a1aa2cc82577bfd6951ac095baae40dfb4a'
+    assert inputs['abis']==['arm64-v8a']
+    assert sha((source/'build-libbox.ps1').read_bytes())==inputs['recipe_sha256']
     assert inputs['android_api']==26
     assert inputs['tags']==['with_gvisor','with_quic','with_wireguard','with_utls']
-    assert sha((source/'src/go.mod').read_bytes())=='9f176e32c5bc5789e21b6ab5708dbf9e8d26eaf61bd6968885887d54e22f64e9'
+    assert sha((source/'src/go.mod').read_bytes())=='ec16b816a63ba28308d0faa2258124e820d4e0aeb488c9ee93d6571fbacd822a'
     assert sha((source/'src/go.sum').read_bytes())=='7aebd46dd3d5c6d61dd479ae7297c8c35b569b54745fe0ca68c5466f7f7ed38a'
     for tree in inputs['trees']:
         root=source/tree['source']
@@ -97,7 +112,7 @@ elif mode=='downloads':
 elif mode=='merge':
     shared=None
     members={}
-    for abi,machine in [('arm64-v8a',183),('armeabi-v7a',40),('x86_64',62)]:
+    for abi,machine in [('arm64-v8a',183)]:
         with zipfile.ZipFile(output/('libbox-'+abi+'.aar')) as archive:
             current={name:archive.read(name) for name in archive.namelist() if not name.endswith('/') and not name.startswith('jni/')}
             assert shared is None or current==shared, 'ABI shared members differ'
@@ -131,13 +146,14 @@ Invoke-Checked -FilePath $PythonPath -Arguments @('-I', $helperPath, 'extract', 
 $sourceRoot = Join-Path $OutputDirectory 'source'
 $inputs = Get-Content -LiteralPath (Join-Path $sourceRoot 'build-inputs.json') -Raw | ConvertFrom-Json
 if ((Get-Sha256 $clang) -ne $inputs.clang_sha256) { throw 'NDK clang checksum mismatch' }
-if (-not (Select-String -LiteralPath (Join-Path $NdkRoot 'source.properties') -Pattern 'Pkg.Revision\s*=\s*28\.0\.13004108' -Quiet)) { throw 'NDK revision mismatch' }
+if (-not (Select-String -LiteralPath (Join-Path $NdkRoot 'source.properties') -Pattern 'Pkg.Revision\s*=\s*29\.0\.14206865' -Quiet)) { throw 'NDK revision mismatch' }
 $previousPreference = $ErrorActionPreference
 try {
     $ErrorActionPreference = 'Continue'
     $javaVersion = (& (Join-Path $JavaHome 'bin\java.exe') -version 2>&1) -join "`n"
 } finally { $ErrorActionPreference = $previousPreference }
-if ($LASTEXITCODE -ne 0 -or $javaVersion -notmatch 'version "17\.') { throw 'JDK 17 is required' }
+if ((Get-Sha256 (Join-Path $JavaHome 'bin\java.exe')) -ne $inputs.installed_tools.jdk.java_exe_sha256) { throw 'JDK executable checksum mismatch' }
+if ($LASTEXITCODE -ne 0 -or $javaVersion -notmatch 'version "21\.') { throw 'JDK 21 is required' }
 
 if (-not $GoRoot) {
     $goArchive = $inputs.tool_archives | Where-Object { $_.name -eq 'go' }
@@ -179,7 +195,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Pinned module download failed' }
         [IO.File]::WriteAllText((Join-Path $OutputDirectory 'module-downloads.json'), ($downloads -join "`n"), (New-Object Text.UTF8Encoding($false)))
         Invoke-Checked -FilePath $PythonPath -Arguments @('-I', $helperPath, 'downloads', $SourceArchive, $OutputDirectory)
-        if ((Get-Sha256 (Join-Path $sourceRoot 'src\go.mod')) -ne '9f176e32c5bc5789e21b6ab5708dbf9e8d26eaf61bd6968885887d54e22f64e9' -or
+        if ((Get-Sha256 (Join-Path $sourceRoot 'src\go.mod')) -ne 'ec16b816a63ba28308d0faa2258124e820d4e0aeb488c9ee93d6571fbacd822a' -or
             (Get-Sha256 (Join-Path $sourceRoot 'src\go.sum')) -ne '7aebd46dd3d5c6d61dd479ae7297c8c35b569b54745fe0ca68c5466f7f7ed38a') { throw 'Pinned upstream module inputs changed' }
         Invoke-Checked -FilePath $go -Arguments @('mod','verify')
         $env:GOWORK = 'off'

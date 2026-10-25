@@ -1,6 +1,5 @@
 package com.noki.vpn.data
 
-import java.io.File
 import com.noki.vpn.vpn.GeositeAssetTest
 import com.noki.vpn.vpn.VpnConfigFactory
 import kotlinx.coroutines.runBlocking
@@ -78,12 +77,7 @@ class BackendMultiHopContractTest {
             BackendVpnSessionJsonParser.parse(fixture().put("youtube_cascade", "invalid")))
     }
 
-    private fun fixture(): JSONObject {
-        val path = generateSequence(File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
-            .map { File(it, "contracts/multihop_session_v2.json") }
-            .first { it.isFile }
-        return JSONObject(path.readText())
-    }
+    private fun fixture(): JSONObject = contractFixture("multihop_session_v2.json")
 
     @Test
     fun `v2 transports dial only entry while keeping exit authentication and Russian DIRECT`() {
@@ -177,7 +171,8 @@ class BackendMultiHopContractTest {
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
                 .body(payload.toString().toResponseBody("application/json".toMediaType())).build()
         }.build()
-        val api = BackendApiClient(client, "https://api.example")
+        val api = BackendApiClient(client, "https://api.example",
+            nativeCoreVersion = { "1.14.1-extended-2.7.2-nokinv-4" })
         for (protocol in listOf("reality", "tls")) assertEquals(selection,
             api.createVpnSession("token", "device", "proof", "nonce", "signature",
                 null, null, null, protocol, null, selection).multiHop!!.selection)
@@ -187,5 +182,18 @@ class BackendMultiHopContractTest {
                 "LV", null, null, "auto", null, selection) }
         }
         assertEquals(2, requests)
+    }
+
+    @Test
+    fun `IP capability requires a recognized native revision with IP support`() {
+        for (version in listOf("", "2.0.12", "1.14.1-extended-2.7.2-nokinv-4",
+                "1.14.1-extended-2.7.2-nokinv-5",
+                "1.14.1-extended-2.7.3-nokinv-6", "1.14.1-extended-2.7.2-nokinv-6-dev",
+                "1.14.1-extended-2.7.2-nokinv-99999999999999999999")) {
+            assertFalse(backendVpnCapabilities(version).contains("nokinv_ip_v1"))
+        }
+        for (revision in listOf(6, 7)) {
+            assertTrue(backendVpnCapabilities("1.14.1-extended-2.7.2-nokinv-$revision").contains("nokinv_ip_v1"))
+        }
     }
 }

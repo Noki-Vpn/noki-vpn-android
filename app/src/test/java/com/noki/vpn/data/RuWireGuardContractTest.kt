@@ -1,6 +1,5 @@
 package com.noki.vpn.data
 
-import java.io.File
 import java.time.Instant
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -115,12 +114,7 @@ class RuWireGuardContractTest {
         assertEquals(setOf("device_id", "device_key", "device_nonce", "device_signature", "public_key"),
             payload.keys().asSequence().toSet())
     }
-    private fun fixture(): JSONObject {
-        val path = generateSequence(File(System.getProperty("user.dir"))) { it.parentFile }
-            .map { File(it, "contracts/ru_wireguard_session_v2.json") }
-            .first { it.isFile }
-        return JSONObject(path.readText())
-    }
+    private fun fixture(): JSONObject = contractFixture("ru_wireguard_session_v2.json")
 
     private fun expectation(root: JSONObject): RuWireGuardSessionExpectation {
         val request = root.getJSONObject("request")

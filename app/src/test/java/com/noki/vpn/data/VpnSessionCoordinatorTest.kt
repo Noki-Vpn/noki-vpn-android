@@ -15,9 +15,7 @@ import org.robolectric.annotation.Config
 class VpnSessionCoordinatorTest {
     @Test
     fun `serialized no RU MultiHop prepares NokiNV auto TCP and QUIC through the entry`() = runBlocking {
-        val path = generateSequence(java.io.File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
-            .map { java.io.File(it, "contracts/multihop_session_v2.json") }.first { it.isFile }
-        val payload = org.json.JSONObject(path.readText())
+        val payload = contractFixture("multihop_session_v2.json")
         for (side in listOf("entry", "exit")) {
             payload.getJSONObject("multihop").getJSONObject("selection").getJSONObject(side)
                 .put("country_code", org.json.JSONObject.NULL)
@@ -203,9 +201,7 @@ class VpnSessionCoordinatorTest {
 
     @Test
     fun `no RU pair honors manual protocol and never falls back to a different transport`() = runBlocking {
-        val path = generateSequence(java.io.File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
-            .map { java.io.File(it, "contracts/multihop_session_v2.json") }.first { it.isFile }
-        val session = BackendVpnSessionJsonParser.parse(org.json.JSONObject(path.readText()))
+        val session = BackendVpnSessionJsonParser.parse(contractFixture("multihop_session_v2.json"))
         for (candidate in session.endpointCandidates.filter { it.transport == "xhttp" || it.proxyType == "hysteria" }) {
             val protocol = VpnProtocol.fromBackendCode(candidate.security, candidate.proxyType)
             val api = FakeVpnSessionApi(pairSession = session)

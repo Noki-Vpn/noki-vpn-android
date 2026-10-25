@@ -1,5 +1,14 @@
 package com.noki.vpn.data
 
+import org.json.JSONObject
+
+internal fun contractFixture(name: String): JSONObject {
+    val resource = requireNotNull(
+        BackendEndpointCandidate::class.java.getResourceAsStream("/contracts/$name"),
+    ) { "Missing $name test resource" }
+    return resource.bufferedReader(Charsets.UTF_8).use { JSONObject(it.readText()) }
+}
+
 internal fun tcpCandidate(
     code: String,
     priority: Int = 10,

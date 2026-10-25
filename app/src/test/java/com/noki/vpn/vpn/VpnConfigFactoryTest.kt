@@ -7,7 +7,7 @@ import com.noki.vpn.data.MultiHopSettings
 import com.noki.vpn.data.VlessProfile
 import com.noki.vpn.data.BackendVpnSessionJsonParser
 import com.noki.vpn.data.EndpointSelector
-import java.io.File
+import com.noki.vpn.data.contractFixture
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -16,6 +16,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VpnConfigFactoryTest {
+    @Test fun ipTunnelCapabilityIsOptionalPerCandidate() {
+        val value = JSONObject().put("code", "nv").put("entry_host", "node.example")
+            .put("proxy_type", "nokinv").put("transport", "nokinv")
+        assertFalse(BackendVpnSessionJsonParser.parseEndpointCandidate(value).ipTunnel)
+        value.put("ip_tunnel", true)
+        assertTrue(BackendVpnSessionJsonParser.parseEndpointCandidate(value).ipTunnel)
+    }
+
     @Test fun nokinvUsesDeviceCredentialAndOneAutomaticTransport() {
         val token = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 7 })
         val profile = VlessProfile(proxyType = "nokinv", transport = "nokinv", security = "tls",
@@ -37,6 +45,15 @@ class VpnConfigFactoryTest {
         assertEquals("/custom", JSONObject(VpnConfigFactory.buildProbe(profile.copy(path = "/custom")))
             .getJSONArray("outbounds").getJSONObject(0).getString("path"))
         assertFalse(outbound.has("uuid"))
+        assertFalse(outbound.has("ip_tunnel"))
+        val ipProfile = profile.copy(nokinvIpTunnel = true)
+        val ipConfig = JSONObject(VpnConfigFactory.build(ipProfile, settings, geosite))
+        assertTrue(ipConfig.getJSONArray("outbounds").getJSONObject(0).getBoolean("ip_tunnel"))
+        val ipRules = ipConfig.getJSONObject("route").getJSONArray("rules")
+        assertFalse((0 until ipRules.length()).any { ipRules.getJSONObject(it).optString("action") == "sniff" })
+        assertTrue(ipConfig.getJSONObject("dns").getBoolean("reverse_mapping"))
+        val youtubeConfig = JSONObject(VpnConfigFactory.build(ipProfile, settings.copy(youtubeNoAdsEnabled = true), geosite))
+        assertEquals("sniff", youtubeConfig.getJSONObject("route").getJSONArray("rules").getJSONObject(0).getString("action"))
         for (mode in listOf("", "quic", "tcp")) {
             val selected = profile.copy(transportMode = mode)
             for (config in listOf(VpnConfigFactory.buildProbe(selected),
@@ -343,9 +360,7 @@ class VpnConfigFactoryTest {
 
     @Test
     fun youtubeConnectsDirectlyWithoutReplacingTheSelectedNatMultiHopEntry() {
-        val fixture = generateSequence(File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }
-            .map { File(it, "contracts/multihop_session_v2.json") }.first { it.isFile }
-        val session = BackendVpnSessionJsonParser.parse(JSONObject(fixture.readText()))
+        val session = BackendVpnSessionJsonParser.parse(contractFixture("multihop_session_v2.json"))
         val route = requireNotNull(session.multiHop)
         val settings = AdvancedSettings(youtubeNoAdsEnabled = true, multiHop = route.selection)
         for (candidate in session.endpointCandidates) {

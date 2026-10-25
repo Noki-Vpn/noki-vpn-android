@@ -269,6 +269,7 @@ data class BackendVpnSession(
     val multiHop: BackendMultiHopSession? = null,
     val nokinvToken: String = "",
     val nokinvCredentialGeneration: Int = 0,
+    val ipTunnel: Boolean = false,
 )
 
 data class BackendMultiHopSession(
@@ -409,6 +410,7 @@ data class BackendEndpointCandidate(
     val canaryOnly: Boolean,
     val tags: List<String>,
     val connectIp: String? = null,
+    val ipTunnel: Boolean = false,
 )
 
 internal fun BackendEndpointCandidate.connectionHost(): String =

@@ -173,6 +173,7 @@ data class VlessProfile(
     val uuid: String = "",
     val nokinvToken: String = "",
     val nokinvCredentialGeneration: Int = 0,
+    val nokinvIpTunnel: Boolean = false,
     val flow: String = "",
     val security: String = "reality",
     val fingerprint: String = "chrome",

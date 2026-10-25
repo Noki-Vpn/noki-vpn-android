@@ -42,6 +42,7 @@ internal class StoredSettingsCodec(
         .put("uuid", settings.profile.uuid)
         .put("nokinvToken", settings.profile.nokinvToken)
         .put("nokinvCredentialGeneration", settings.profile.nokinvCredentialGeneration)
+        .put("nokinvIpTunnel", settings.profile.nokinvIpTunnel)
         .put("flow", settings.profile.flow)
         .put("security", settings.profile.security)
         .put("fingerprint", settings.profile.fingerprint)
@@ -140,6 +141,7 @@ internal class StoredSettingsCodec(
             uuid = json.optString("uuid"),
             nokinvToken = json.optString("nokinvToken", ""),
             nokinvCredentialGeneration = json.optInt("nokinvCredentialGeneration", 0),
+            nokinvIpTunnel = json.optBoolean("nokinvIpTunnel", false),
             flow = json.optString("flow"),
             security = json.optString("security", "reality"),
             fingerprint = json.optString("fingerprint", "chrome"),
