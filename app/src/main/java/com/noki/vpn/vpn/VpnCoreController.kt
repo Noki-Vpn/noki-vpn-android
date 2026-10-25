@@ -76,8 +76,15 @@ internal class VpnCoreController(
         val core = checkNotNull(server) { "vpn_core_not_running" }
         VpnProbeResult(core.measureDelay("proxy", targetUrl, timeoutMillis).takeIf { it > 0L })
     } catch (error: Throwable) {
-        SafeLog.w(TAG, "VPN readiness failed", error)
-        VpnProbeResult(null, VpnCoreIssue.fromThrowable(error))
+        val issue = VpnCoreIssue.fromThrowable(error)
+        SafeLog.w(TAG, "VPN readiness failed; issue=${issue?.logMessage ?: "unknown"}", error)
+        runCatching {
+            SettingsRepository(context).recordAppLog(
+                category = "vpn_core", level = "error", message = "vpn_core_readiness_failed",
+                details = error.message, errorType = error::class.java.simpleName,
+            )
+        }
+        VpnProbeResult(null, issue)
     }
 
     @Synchronized

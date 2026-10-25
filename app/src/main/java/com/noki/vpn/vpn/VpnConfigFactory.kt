@@ -79,10 +79,14 @@ object VpnConfigFactory {
         val russian = domainMatch(listOf(DomainRulePolicy.RUSSIAN_RESOURCES_RULE), resolved)
             ?: throw IllegalArgumentException("geosite_category_ru_empty")
         val rules = JSONArray()
-        // YouTube still needs SNI/QUIC classification; ordinary IP sessions use DNS reverse mapping.
+        // Unknown domains still need SNI/QUIC classification; known IP sessions use the DNS route hint.
         if (!ipTunnel || normalized.youtubeNoAdsEnabled) {
-            rules.put(JSONObject().put("inbound", JSONArray().put("tun")).put("action", "sniff")
-                .put("sniffer", JSONArray().put("http").put("tls").apply { if (normalized.youtubeNoAdsEnabled) put("quic") }))
+            val sniff = if (ipTunnel) JSONObject().put("type", "logical").put("mode", "and").put("rules", JSONArray()
+                .put(JSONObject().put("inbound", JSONArray().put("tun")))
+                .put(JSONObject().put("domain_regex", JSONArray().put(".+")).put("invert", true)))
+            else JSONObject().put("inbound", JSONArray().put("tun"))
+            rules.put(sniff.put("action", "sniff").put("sniffer", JSONArray().put("http").put("tls")
+                .apply { if (normalized.youtubeNoAdsEnabled) put("quic") }))
         }
         rules.put(JSONObject().put("port", JSONArray().put(53)).put("action", "hijack-dns"))
             .put(JSONObject().put("port", JSONArray().put(853)).put("network", JSONArray().put("tcp").put("udp"))

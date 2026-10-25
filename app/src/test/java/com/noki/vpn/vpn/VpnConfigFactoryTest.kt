@@ -53,7 +53,19 @@ class VpnConfigFactoryTest {
         assertFalse((0 until ipRules.length()).any { ipRules.getJSONObject(it).optString("action") == "sniff" })
         assertTrue(ipConfig.getJSONObject("dns").getBoolean("reverse_mapping"))
         val youtubeConfig = JSONObject(VpnConfigFactory.build(ipProfile, settings.copy(youtubeNoAdsEnabled = true), geosite))
-        assertEquals("sniff", youtubeConfig.getJSONObject("route").getJSONArray("rules").getJSONObject(0).getString("action"))
+        val sniff = youtubeConfig.getJSONObject("route").getJSONArray("rules").getJSONObject(0)
+        assertEquals("sniff", sniff.getString("action"))
+        assertEquals("and", sniff.getString("mode"))
+        val sniffConditions = sniff.getJSONArray("rules")
+        assertEquals("[\"tun\"]", sniffConditions.getJSONObject(0).getJSONArray("inbound").toString())
+        val unknownDomain = sniffConditions.getJSONObject(1)
+        assertTrue(unknownDomain.getBoolean("invert"))
+        val knownDomain = Regex(unknownDomain.getJSONArray("domain_regex").getString(0))
+        for (domain in listOf("ordinary.example", "youtube.com", "russian.example")) {
+            assertTrue(knownDomain.matches(domain))
+        }
+        assertFalse(knownDomain.matches(""))
+        assertTrue(youtubeConfig.getJSONObject("dns").getBoolean("reverse_mapping"))
         for (mode in listOf("", "quic", "tcp")) {
             val selected = profile.copy(transportMode = mode)
             for (config in listOf(VpnConfigFactory.buildProbe(selected),
