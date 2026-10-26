@@ -85,7 +85,7 @@ elif mode=='extract':
     assert inputs['source_commit']=='55faa763f986f4ca8a492d9b2719bc6330d2bef5'
     assert inputs['version']=='1.14.1-extended-2.7.2-nokinv-21'
     assert inputs['local_source_commit']=='9280c0fd9d85df89cd47f266a28ffc2df2e84781'
-    assert inputs['abis']==['arm64-v8a']
+    assert inputs['abis']==['arm64-v8a','armeabi-v7a','x86_64']
     assert sha((source/'build-libbox.ps1').read_bytes())==inputs['recipe_sha256']
     assert inputs['android_api']==26
     assert inputs['tags']==['with_gvisor','with_quic','with_wireguard','with_utls']
@@ -112,7 +112,7 @@ elif mode=='downloads':
 elif mode=='merge':
     shared=None
     members={}
-    for abi,machine in [('arm64-v8a',183)]:
+    for abi,machine in [('arm64-v8a',183),('armeabi-v7a',40),('x86_64',62)]:
         with zipfile.ZipFile(output/('libbox-'+abi+'.aar')) as archive:
             current={name:archive.read(name) for name in archive.namelist() if not name.endswith('/') and not name.startswith('jni/')}
             assert shared is None or current==shared, 'ABI shared members differ'
