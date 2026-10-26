@@ -111,8 +111,9 @@ class VpnConfigFactoryTest {
 
     @Test
     fun nokinvDnsUsesTheExitThroughTheTunnelAndKeepsTheLocalTunDnsAddress() {
-        for (host in listOf("93.184.216.34", "node.example")) {
-            val profile = VlessProfile(proxyType = "nokinv", transport = "nokinv", security = "tls",
+        for (host in listOf("93.184.216.34", "node.example")) for (transport in listOf("tcp", "quic")) {
+            val profile = VlessProfile(proxyType = "nokinv", transport = "nokinv", transportMode = transport,
+                nokinvIpTunnel = true, security = "tls",
                 host = host, port = "10443", serverName = "node.example", uuid = "",
                 nokinvToken = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 7 }),
                 nokinvCredentialGeneration = 1)
@@ -124,7 +125,13 @@ class VpnConfigFactoryTest {
             assertEquals(53, nodeDns.getInt("server_port"))
             assertEquals("tcp", nodeDns.getString("type"))
             assertEquals("proxy", nodeDns.getString("detour"))
+            assertEquals("bootstrap", nodeDns.getJSONObject("domain_resolver").getString("server"))
+            assertEquals("ipv4_only", nodeDns.getJSONObject("domain_resolver").getString("strategy"))
+            assertEquals("local", dns.getJSONArray("servers").getJSONObject(1).getString("type"))
             assertEquals("noki-node-dns", dns.getString("final"))
+            assertEquals("noki-node-dns", config.getJSONObject("route")
+                .getJSONObject("default_domain_resolver").getString("server"))
+            assertEquals(transport, config.getJSONArray("outbounds").getJSONObject(0).getString("transport"))
             assertEquals("198.18.0.1", config.getJSONArray("inbounds").getJSONObject(0)
                 .getJSONArray("dns_address").getString(0))
         }

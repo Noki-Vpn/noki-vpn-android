@@ -191,9 +191,11 @@ class BackendMultiHopContractTest {
                 "1.14.1-extended-2.7.3-nokinv-6", "1.14.1-extended-2.7.2-nokinv-6-dev",
                 "1.14.1-extended-2.7.2-nokinv-99999999999999999999")) {
             assertFalse(backendVpnCapabilities(version).contains("nokinv_ip_v1"))
+            assertFalse(backendVpnCapabilities(version).contains("nokinv_ip_dns_v1"))
         }
-        for (revision in listOf(6, 7)) {
-            assertTrue(backendVpnCapabilities("1.14.1-extended-2.7.2-nokinv-$revision").contains("nokinv_ip_v1"))
+        for (revision in listOf(6, 7, 21, 22)) {
+            assertEquals(setOf("nokinv_v1", "nokinv_release_v1", "nokinv_ip_v1", "nokinv_ip_dns_v1"),
+                backendVpnCapabilities("1.14.1-extended-2.7.2-nokinv-$revision").toSet())
         }
     }
 }

@@ -30,7 +30,7 @@ internal fun backendVpnCapabilities(coreVersion: String): List<String> {
     val revision = Regex("^1\\.14\\.1-extended-2\\.7\\.2-nokinv-([0-9]+)$")
         .matchEntire(coreVersion)?.groupValues?.get(1)?.toIntOrNull()
     return listOf("nokinv_v1", "nokinv_release_v1") +
-        if (revision != null && revision >= 6) listOf("nokinv_ip_v1") else emptyList()
+        if (revision != null && revision >= 6) listOf("nokinv_ip_v1", "nokinv_ip_dns_v1") else emptyList()
 }
 
 class BackendApiClient(

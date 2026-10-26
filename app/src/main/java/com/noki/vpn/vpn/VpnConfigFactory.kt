@@ -123,7 +123,8 @@ object VpnConfigFactory {
         domainMatch(normalized.alwaysOnDomains, resolved)?.let { rules.put(route(it, "proxy")) }
         // The wire list supplies an explicit primary. Native DNS has no synthesized failover.
         val dns = JSONArray().put(JSONObject().put("type", "tcp").put("tag", DNS_TAG)
-            .put("server", dnsServers.first()).put("server_port", 53).put("detour", "proxy"))
+            .put("server", dnsServers.first()).put("server_port", 53).put("detour", "proxy")
+            .put("domain_resolver", resolver(BOOTSTRAP_TAG)))
         dns.put(bootstrapServer())
         return JSONObject()
             .put("log", JSONObject().put("level", when {
