@@ -5,6 +5,7 @@ import com.noki.vpn.data.EndpointRankingPolicy
 import com.noki.vpn.data.StoredSettings
 import com.noki.vpn.data.VpnConnectionState
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
@@ -18,9 +19,68 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VpnConnectionOrchestratorTest {
+    @Test
+    fun `queued readiness keeps its prepared owner after core replacement`() = runBlocking {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val returned = CountDownLatch(1)
+        val oldCancelled = java.util.concurrent.atomic.AtomicBoolean()
+        val oldMeasures = AtomicInteger()
+        val newMeasures = AtomicInteger()
+        val newCancels = AtomicInteger()
+        val oldProbe = VpnReadinessProbe(
+            measure = {
+                if (oldCancelled.get()) VpnProbeResult(null) else {
+                    oldMeasures.incrementAndGet()
+                    VpnProbeResult(1L)
+                }
+            },
+            cancel = { oldCancelled.set(true) },
+        )
+        var liveProbe = oldProbe
+        val runtime = RecordingVpnCoreRuntime(mutableListOf(), prepareReadiness = { _, _ -> liveProbe })
+        val orchestrator = VpnConnectionOrchestrator(
+            runtime, UnusedTunInterfaceFactory, RecordingConnectedSidecars(mutableListOf()),
+        )
+        val prepared = orchestrator.prepareReadinessCandidates(listOf("https://example.test"), 3_000L)
+        val waiting = async(Dispatchers.Default) {
+            EndpointProbeRunner.awaitNativeProbe(
+                measure = {
+                    entered.countDown()
+                    try {
+                        check(release.await(2L, TimeUnit.SECONDS))
+                        prepared.measure()
+                    } finally { returned.countDown() }
+                },
+                cancel = prepared.cancel,
+            )
+        }
+        try {
+            assertTrue(entered.await(1L, TimeUnit.SECONDS))
+            waiting.cancel()
+            waiting.join()
+            liveProbe = VpnReadinessProbe(
+                measure = { newMeasures.incrementAndGet(); VpnProbeResult(2L) },
+                cancel = { newCancels.incrementAndGet() },
+            )
+            release.countDown()
+            assertTrue(returned.await(1L, TimeUnit.SECONDS))
+            prepared.cancel()
+            assertEquals(0, oldMeasures.get())
+            assertEquals(0, newMeasures.get())
+            assertEquals(0, newCancels.get())
+            assertEquals(2L, orchestrator.prepareReadinessCandidates(listOf("https://example.test"), 3_000L).measure().delayMs)
+            assertEquals(1, newMeasures.get())
+        } finally {
+            release.countDown()
+            waiting.cancel()
+        }
+    }
+
     @Test
     fun `independent lifecycle operations wait and cancellation preserves the holder`() = runBlocking {
         val orchestrator = VpnConnectionOrchestrator(
@@ -406,6 +466,9 @@ private class RecordingConnectedSidecars(
 
 private class RecordingVpnCoreRuntime(
     private val events: MutableList<String>,
+    private val prepareReadiness: (List<String>, Long) -> VpnReadinessProbe = { _, _ ->
+        VpnReadinessProbe(measure = { VpnProbeResult(delayMs = 1L) }, cancel = {})
+    },
 ) : VpnCoreRuntime {
     override fun nokiNvCarrier(): String = ""
     override fun rebindNetwork(): Boolean = true
@@ -425,6 +488,9 @@ private class RecordingVpnCoreRuntime(
 
     override fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult =
         VpnProbeResult(delayMs = 1L)
+
+    override fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long): VpnReadinessProbe =
+        prepareReadiness(targetUrls, timeoutMillis)
 }
 
 private class BlockingFirstCancellationVpnCoreRuntime(
@@ -449,6 +515,9 @@ private class BlockingFirstCancellationVpnCoreRuntime(
 
     override fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult =
         VpnProbeResult(delayMs = 1L)
+
+    override fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long): VpnReadinessProbe =
+        VpnReadinessProbe(measure = { VpnProbeResult(delayMs = 1L) }, cancel = {})
 }
 
 private class RecordingTunHandle(

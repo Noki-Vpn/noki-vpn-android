@@ -244,6 +244,7 @@ class AppVpnServiceCommandTest {
             fixture.observeNetwork(UnderlyingNetworkAvailability.Validated)
             yield()
             assertEquals(1, fixture.runtimeRebinds)
+            fixture.orchestrator.withLifecycleLock {}
             assertEquals(tunnel, fixture.orchestrator.currentTunnel())
             assertEquals(generation, fixture.orchestrator.currentGenerationId())
             assertEquals(session, fixture.ruSession())
@@ -293,6 +294,7 @@ class AppVpnServiceCommandTest {
             fixture.observeNetwork(UnderlyingNetworkAvailability.Validated)
             yield()
             assertEquals(1, fixture.runtimeRebinds)
+            fixture.orchestrator.withLifecycleLock {}
             org.junit.Assert.assertTrue(probes > 0)
             assertNull(fixture.orchestrator.currentUnderlay())
             assertEquals(tunnel, fixture.orchestrator.currentTunnel())
@@ -306,6 +308,7 @@ class AppVpnServiceCommandTest {
             shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(2))
             yield()
             assertEquals(2, fixture.runtimeRebinds)
+            fixture.orchestrator.withLifecycleLock {}
             org.junit.Assert.assertNotNull(fixture.orchestrator.currentUnderlay())
             assertEquals(tunnel, fixture.orchestrator.currentTunnel())
             assertEquals(generation, fixture.orchestrator.currentGenerationId())
@@ -887,19 +890,18 @@ class AppVpnServiceCommandTest {
     }
 
     @Test
-    fun slowFirstTwoReadinessTargetsCannotStarveTheThirdStartupTarget() = runBlocking {
+    fun startupReadinessPassesAllTargetsInOneNativeDeadline() = runBlocking {
         val fixture = Fixture(this, probeFallback = true, workingEndpoint = null)
         fixture.runtimeRunning = true
         fixture.startedEndpoints += "tcp1"
         fixture.onProbe = {
-            if (fixture.probeTimeouts.size < 3) {
-                org.robolectric.shadows.ShadowSystemClock.advanceBy(
-                    java.time.Duration.ofMillis(fixture.probeTimeouts.last()))
-            } else fixture.workingEndpoint = "tcp1"
+            org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMillis(1_800L))
+            fixture.workingEndpoint = "tcp1"
         }
         val start = android.os.SystemClock.elapsedRealtime()
         assertEquals(30L, fixture.measureReadiness(fastStartup = true))
-        assertEquals(3, fixture.probeTimeouts.size)
+        assertEquals(listOf(3_000L), fixture.probeTimeouts)
+        assertEquals(listOf(VpnProbePlanPolicy.connectedTargets(false).map { it.url }), fixture.readinessCandidates)
         org.junit.Assert.assertTrue(android.os.SystemClock.elapsedRealtime() - start <= VpnProbePlanPolicy.STARTUP_TOTAL_TIMEOUT_MILLIS)
     }
 
@@ -1115,6 +1117,7 @@ class AppVpnServiceCommandTest {
             assertEquals(tunnel, fixture.orchestrator.currentTunnel())
             assertEquals(starts, fixture.startedEndpoints.size)
             assertEquals(stops, fixture.runtimeStops)
+            fixture.orchestrator.withLifecycleLock {}
             org.junit.Assert.assertNotNull(fixture.orchestrator.currentUnderlay())
         } finally {
             fixture.invoke("cancelDelayedVpnCallbacks")
@@ -1405,7 +1408,7 @@ class AppVpnServiceCommandTest {
         assertEquals("hy2", fixture.savedSettings().profile.endpointCode)
         assertEquals(1, fixture.tunnelsCreated)
         assertTrue(fixture.probeTimeouts.isNotEmpty())
-        assertTrue(fixture.probeTimeouts.all { it in 1L..1_500L })
+        assertTrue(fixture.probeTimeouts.all { it == VpnProbePlanPolicy.STARTUP_TOTAL_TIMEOUT_MILLIS })
     }
 
     @Test
@@ -1834,6 +1837,7 @@ class AppVpnServiceCommandTest {
         val startedEndpoints = mutableListOf<String>()
         val startedConfigs = mutableListOf<JSONObject>()
         val probeTimeouts = java.util.concurrent.CopyOnWriteArrayList<Long>()
+        val readinessCandidates = java.util.concurrent.CopyOnWriteArrayList<List<String>>()
         var rejectYoutubeRuntime = false
         var runtimeRunning = false
         var runtimeCarrier = ""
@@ -1885,6 +1889,21 @@ class AppVpnServiceCommandTest {
                     return runtimeRebindSucceeds
                 }
                 override fun cancelMeasureDelay() { probeCancels.incrementAndGet() }
+                override fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long): VpnReadinessProbe {
+                    readinessCandidates += targetUrls
+                    val completed = java.util.concurrent.atomic.AtomicBoolean()
+                    val cancelled = java.util.concurrent.atomic.AtomicBoolean()
+                    return VpnReadinessProbe(
+                        measure = {
+                            if (cancelled.get()) VpnProbeResult(null) else try {
+                                measureDelay(targetUrls.first(), timeoutMillis)
+                            } finally { completed.set(true) }
+                        },
+                        cancel = {
+                            if (!completed.get() && cancelled.compareAndSet(false, true)) probeCancels.incrementAndGet()
+                        },
+                    )
+                }
                 override fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult {
                     probeTimeouts += timeoutMillis
                     if (!probeActive.compareAndSet(false, true)) {

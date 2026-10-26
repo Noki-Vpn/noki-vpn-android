@@ -18,7 +18,7 @@ class VpnProbePlanPolicyTest {
             VpnProbePlanPolicy.connectedTargets(recovery = false),
             VpnProbePlanPolicy.connectedTargets(recovery = true),
         )
-        assertEquals(4_000L, VpnProbePlanPolicy.PER_TARGET_TIMEOUT_MILLIS)
+        assertEquals(3_000L, VpnProbePlanPolicy.STARTUP_TOTAL_TIMEOUT_MILLIS)
         assertEquals(10_000L, VpnProbePlanPolicy.TOTAL_TIMEOUT_MILLIS)
     }
 }

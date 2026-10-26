@@ -34,4 +34,24 @@ class VpnReleaseDiagnosticLoggingContractTest {
         assertFalse(underlaySource.contains("hostAddress"))
         assertFalse(underlaySource.contains("privateDnsServerName.orEmpty"))
     }
+
+    @Test
+    fun `readiness uses one native operation with the complete target budget`() {
+        val readiness = source.substringAfter("private suspend fun measureRuntimeReadiness")
+            .substringBefore("private fun readinessDiagnosticDetails")
+        assertTrue(readiness.contains("prepareReadinessCandidates(connectedTargets.map { it.url }, totalTimeout)"))
+        assertTrue(readiness.indexOf("prepareReadinessCandidates(") < readiness.indexOf("awaitNativeProbe("))
+        assertTrue(readiness.contains("measure = probe.measure, cancel = probe.cancel"))
+        assertFalse(readiness.contains("remainingMillis /"))
+        val loader = javaClass.classLoader
+        Class.forName("io.nekohasekai.libbox.CommandServer", false, loader).getMethod(
+            "prepareReadinessCandidates",
+            String::class.java,
+            Class.forName("io.nekohasekai.libbox.StringIterator", false, loader),
+            Long::class.javaPrimitiveType,
+        )
+        val measurement = Class.forName("io.nekohasekai.libbox.Measurement", false, loader)
+        measurement.getMethod("run")
+        measurement.getMethod("cancel")
+    }
 }

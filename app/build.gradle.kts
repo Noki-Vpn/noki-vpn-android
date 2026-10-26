@@ -43,9 +43,9 @@ val googleWebClientId = providers.gradleProperty("noki.googleWebClientId")
     .orElse("")
     .get()
 val libboxAarFile = layout.projectDirectory.file("libs/libbox.aar")
-val libboxAarSha256 = "DFDF14201C5E2C84E8708ABA7B2403023F079AA766D81074F3ED821BA6D38D22"
+val libboxAarSha256 = "E406A161F1293960FA9EBBE31504168FD660E797FF10EB6B97FD09B5A0A3D25C"
 val libboxSourceFile = layout.projectDirectory.file("libs/libbox.SOURCE.zip")
-val libboxSourceSha256 = "C19D350350B9FB19816F5DD3D924E37894EA5DA8DD598AA4DA8FDD98927FA233"
+val libboxSourceSha256 = "B7D9B6B048BAD43E49391DA437FD283D521CB6ADE72C2DD1D137C9A60D2C70C6"
 val geositeFile = layout.projectDirectory.file("src/main/assets/geosite.dat")
 val geositeSha256 = "1B9012AB376E142DA68506385E4B0590ABEB20A0DEAC0169293E1057FCE8D949"
 val geositeSourceFile = layout.projectDirectory.file("../third_party/geosite/SOURCE.zip")

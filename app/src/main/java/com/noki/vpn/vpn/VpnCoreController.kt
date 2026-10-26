@@ -72,9 +72,28 @@ internal class VpnCoreController(
     @Synchronized
     override fun nokiNvCarrier(): String = server?.getNokiNVCarrier().orEmpty()
 
-    override fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult = try {
-        val core = checkNotNull(server) { "vpn_core_not_running" }
-        VpnProbeResult(core.measureDelay("proxy", targetUrl, timeoutMillis).takeIf { it > 0L })
+    override fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult {
+        val core = server
+        return measureProbe { checkNotNull(core) { "vpn_core_not_running" }.measureDelay("proxy", targetUrl, timeoutMillis) }
+    }
+
+    override fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long): VpnReadinessProbe {
+        val core = server
+        return try {
+            val measurement = checkNotNull(core) { "vpn_core_not_running" }
+                .prepareReadinessCandidates("proxy", strings(targetUrls), timeoutMillis)
+            VpnReadinessProbe(
+                measure = { measureProbe { measurement.run() } },
+                cancel = measurement::cancel,
+            )
+        } catch (error: Throwable) {
+            val result = measureProbe { throw error }
+            VpnReadinessProbe(measure = { result }, cancel = {})
+        }
+    }
+
+    private fun measureProbe(measure: () -> Long): VpnProbeResult = try {
+        VpnProbeResult(measure().takeIf { it > 0L })
     } catch (error: Throwable) {
         val issue = VpnCoreIssue.fromThrowable(error)
         SafeLog.w(TAG, "VPN readiness failed; issue=${issue?.logMessage ?: "unknown"}", error)

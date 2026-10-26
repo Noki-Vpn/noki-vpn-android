@@ -2191,49 +2191,39 @@ class AppVpnService : VpnService() {
         val repository = SettingsRepository(this)
         val connectedTargets = VpnProbePlanPolicy.connectedTargets(recovery)
         val totalTimeout = if (fastStartup) VpnProbePlanPolicy.STARTUP_TOTAL_TIMEOUT_MILLIS else VpnProbePlanPolicy.TOTAL_TIMEOUT_MILLIS
-        val targetTimeout = if (fastStartup) VpnProbePlanPolicy.STARTUP_PER_TARGET_TIMEOUT_MILLIS else VpnProbePlanPolicy.PER_TARGET_TIMEOUT_MILLIS
-        val deadline = SystemClock.elapsedRealtime() + totalTimeout
-        for ((index, target) in connectedTargets.withIndex()) {
-            currentCoroutineContext().ensureActive()
-            val remainingMillis = deadline - SystemClock.elapsedRealtime()
-            if (remainingMillis <= 0L) break
-            val startedAt = SystemClock.elapsedRealtime()
-            // Reserve a probe slot for every independent target inside the same startup deadline.
-            val budget = if (fastStartup) remainingMillis / (connectedTargets.size - index) else remainingMillis
-            val timeoutMillis = budget.coerceAtMost(targetTimeout).coerceAtLeast(1L)
-            val measure = { connectionOrchestrator.measureDelay(target.url, timeoutMillis) }
-            val result = if (fastStartup) withTimeoutOrNull(timeoutMillis) {
-                EndpointProbeRunner.awaitNativeProbe(
-                    measure = measure,
-                    cancel = connectionOrchestrator::cancelReadinessProbe,
-                )
-            } ?: VpnProbeResult(null, VpnCoreIssue.PROXY_TCP_TIMEOUT) else measure()
-            currentCoroutineContext().ensureActive()
-            recordDiagnostic(
-                repository = repository,
-                message = "readiness_probe",
-                details = readinessDiagnosticDetails(
-                    target = target,
-                    result = result,
-                    recovery = recovery,
-                    fallback = false,
-                    elapsedMs = SystemClock.elapsedRealtime() - startedAt,
-                ),
-                level = if (VpnReadinessPolicy.accept(result.delayMs)) "info" else "error",
-            )
-            if (VpnReadinessPolicy.accept(result.delayMs)) return@withLock result.delayMs
+        val startedAt = SystemClock.elapsedRealtime()
+        val probe = connectionOrchestrator.prepareReadinessCandidates(connectedTargets.map { it.url }, totalTimeout)
+        val result = try {
+            withTimeoutOrNull(totalTimeout) {
+                EndpointProbeRunner.awaitNativeProbe(measure = probe.measure, cancel = probe.cancel)
+            } ?: VpnProbeResult(null, VpnCoreIssue.PROXY_TCP_TIMEOUT)
+        } finally {
+            probe.cancel()
         }
-        null
+        currentCoroutineContext().ensureActive()
+        recordDiagnostic(
+            repository = repository,
+            message = "readiness_probe",
+            details = readinessDiagnosticDetails(
+                targetKey = connectedTargets.joinToString(",") { it.key },
+                result = result,
+                recovery = recovery,
+                fallback = false,
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+            ),
+            level = if (VpnReadinessPolicy.accept(result.delayMs)) "info" else "error",
+        )
+        result.delayMs.takeIf(VpnReadinessPolicy::accept)
     }
 
     private fun readinessDiagnosticDetails(
-        target: VpnProbePlanPolicy.ProbeTarget,
+        targetKey: String,
         result: VpnProbeResult,
         recovery: Boolean,
         fallback: Boolean,
         elapsedMs: Long,
     ): String = buildString {
-        append("target=").append(target.key)
+        append("target=").append(targetKey)
         append("; recovery=").append(recovery)
         append("; fallback=").append(fallback)
         append("; delay_ms=").append(result.delayMs ?: -1L)
