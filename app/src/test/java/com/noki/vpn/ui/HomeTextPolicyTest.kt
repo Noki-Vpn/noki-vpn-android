@@ -21,7 +21,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeTextPolicyTest {
-    @Test fun connectedNokiNVUsesTheProtocolPickerNamesWhileGamingKeepsItsStatus() {
+    @Test fun connectedNokiNVUsesTheProtocolPickerNamesWhileGamingKeepsItsPickerLabel() {
         for (language in AppLanguage.entries) {
             for ((carrier, mode) in listOf("quic" to "quic", "tls" to "tcp")) {
                 val endpoint = VpnEndpointOption(code = "nv", host = "nv.example.com", label = "custom label",
@@ -35,7 +35,11 @@ class HomeTextPolicyTest {
                     profile = VlessProfile(endpointCode = endpoint.code, proxyType = "nokinv", transport = "nokinv", transportMode = mode))
                 for (auto in listOf(false, true)) assertEquals(expected, protocolCardLabel(state, auto))
                 val gaming = state.copy(advancedSettings = state.advancedSettings.copy(gamingModeEnabled = true))
-                assertTrue(protocolCardLabel(gaming, true).endsWith(if (language == AppLanguage.RU) "Игровой" else "Gaming"))
+                for (connection in VpnConnectionState.entries) for (auto in listOf(false, true)) {
+                    assertEquals("NokiNV / Gaming", protocolCardLabel(gaming.copy(
+                        connectionState = connection), auto))
+                }
+                assertEquals("NokiNV / Gaming", protocolCardLabel(gaming.copy(nokiNvCarrier = "mixed"), true))
             }
         }
     }
@@ -152,6 +156,45 @@ class HomeTextPolicyTest {
                 VpnServer("entry", "Латвия1", "LV", "lv", "lv.example", 443, true),
                 VpnServer("exit", "Нидерланды1", "NL", "nl", "nl.example", 443, true)))))
         assertEquals("Латвия1 → Нидерланды1", homeServerSubtitle(direct))
+    }
+
+    @Test
+    fun multiHopFlagUsesConfiguredOrConfirmedExitAndNeverPreviousAutoCountry() {
+        val nodes = listOf(
+            VpnServer("entry", "Latvia", "LV", "lv", "lv.example", 443, true),
+            VpnServer("exit", "Netherlands", "NL", "nl", "nl.example", 443, true),
+            VpnServer("runtime", "Austria", "AT", "at", "at.example", 443, true),
+            VpnServer("old", "France", "FR", "fr", "fr.example", 443, true),
+        )
+        for (ruRelay in listOf(false, true)) {
+            val state = AppUiState(
+                personalizationSettings = PersonalizationSettings(language = AppLanguage.EN),
+                advancedSettings = AdvancedSettings(ruRelayEnabled = ruRelay, multiHop = MultiHopSettings(
+                    enabled = true, entry = HopSelection(ServerSelectionMode.SERVER, nodeId = "entry"),
+                    exit = HopSelection(ServerSelectionMode.SERVER, nodeId = "exit"))),
+                locations = nodes.map { location(code = it.locationCode, countryCode = it.countryCode).copy(servers = listOf(it)) },
+                ruForeignNodes = nodes.map { RuForeignNode(it.id, it.name, it.countryCode) },
+                userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.AUTO,
+                    selectedServerCode = "old", actualCountryCode = "FR", selectedCountryCode = "FR"),
+            )
+            for (connection in listOf(VpnConnectionState.DISCONNECTED, VpnConnectionState.CONNECTING, VpnConnectionState.FAILED)) {
+                assertEquals("NL", homeMultiHopExitCountryCode(state.copy(connectionState = connection)))
+            }
+            val connected = state.copy(connectionState = VpnConnectionState.CONNECTED,
+                userProfile = state.userProfile.copy(selectedServerCode = "exit"))
+            assertEquals("NL", homeMultiHopExitCountryCode(connected))
+            assertNull(homeMultiHopExitCountryCode(state.copy(connectionState = VpnConnectionState.CONNECTED)))
+            assertNull(homeMultiHopExitCountryCode(connected.copy(userProfile =
+                state.userProfile.copy(selectedServerCode = "runtime"))))
+            if (!ruRelay) assertEquals("NL", homeMultiHopExitCountryCode(connected.copy(userProfile =
+                state.userProfile.copy(selectedServerCode = "nl"))))
+            assertNull(homeMultiHopExitCountryCode(connected.copy(userProfile =
+                state.userProfile.copy(selectedServerCode = "missing"))))
+            assertNull(homeMultiHopExitCountryCode(state.copy(advancedSettings = state.advancedSettings.copy(
+                multiHop = state.advancedSettings.multiHop.copy(exit = HopSelection(ServerSelectionMode.SERVER, nodeId = "missing"))))))
+            assertEquals("NL", homeMultiHopExitCountryCode(state.copy(advancedSettings = state.advancedSettings.copy(
+                multiHop = state.advancedSettings.multiHop.copy(exit = HopSelection(ServerSelectionMode.COUNTRY, countryCode = " nl "))))))
+        }
     }
 
     @Test

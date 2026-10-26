@@ -444,7 +444,7 @@ internal fun OnlineStatusIndicator(
 
 internal fun countryMarkerCode(location: ServerLocation): String? = countryMarkerCode(location.countryCode)
 
-private fun countryMarkerCode(countryCode: String): String? {
+internal fun countryMarkerCode(countryCode: String): String? {
     return countryCode
         .trim()
         .uppercase(Locale.ROOT)

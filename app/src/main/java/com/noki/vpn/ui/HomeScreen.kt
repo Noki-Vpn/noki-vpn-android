@@ -76,9 +76,6 @@ fun HomeScreen(
             val scale = adaptiveMetrics.contentScale
             val screenMaxHeight = maxHeight
             val language = state.personalizationSettings.language
-            val displayedCountryCode = if (state.userProfile.serverSelectionMode == ServerSelectionMode.AUTO) {
-                state.userProfile.actualCountryCode
-            } else state.userProfile.selectedCountryCode
             val selectedLocation = homeSelectedLocation(state.locations, state.userProfile)
             val ruRelayEnabled = state.advancedSettings.ruRelayEnabled
             val usesRuCatalog = usesRuForeignNodeCatalog(ruRelayEnabled, state.ruForeignNodes)
@@ -256,8 +253,6 @@ fun HomeScreen(
                         .zIndex(3f),
                     scale = scale,
                     language = language,
-                    locations = state.locations,
-                    selectedServerCode = selectedLocation?.code ?: displayedCountryCode,
                     expanded = isServerMenuExpanded,
                     onToggle = {
                         if (multiHop.enabled) viewModel.openScreen(AppDestination.MULTIHOP)
@@ -275,7 +270,11 @@ fun HomeScreen(
                     subtitle = homeServerSubtitle(state),
                     automatic = !multiHop.enabled && state.userProfile.serverSelectionMode == ServerSelectionMode.AUTO &&
                         state.connectionState != VpnConnectionState.CONNECTED,
-                    countryCode = if (usesRuCatalog) ruCountryCode.takeIf { it.isNotBlank() } else null,
+                    countryCode = when {
+                        multiHop.enabled -> homeMultiHopExitCountryCode(state)
+                        usesRuCatalog -> ruCountryCode.takeIf { it.isNotBlank() }
+                        else -> selectedLocation?.countryCode
+                    },
                 )
             }
 

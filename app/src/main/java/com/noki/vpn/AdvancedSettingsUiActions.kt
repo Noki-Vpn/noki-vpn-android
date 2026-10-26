@@ -58,7 +58,10 @@ internal fun automaticLogUploadEffect(
 }
 
 internal fun AppUiRuntime.updateFilterMode(mode: AppFilterMode) {
-    applyAndPersist(AdvancedSettingsStateReducer.setFilterMode(uiState, mode))
+    val next = AdvancedSettingsStateReducer.setFilterMode(uiState, mode)
+    if (next == uiState) return
+    applyAndPersist(next)
+    applyAppRoutingSettings()
 }
 
 internal fun AppUiRuntime.togglePackageSelection(packageName: String) {

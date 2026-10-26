@@ -76,6 +76,36 @@ internal fun homeSelectedLocation(
     }
 }
 
+internal fun homeMultiHopExitCountryCode(state: AppUiState): String? {
+    val usesRuCatalog = usesRuForeignNodeCatalog(state.advancedSettings.ruRelayEnabled, state.ruForeignNodes)
+    fun nodeCountry(nodeId: String?): String? {
+        if (nodeId.isNullOrBlank()) return null
+        val code = if (usesRuCatalog) {
+            state.ruForeignNodes.firstOrNull { it.id == nodeId }?.countryCode
+        } else state.locations.asSequence().flatMap { it.servers.asSequence() }.firstOrNull {
+            it.id == nodeId || it.locationCode.equals(nodeId, true)
+        }?.countryCode
+        return code?.let(::countryMarkerCode)
+    }
+    val exit = state.advancedSettings.multiHop.exit
+    val configuredCountry = when (exit?.kind) {
+        ServerSelectionMode.COUNTRY -> exit.countryCode?.let(::countryMarkerCode)
+        ServerSelectionMode.SERVER -> nodeCountry(exit.nodeId)
+        else -> null
+    }
+    if (state.connectionState != VpnConnectionState.CONNECTED) return configuredCountry
+    val runtimeCode = state.userProfile.selectedServerCode
+    // Runtime UI sync is asynchronous; a previous Auto id cannot confirm another exit.
+    val matchesExit = when (exit?.kind) {
+        ServerSelectionMode.SERVER -> runtimeCode == exit.nodeId || (!usesRuCatalog && state.locations.any { location ->
+            location.servers.any { it.id == exit.nodeId && it.locationCode.equals(runtimeCode, true) }
+        })
+        ServerSelectionMode.COUNTRY -> nodeCountry(runtimeCode) == configuredCountry
+        else -> false
+    }
+    return nodeCountry(runtimeCode)?.takeIf { matchesExit && it == configuredCountry }
+}
+
 internal fun homeServerSubtitle(state: AppUiState): String? {
     val language = state.personalizationSettings.language
     val ruRelay = state.advancedSettings.ruRelayEnabled
@@ -213,8 +243,6 @@ internal fun HomeLocationCard(
     modifier: Modifier,
     scale: Float,
     language: AppLanguage,
-    locations: List<ServerLocation>,
-    selectedServerCode: String,
     expanded: Boolean,
     backdrop: PrismalGlassLayer?,
     liveGlassEnabled: Boolean,
@@ -225,7 +253,6 @@ internal fun HomeLocationCard(
     automatic: Boolean = false,
 ) {
     val headerHeight = designDp(NokiUiKitPolicy.homeLocationHeightDp, scale)
-    val selectedLocation = locations.firstOrNull { it.code.equals(selectedServerCode, true) }
     val arrowRotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
@@ -246,12 +273,11 @@ internal fun HomeLocationCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(designDp(20f, scale)),
         ) {
-            val flagCode = countryCode ?: selectedLocation?.countryCode
             if (automatic) {
                 AutomaticServerMarker(scale, NokiUiKitPolicy.homeLocationFlagSizeDp)
-            } else if (flagCode != null) {
+            } else if (countryCode != null) {
                 CountryFlagMarker(
-                    countryCode = flagCode,
+                    countryCode = countryCode,
                     scale = scale,
                     sizeDp = NokiUiKitPolicy.homeLocationFlagSizeDp,
                 )
