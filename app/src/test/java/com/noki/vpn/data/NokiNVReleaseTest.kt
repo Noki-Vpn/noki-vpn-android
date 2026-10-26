@@ -132,9 +132,6 @@ class NokiNVReleaseTest {
         val profile = select(auto).profile
         assertEquals("nokinv", profile.proxyType)
         assertEquals(session.nokinvToken, profile.nokinvToken)
-        assertFalse(profile.nokinvIpTunnel)
-        assertTrue(EndpointSelector.profileFromCandidate(session, nv.copy(ipTunnel = true)).nokinvIpTunnel)
-        assertFalse(EndpointSelector.profileFromCandidate(session, hy).nokinvIpTunnel)
         assertTrue(VpnProfileValidator.isUsable(profile, auto))
         val fallback = select(auto, listOf(hy)).profile
         assertEquals("hysteria", fallback.proxyType)

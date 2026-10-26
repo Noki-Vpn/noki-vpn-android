@@ -16,12 +16,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VpnConfigFactoryTest {
-    @Test fun ipTunnelCapabilityIsOptionalPerCandidate() {
+    @Test fun oldIpTunnelCapabilityDoesNotChangeTheFlowCandidate() {
         val value = JSONObject().put("code", "nv").put("entry_host", "node.example")
             .put("proxy_type", "nokinv").put("transport", "nokinv")
-        assertFalse(BackendVpnSessionJsonParser.parseEndpointCandidate(value).ipTunnel)
+        val flowCandidate = BackendVpnSessionJsonParser.parseEndpointCandidate(value)
         value.put("ip_tunnel", true)
-        assertTrue(BackendVpnSessionJsonParser.parseEndpointCandidate(value).ipTunnel)
+        assertEquals(flowCandidate, BackendVpnSessionJsonParser.parseEndpointCandidate(value))
     }
 
     @Test fun nokinvUsesDeviceCredentialAndOneAutomaticTransport() {
@@ -46,25 +46,14 @@ class VpnConfigFactoryTest {
             .getJSONArray("outbounds").getJSONObject(0).getString("path"))
         assertFalse(outbound.has("uuid"))
         assertFalse(outbound.has("ip_tunnel"))
-        val ipProfile = profile.copy(nokinvIpTunnel = true)
-        val ipConfig = JSONObject(VpnConfigFactory.build(ipProfile, settings, geosite))
-        assertTrue(ipConfig.getJSONArray("outbounds").getJSONObject(0).getBoolean("ip_tunnel"))
-        val ipRules = ipConfig.getJSONObject("route").getJSONArray("rules")
-        assertFalse((0 until ipRules.length()).any { ipRules.getJSONObject(it).optString("action") == "sniff" })
-        assertTrue(ipConfig.getJSONObject("dns").getBoolean("reverse_mapping"))
-        val youtubeConfig = JSONObject(VpnConfigFactory.build(ipProfile, settings.copy(youtubeNoAdsEnabled = true), geosite))
+        val flowConfig = JSONObject(VpnConfigFactory.build(profile, settings, geosite))
+        assertFalse(flowConfig.getJSONArray("outbounds").getJSONObject(0).has("ip_tunnel"))
+        assertTrue(flowConfig.getJSONObject("dns").getBoolean("reverse_mapping"))
+        val youtubeConfig = JSONObject(VpnConfigFactory.build(profile, settings.copy(youtubeNoAdsEnabled = true), geosite))
         val sniff = youtubeConfig.getJSONObject("route").getJSONArray("rules").getJSONObject(0)
         assertEquals("sniff", sniff.getString("action"))
-        assertEquals("and", sniff.getString("mode"))
-        val sniffConditions = sniff.getJSONArray("rules")
-        assertEquals("[\"tun\"]", sniffConditions.getJSONObject(0).getJSONArray("inbound").toString())
-        val unknownDomain = sniffConditions.getJSONObject(1)
-        assertTrue(unknownDomain.getBoolean("invert"))
-        val knownDomain = Regex(unknownDomain.getJSONArray("domain_regex").getString(0))
-        for (domain in listOf("ordinary.example", "youtube.com", "russian.example")) {
-            assertTrue(knownDomain.matches(domain))
-        }
-        assertFalse(knownDomain.matches(""))
+        assertEquals("[\"tun\"]", sniff.getJSONArray("inbound").toString())
+        assertEquals("[\"http\",\"tls\",\"quic\"]", sniff.getJSONArray("sniffer").toString())
         assertTrue(youtubeConfig.getJSONObject("dns").getBoolean("reverse_mapping"))
         for (mode in listOf("", "quic", "tcp")) {
             val selected = profile.copy(transportMode = mode)
@@ -113,7 +102,7 @@ class VpnConfigFactoryTest {
     fun nokinvDnsUsesTheExitThroughTheTunnelAndKeepsTheLocalTunDnsAddress() {
         for (host in listOf("93.184.216.34", "node.example")) for (transport in listOf("tcp", "quic")) {
             val profile = VlessProfile(proxyType = "nokinv", transport = "nokinv", transportMode = transport,
-                nokinvIpTunnel = true, security = "tls",
+                security = "tls",
                 host = host, port = "10443", serverName = "node.example", uuid = "",
                 nokinvToken = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 7 }),
                 nokinvCredentialGeneration = 1)

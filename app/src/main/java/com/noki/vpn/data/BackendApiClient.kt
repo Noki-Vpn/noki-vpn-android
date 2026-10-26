@@ -1,7 +1,6 @@
 package com.noki.vpn.data
 
 import com.noki.vpn.BuildConfig
-import io.nekohasekai.libbox.Libbox
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -26,19 +25,13 @@ internal fun backendStreamingClient(controlPlaneClient: OkHttpClient): OkHttpCli
         .callTimeout(30, TimeUnit.MINUTES)
         .build()
 
-internal fun backendVpnCapabilities(coreVersion: String): List<String> {
-    val revision = Regex("^1\\.14\\.1-extended-2\\.7\\.2-nokinv-([0-9]+)$")
-        .matchEntire(coreVersion)?.groupValues?.get(1)?.toIntOrNull()
-    return listOf("nokinv_v1", "nokinv_release_v1") +
-        if (revision != null && revision >= 6) listOf("nokinv_ip_v1", "nokinv_ip_dns_v1") else emptyList()
-}
+internal fun backendVpnCapabilities(): List<String> = listOf("nokinv_v1", "nokinv_release_v1")
 
 class BackendApiClient(
     private val client: OkHttpClient = defaultBackendControlPlaneClient(),
     baseUrl: String = NokiBackendConfig.apiBaseUrl,
     streamingClient: OkHttpClient = backendStreamingClient(client),
     private val challengeSigner: (String) -> String = DeviceIdentity::signChallenge,
-    private val nativeCoreVersion: () -> String = { Libbox.version() },
 ) : VpnSessionApi, TemporaryVpnApi, AuthFlowApi, TelegramAuthApi, GoogleAuthApi, TelegramOidcApi,
     AuthRefreshApi, PasswordRecoveryApi,
     AccountApi, AccountSecurityApi, DeviceActionApi,
@@ -69,7 +62,6 @@ class BackendApiClient(
             .dns { host -> network.getAllByName(host).toList() }.build(),
         baseUrl = baseUrl,
         challengeSigner = challengeSigner,
-        nativeCoreVersion = nativeCoreVersion,
     )
 
     suspend fun paymentConfig(): BackendPaymentConfig = withContext(Dispatchers.IO) {
@@ -434,7 +426,7 @@ class BackendApiClient(
             .put("device_nonce", deviceNonce)
             .put("device_signature", deviceSignature)
             .put("profile_code", if (hops != null) "auto" else profileCode)
-            .put("capabilities", JSONArray(backendVpnCapabilities(runCatching(nativeCoreVersion).getOrDefault(""))))
+            .put("capabilities", JSONArray(backendVpnCapabilities()))
             .put("country_code", countryCode)
             .put("location_code", locationCode)
             .put("exclude_location_code", excludeLocationCode)

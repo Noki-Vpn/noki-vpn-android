@@ -629,7 +629,6 @@ internal object BackendVpnSessionJsonParser {
         multiHop = multiHop,
         nokinvToken = json.optBackendString("nokinv_token").orEmpty(),
         nokinvCredentialGeneration = json.optInt("nokinv_credential_generation", 0),
-        ipTunnel = json.optBoolean("ip_tunnel", false),
     )
     }
 
@@ -701,7 +700,6 @@ internal object BackendVpnSessionJsonParser {
         canaryOnly = item.optBoolean("canary_only", false),
         tags = item.optJSONArray("tags").toBackendStringList(),
         connectIp = item.optBackendString("connect_ip"),
-        ipTunnel = item.optBoolean("ip_tunnel", false),
     )
 
 }

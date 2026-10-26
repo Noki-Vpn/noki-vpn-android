@@ -34,7 +34,7 @@ object VpnConfigFactory {
         val dnsServer = if (profile.proxyType.equals("nokinv", ignoreCase = true)) profile.host else VpnTunnelPolicy.DNS_SERVER
         return routedConfig(advancedSettings, geositeBytes, JSONArray().put(proxyOutbound(profile, advancedSettings.gamingModeEnabled)),
             mtu = VpnTunnelPolicy.MTU, address = "10.10.0.2/32", dnsServers = listOf(dnsServer),
-            youtubeConnection = youtubeConnection, ipTunnel = profile.nokinvIpTunnel).toString(2)
+            youtubeConnection = youtubeConnection).toString(2)
     }
 
     fun buildWireGuard(config: BackendRuWireGuardConfig, privateKey: ByteArray,
@@ -69,8 +69,7 @@ object VpnConfigFactory {
 
     private fun routedConfig(settings: AdvancedSettings, geositeBytes: ByteArray, outbounds: JSONArray,
                               mtu: Int, address: String, dnsServers: List<String>,
-                              youtubeConnection: YoutubeConnectionConfig?, endpoints: JSONArray = JSONArray(),
-                              ipTunnel: Boolean = false): JSONObject {
+                              youtubeConnection: YoutubeConnectionConfig?, endpoints: JSONArray = JSONArray()): JSONObject {
         val normalized = DomainRulePolicy.normalizeSettings(settings)
         val selectors = (normalized.alwaysOnDomains + normalized.bypassDomains + DomainRulePolicy.RUSSIAN_RESOURCES_RULE +
             if (normalized.youtubeNoAdsEnabled) listOf(YOUTUBE_RULE) else emptyList())
@@ -79,15 +78,9 @@ object VpnConfigFactory {
         val russian = domainMatch(listOf(DomainRulePolicy.RUSSIAN_RESOURCES_RULE), resolved)
             ?: throw IllegalArgumentException("geosite_category_ru_empty")
         val rules = JSONArray()
-        // Unknown domains still need SNI/QUIC classification; known IP sessions use the DNS route hint.
-        if (!ipTunnel || normalized.youtubeNoAdsEnabled) {
-            val sniff = if (ipTunnel) JSONObject().put("type", "logical").put("mode", "and").put("rules", JSONArray()
-                .put(JSONObject().put("inbound", JSONArray().put("tun")))
-                .put(JSONObject().put("domain_regex", JSONArray().put(".+")).put("invert", true)))
-            else JSONObject().put("inbound", JSONArray().put("tun"))
-            rules.put(sniff.put("action", "sniff").put("sniffer", JSONArray().put("http").put("tls")
+        rules.put(JSONObject().put("inbound", JSONArray().put("tun"))
+            .put("action", "sniff").put("sniffer", JSONArray().put("http").put("tls")
                 .apply { if (normalized.youtubeNoAdsEnabled) put("quic") }))
-        }
         rules.put(JSONObject().put("port", JSONArray().put(53)).put("action", "hijack-dns"))
             .put(JSONObject().put("port", JSONArray().put(853)).put("network", JSONArray().put("tcp").put("udp"))
                 .put("action", "reject"))
@@ -189,7 +182,6 @@ object VpnConfigFactory {
             profile.spiderX in listOf("", "/")) { "vpn_profile_option_unsupported" }
         val transport = profile.transport.lowercase(Locale.ROOT)
         val kind = profile.proxyType.lowercase(Locale.ROOT)
-        require(!profile.nokinvIpTunnel || kind == "nokinv") { "vpn_profile_ip_tunnel_invalid" }
         val security = profile.security.lowercase(Locale.ROOT)
         require(security in setOf("tls", "reality") && profile.serverName.isNotBlank()) { "vpn_profile_tls_required" }
         if (kind == "nokinv") {
@@ -207,7 +199,6 @@ object VpnConfigFactory {
                 .put("tls", JSONObject().put("enabled", true).put("server_name", profile.serverName)
                     .put("min_version", "1.3"))
                 .put("domain_resolver", resolver(BOOTSTRAP_TAG))
-                .apply { if (profile.nokinvIpTunnel) put("ip_tunnel", true) }
         }
         require(profile.uuid.isNotBlank()) { "vpn_profile_invalid" }
         val hy2 = kind in setOf("hysteria", "hysteria2", "hy2")
