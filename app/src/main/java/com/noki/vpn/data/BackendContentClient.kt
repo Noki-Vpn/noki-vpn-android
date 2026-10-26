@@ -41,7 +41,7 @@ internal class BackendContentClient(
             .put("device_key", deviceKey)
             .put("device_name", deviceName)
             .put("platform", "android")
-            .put("content", logsText.take(200_000))
+            .put("content", logsText)
             .apply {
                 incident?.let {
                     put("incident_id", it.id)

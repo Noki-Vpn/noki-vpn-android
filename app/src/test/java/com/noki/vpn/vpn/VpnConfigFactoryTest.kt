@@ -7,6 +7,7 @@ import com.noki.vpn.data.MultiHopSettings
 import com.noki.vpn.data.VlessProfile
 import com.noki.vpn.data.BackendVpnSessionJsonParser
 import com.noki.vpn.data.EndpointSelector
+import com.noki.vpn.data.EndpointSelectionMode
 import com.noki.vpn.data.contractFixture
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -16,6 +17,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VpnConfigFactoryTest {
+    @Test fun connectionLogSettingTakesPriorityOverErrorLogs() {
+        for ((connection, error, level) in listOf(
+            Triple(true, true, "info"),
+            Triple(false, true, "error"),
+            Triple(false, false, "warn"),
+        )) {
+            val config = JSONObject(VpnConfigFactory.build(profile(), AdvancedSettings(
+                connectionLogsEnabled = connection, errorLogsEnabled = error,
+            ), geosite))
+            assertEquals(level, config.getJSONObject("log").getString("level"))
+        }
+    }
+
     @Test fun ipTunnelCapabilityIsOptionalPerCandidate() {
         val value = JSONObject().put("code", "nv").put("entry_host", "node.example")
             .put("proxy_type", "nokinv").put("transport", "nokinv")
@@ -110,6 +124,31 @@ class VpnConfigFactoryTest {
     }
 
     @Test
+    fun nokinvTcpUsesFlowProxyWhileQuicAndGamingKeepIpRouting() {
+        val profile = VlessProfile(proxyType = "nokinv", transport = "nokinv", security = "tls",
+            host = "node.example", port = "10443", serverName = "node.example", nokinvIpTunnel = true,
+            nokinvToken = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 7 }),
+            nokinvCredentialGeneration = 1)
+        for (transport in listOf("", "tcp", "quic")) for (gaming in listOf(false, true)) {
+            for (selection in EndpointSelectionMode.entries) for (youtube in listOf(false, true)) {
+                val expectedIpTunnel = gaming || transport != "tcp"
+                val config = JSONObject(VpnConfigFactory.build(profile.copy(transportMode = transport),
+                    AdvancedSettings(protocol = com.noki.vpn.data.VpnProtocol.NOKINV, gamingModeEnabled = gaming,
+                        endpointSelectionMode = selection, youtubeNoAdsEnabled = youtube), geosite))
+                val outbound = config.getJSONArray("outbounds").getJSONObject(0)
+                assertEquals(expectedIpTunnel, outbound.optBoolean("ip_tunnel", false))
+                assertEquals(if (gaming) "auto" else transport.ifBlank { "auto" }, outbound.getString("transport"))
+                assertEquals(if (gaming) "gaming" else "balanced", outbound.getString("mode"))
+                val rules = config.getJSONObject("route").getJSONArray("rules")
+                val sniff = (0 until rules.length()).map(rules::getJSONObject)
+                    .firstOrNull { it.optString("action") == "sniff" }
+                assertEquals(!expectedIpTunnel || youtube, sniff != null)
+                sniff?.let { assertEquals(expectedIpTunnel, it.optString("type") == "logical") }
+            }
+        }
+    }
+
+    @Test
     fun nokinvDnsUsesTheExitThroughTheTunnelAndKeepsTheLocalTunDnsAddress() {
         for (host in listOf("93.184.216.34", "node.example")) for (transport in listOf("tcp", "quic")) {
             val profile = VlessProfile(proxyType = "nokinv", transport = "nokinv", transportMode = transport,
@@ -131,7 +170,13 @@ class VpnConfigFactoryTest {
             assertEquals("noki-node-dns", dns.getString("final"))
             assertEquals("noki-node-dns", config.getJSONObject("route")
                 .getJSONObject("default_domain_resolver").getString("server"))
-            assertEquals(transport, config.getJSONArray("outbounds").getJSONObject(0).getString("transport"))
+            val outbound = config.getJSONArray("outbounds").getJSONObject(0)
+            assertEquals(transport, outbound.getString("transport"))
+            assertEquals(transport != "tcp", outbound.optBoolean("ip_tunnel", false))
+            assertEquals("bootstrap", outbound.getJSONObject("domain_resolver").getString("server"))
+            val probeOutbound = JSONObject(VpnConfigFactory.buildProbe(profile)).getJSONArray("outbounds").getJSONObject(0)
+            assertEquals(transport != "tcp", probeOutbound.optBoolean("ip_tunnel", false))
+            assertEquals("bootstrap", probeOutbound.getJSONObject("domain_resolver").getString("server"))
             assertEquals("198.18.0.1", config.getJSONArray("inbounds").getJSONObject(0)
                 .getJSONArray("dns_address").getString(0))
         }

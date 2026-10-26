@@ -4,8 +4,59 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.Locale
 
 internal object AppLogStore {
+    const val EXPORT_MAX_CHARS = 200_000
+
+    fun export(logs: List<AppLogEntry>): String {
+        if (logs.isEmpty()) return EXPORT_HEADER + "(no local events yet)\n"
+        val blocks = ArrayDeque<String>()
+        var remaining = EXPORT_MAX_CHARS - EXPORT_HEADER.length
+        for (entry in logs.sortedBy { it.timestamp }.asReversed()) {
+            val block = exportBlock(entry)
+            if (block.length > remaining) {
+                if (blocks.isEmpty()) {
+                    var end = remaining - OVERSIZED_EVENT_MARKER.length
+                    if (block[end - 1].isHighSurrogate() && block[end].isLowSurrogate()) end--
+                    blocks.addFirst(block.take(end) + OVERSIZED_EVENT_MARKER)
+                }
+                break
+            }
+            blocks.addFirst(block)
+            remaining -= block.length
+        }
+        return EXPORT_HEADER + blocks.joinToString("")
+    }
+
+    private fun exportBlock(entry: AppLogEntry): String = buildString {
+        append(entry.timestamp)
+        append(" [")
+        append(entry.level.uppercase(Locale.ROOT))
+        append("] ")
+        append(entry.category)
+        append(": ")
+        appendLine(AppDiagnosticRedactor.redact(entry.message))
+        entry.details?.takeIf { it.isNotBlank() }?.let { details ->
+            append("  ")
+            appendLine(AppDiagnosticRedactor.redact(details).replace("\n", "\n  "))
+        }
+        val metadata = buildList {
+            entry.appVersion?.takeIf { it.isNotBlank() }?.let { add("app=${AppDiagnosticRedactor.redact(it)}") }
+            entry.androidVersion?.takeIf { it.isNotBlank() }?.let { add("android=${AppDiagnosticRedactor.redact(it)}") }
+            entry.deviceModel?.takeIf { it.isNotBlank() }?.let { add("device=${AppDiagnosticRedactor.redact(it)}") }
+            entry.errorType?.takeIf { it.isNotBlank() }?.let { add("error_type=${AppDiagnosticRedactor.redact(it)}") }
+            entry.serverCountry?.takeIf { it.isNotBlank() }?.let { add("server_country=${AppDiagnosticRedactor.redact(it)}") }
+            entry.apiResponseTimeMs?.let { add("api_response_ms=$it") }
+            entry.connectionSuccess?.let { add("connection_success=$it") }
+            entry.endpointRating?.takeIf { it.isNotBlank() }?.let { add("endpoint_rating=${AppDiagnosticRedactor.redact(it)}") }
+        }
+        if (metadata.isNotEmpty()) {
+            append("  ")
+            appendLine(metadata.joinToString(" | "))
+        }
+    }
+
     fun decode(raw: String?): List<AppLogEntry> {
         if (raw.isNullOrBlank()) return emptyList()
         return runCatching {
@@ -82,6 +133,8 @@ internal object AppLogStore {
     private const val RETENTION_DAYS = 14L
     private const val MAX_ENTRIES = 500
     private const val MAX_CHARS = 2_000_000
+    private const val EXPORT_HEADER = "Noki diagnostic log\n"
+    private const val OVERSIZED_EVENT_MARKER = "\n  [event truncated: export limit]\n"
 }
 
 internal object VpnIncidentStore {

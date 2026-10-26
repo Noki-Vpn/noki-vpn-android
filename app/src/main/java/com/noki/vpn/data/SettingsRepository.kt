@@ -11,7 +11,6 @@ import org.json.JSONObject
 import org.json.JSONArray
 import java.security.MessageDigest
 import java.time.Instant
-import java.util.Locale
 
 internal const val SETTINGS_PREFERENCES_NAME = "noki_settings"
 internal const val SETTINGS_ENCRYPTED_KEY = "settings_json_encrypted_v2"
@@ -347,40 +346,7 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
         }
     }
 
-    fun exportAppLogs(): String {
-        val logs = loadAppLogs()
-        if (logs.isEmpty()) return "Noki diagnostic log\n(no local events yet)\n"
-        return buildString {
-            appendLine("Noki diagnostic log")
-            logs.forEach { entry ->
-                append(entry.timestamp)
-                append(" [")
-                append(entry.level.uppercase(Locale.ROOT))
-                append("] ")
-                append(entry.category)
-                append(": ")
-                appendLine(AppDiagnosticRedactor.redact(entry.message))
-                entry.details?.takeIf { it.isNotBlank() }?.let { details ->
-                    append("  ")
-                    appendLine(AppDiagnosticRedactor.redact(details).replace("\n", "\n  "))
-                }
-                val metadata = buildList {
-                    entry.appVersion?.takeIf { it.isNotBlank() }?.let { add("app=${AppDiagnosticRedactor.redact(it)}") }
-                    entry.androidVersion?.takeIf { it.isNotBlank() }?.let { add("android=${AppDiagnosticRedactor.redact(it)}") }
-                    entry.deviceModel?.takeIf { it.isNotBlank() }?.let { add("device=${AppDiagnosticRedactor.redact(it)}") }
-                    entry.errorType?.takeIf { it.isNotBlank() }?.let { add("error_type=${AppDiagnosticRedactor.redact(it)}") }
-                    entry.serverCountry?.takeIf { it.isNotBlank() }?.let { add("server_country=${AppDiagnosticRedactor.redact(it)}") }
-                    entry.apiResponseTimeMs?.let { add("api_response_ms=$it") }
-                    entry.connectionSuccess?.let { add("connection_success=$it") }
-                    entry.endpointRating?.takeIf { it.isNotBlank() }?.let { add("endpoint_rating=${AppDiagnosticRedactor.redact(it)}") }
-                }
-                if (metadata.isNotEmpty()) {
-                    append("  ")
-                    appendLine(metadata.joinToString(" | "))
-                }
-            }
-        }
-    }
+    fun exportAppLogs(): String = AppLogStore.export(loadAppLogs())
 
     override fun loadEndpointHealth(): Map<String, EndpointHealth> {
         return synchronized(ENDPOINT_HEALTH_LOCK) {

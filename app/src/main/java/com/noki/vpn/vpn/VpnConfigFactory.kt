@@ -30,11 +30,12 @@ object VpnConfigFactory {
         require(!advancedSettings.gamingModeEnabled || VpnProfileValidator.isUsable(profile, advancedSettings)) { "gaming_profile_invalid" }
         require(profile.multiHop == null && !advancedSettings.multiHop.enabled ||
             VpnProfileValidator.isUsable(profile, advancedSettings)) { "multihop_profile_invalid" }
+        val ipTunnel = effectiveIpTunnel(profile, advancedSettings.gamingModeEnabled)
         // NokiNV vets destinations before the exit intercepts DNS; its public address passes that check.
         val dnsServer = if (profile.proxyType.equals("nokinv", ignoreCase = true)) profile.host else VpnTunnelPolicy.DNS_SERVER
         return routedConfig(advancedSettings, geositeBytes, JSONArray().put(proxyOutbound(profile, advancedSettings.gamingModeEnabled)),
             mtu = VpnTunnelPolicy.MTU, address = "10.10.0.2/32", dnsServers = listOf(dnsServer),
-            youtubeConnection = youtubeConnection, ipTunnel = profile.nokinvIpTunnel).toString(2)
+            youtubeConnection = youtubeConnection, ipTunnel = ipTunnel).toString(2)
     }
 
     fun buildWireGuard(config: BackendRuWireGuardConfig, privateKey: ByteArray,
@@ -128,8 +129,8 @@ object VpnConfigFactory {
         dns.put(bootstrapServer())
         return JSONObject()
             .put("log", JSONObject().put("level", when {
-                normalized.errorLogsEnabled -> "error"
                 normalized.connectionLogsEnabled -> "info"
+                normalized.errorLogsEnabled -> "error"
                 else -> "warn"
             }))
             .put("inbounds", JSONArray().put(JSONObject().put("type", "tun").put("tag", "tun")
@@ -181,6 +182,9 @@ object VpnConfigFactory {
         }
     }
 
+    private fun effectiveIpTunnel(profile: VlessProfile, gamingModeEnabled: Boolean): Boolean =
+        profile.nokinvIpTunnel && (gamingModeEnabled || profile.transportMode != "tcp")
+
     private fun proxyOutbound(profile: VlessProfile, gamingModeEnabled: Boolean = false): JSONObject {
         require(profile.host.isNotBlank()) { "vpn_profile_invalid" }
         val port = profile.port.toIntOrNull()
@@ -207,7 +211,7 @@ object VpnConfigFactory {
                 .put("tls", JSONObject().put("enabled", true).put("server_name", profile.serverName)
                     .put("min_version", "1.3"))
                 .put("domain_resolver", resolver(BOOTSTRAP_TAG))
-                .apply { if (profile.nokinvIpTunnel) put("ip_tunnel", true) }
+                .apply { if (effectiveIpTunnel(profile, gamingModeEnabled)) put("ip_tunnel", true) }
         }
         require(profile.uuid.isNotBlank()) { "vpn_profile_invalid" }
         val hy2 = kind in setOf("hysteria", "hysteria2", "hy2")
