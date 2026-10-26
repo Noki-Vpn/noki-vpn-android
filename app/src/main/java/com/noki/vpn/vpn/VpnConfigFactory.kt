@@ -30,12 +30,9 @@ object VpnConfigFactory {
         require(!advancedSettings.gamingModeEnabled || VpnProfileValidator.isUsable(profile, advancedSettings)) { "gaming_profile_invalid" }
         require(profile.multiHop == null && !advancedSettings.multiHop.enabled ||
             VpnProfileValidator.isUsable(profile, advancedSettings)) { "multihop_profile_invalid" }
-        val ipTunnel = effectiveIpTunnel(profile, advancedSettings.gamingModeEnabled)
-        // NokiNV vets destinations before the exit intercepts DNS; its public address passes that check.
-        val dnsServer = if (profile.proxyType.equals("nokinv", ignoreCase = true)) profile.host else VpnTunnelPolicy.DNS_SERVER
         return routedConfig(advancedSettings, geositeBytes, JSONArray().put(proxyOutbound(profile, advancedSettings.gamingModeEnabled)),
-            mtu = VpnTunnelPolicy.MTU, address = "10.10.0.2/32", dnsServers = listOf(dnsServer),
-            youtubeConnection = youtubeConnection, ipTunnel = ipTunnel).toString(2)
+            mtu = VpnTunnelPolicy.MTU, address = "10.10.0.2/32", dnsServers = listOf(VpnTunnelPolicy.DNS_SERVER),
+            youtubeConnection = youtubeConnection).toString(2)
     }
 
     fun buildWireGuard(config: BackendRuWireGuardConfig, privateKey: ByteArray,
@@ -70,8 +67,7 @@ object VpnConfigFactory {
 
     private fun routedConfig(settings: AdvancedSettings, geositeBytes: ByteArray, outbounds: JSONArray,
                               mtu: Int, address: String, dnsServers: List<String>,
-                              youtubeConnection: YoutubeConnectionConfig?, endpoints: JSONArray = JSONArray(),
-                              ipTunnel: Boolean = false): JSONObject {
+                              youtubeConnection: YoutubeConnectionConfig?, endpoints: JSONArray = JSONArray()): JSONObject {
         val normalized = DomainRulePolicy.normalizeSettings(settings)
         val selectors = (normalized.alwaysOnDomains + normalized.bypassDomains + DomainRulePolicy.RUSSIAN_RESOURCES_RULE +
             if (normalized.youtubeNoAdsEnabled) listOf(YOUTUBE_RULE) else emptyList())
@@ -80,15 +76,9 @@ object VpnConfigFactory {
         val russian = domainMatch(listOf(DomainRulePolicy.RUSSIAN_RESOURCES_RULE), resolved)
             ?: throw IllegalArgumentException("geosite_category_ru_empty")
         val rules = JSONArray()
-        // Unknown domains still need SNI/QUIC classification; known IP sessions use the DNS route hint.
-        if (!ipTunnel || normalized.youtubeNoAdsEnabled) {
-            val sniff = if (ipTunnel) JSONObject().put("type", "logical").put("mode", "and").put("rules", JSONArray()
-                .put(JSONObject().put("inbound", JSONArray().put("tun")))
-                .put(JSONObject().put("domain_regex", JSONArray().put(".+")).put("invert", true)))
-            else JSONObject().put("inbound", JSONArray().put("tun"))
-            rules.put(sniff.put("action", "sniff").put("sniffer", JSONArray().put("http").put("tls")
+        rules.put(JSONObject().put("inbound", JSONArray().put("tun"))
+            .put("action", "sniff").put("sniffer", JSONArray().put("http").put("tls")
                 .apply { if (normalized.youtubeNoAdsEnabled) put("quic") }))
-        }
         rules.put(JSONObject().put("port", JSONArray().put(53)).put("action", "hijack-dns"))
             .put(JSONObject().put("port", JSONArray().put(853)).put("network", JSONArray().put("tcp").put("udp"))
                 .put("action", "reject"))
@@ -115,11 +105,14 @@ object VpnConfigFactory {
                 null -> Unit
             }
         }
-        dnsRules.put(JSONObject(russian.toString()).put("server", BOOTSTRAP_TAG))
-        rules.put(route(JSONObject(russian.toString()), "direct"))
-            .put(route(JSONObject().put("domain_suffix", JSONArray().put("googleapis.cn")), "direct"))
-        domainMatch(normalized.bypassDomains.filterNot { it == DomainRulePolicy.RUSSIAN_RESOURCES_RULE }, resolved)
-            ?.let { rules.put(route(it, "direct")) }
+        // DNS follows the same exclusions as data; a failed underlay lookup never falls back to node DNS.
+        // YouTube's explicit protected DNS rule stays ahead of overlapping user exclusions.
+        for (match in listOfNotNull(russian,
+            JSONObject().put("domain_suffix", JSONArray().put("googleapis.cn")),
+            domainMatch(normalized.bypassDomains.filterNot { it == DomainRulePolicy.RUSSIAN_RESOURCES_RULE }, resolved))) {
+            rules.put(route(JSONObject(match.toString()), "direct"))
+            dnsRules.put(JSONObject(match.toString()).put("server", BOOTSTRAP_TAG))
+        }
         rules.put(JSONObject().put("ip_version", 6).put("action", "reject"))
         domainMatch(normalized.alwaysOnDomains, resolved)?.let { rules.put(route(it, "proxy")) }
         // The wire list supplies an explicit primary. Native DNS has no synthesized failover.
@@ -182,9 +175,6 @@ object VpnConfigFactory {
         }
     }
 
-    private fun effectiveIpTunnel(profile: VlessProfile, gamingModeEnabled: Boolean): Boolean =
-        profile.nokinvIpTunnel && (gamingModeEnabled || profile.transportMode != "tcp")
-
     private fun proxyOutbound(profile: VlessProfile, gamingModeEnabled: Boolean = false): JSONObject {
         require(profile.host.isNotBlank()) { "vpn_profile_invalid" }
         val port = profile.port.toIntOrNull()
@@ -193,11 +183,10 @@ object VpnConfigFactory {
             profile.spiderX in listOf("", "/")) { "vpn_profile_option_unsupported" }
         val transport = profile.transport.lowercase(Locale.ROOT)
         val kind = profile.proxyType.lowercase(Locale.ROOT)
-        require(!profile.nokinvIpTunnel || kind == "nokinv") { "vpn_profile_ip_tunnel_invalid" }
         val security = profile.security.lowercase(Locale.ROOT)
         require(security in setOf("tls", "reality") && profile.serverName.isNotBlank()) { "vpn_profile_tls_required" }
         if (kind == "nokinv") {
-            require(security == "tls" && transport == "nokinv" && profile.transportMode in setOf("", "quic", "tcp") &&
+            require(security == "tls" && transport == "nokinv" && profile.transportMode in setOf("", "quic") &&
                 profile.publicKey.isBlank() && profile.shortId.isBlank() && profile.flow.isBlank() &&
                 profile.nokinvToken.matches(Regex("[A-Za-z0-9_-]{43}")) && profile.nokinvCredentialGeneration > 0) {
                 "vpn_profile_nokinv_invalid"
@@ -205,13 +194,12 @@ object VpnConfigFactory {
             return JSONObject().put("tag", "proxy").put("type", "nokinv")
                 .put("server", profile.host).put("server_port", port)
                 .put("token", profile.nokinvToken).put("credential_generation", profile.nokinvCredentialGeneration)
-                .put("transport", if (gamingModeEnabled) "auto" else profile.transportMode.ifBlank { "auto" })
+                .put("transport", "quic")
                 .put("mode", if (gamingModeEnabled) "gaming" else "balanced").put("path", profile.path.ifBlank { "/tunnel" })
-                .put("tcp_exchange", "stream").put("shaping", "off").put("web_profile", "coherent")
+                .put("shaping", "off").put("web_profile", "coherent")
                 .put("tls", JSONObject().put("enabled", true).put("server_name", profile.serverName)
                     .put("min_version", "1.3"))
                 .put("domain_resolver", resolver(BOOTSTRAP_TAG))
-                .apply { if (effectiveIpTunnel(profile, gamingModeEnabled)) put("ip_tunnel", true) }
         }
         require(profile.uuid.isNotBlank()) { "vpn_profile_invalid" }
         val hy2 = kind in setOf("hysteria", "hysteria2", "hy2")

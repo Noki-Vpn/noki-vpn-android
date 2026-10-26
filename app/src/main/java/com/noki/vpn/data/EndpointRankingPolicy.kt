@@ -307,5 +307,9 @@ internal fun BackendEndpointCandidate.normalizedTransport(): String {
 internal fun BackendEndpointCandidate.normalizedTransportMode(): String {
     val mode = transportMode.orEmpty().lowercase(Locale.ROOT).trim()
     if (mode.isNotBlank()) return mode
-    return if (normalizedTransport() == "xhttp") "stream-up" else ""
+    return when (normalizedTransport()) {
+        "xhttp" -> "stream-up"
+        "nokinv" -> "quic"
+        else -> ""
+    }
 }

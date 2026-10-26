@@ -9,6 +9,19 @@ import org.junit.Test
 class StoredSettingsPrivacyMigrationTest {
     private val codec = StoredSettingsCodec(DefaultStoredSettingsFactory::create)
 
+    @Test fun retiredIpTunnelSettingIsIgnoredAndRemovedOnSave() {
+        val settings = DefaultStoredSettingsFactory.create().copy(profile = VlessProfile(
+            proxyType = "nokinv", transport = "nokinv", transportMode = "quic",
+            host = "node.example", serverName = "node.example", security = "tls",
+            nokinvToken = "credential", nokinvCredentialGeneration = 1,
+        ))
+        val current = codec.encode(settings)
+        val legacy = org.json.JSONObject(current).put("nokinvIpTunnel", true).toString()
+        val restored = codec.decode(legacy)
+        assertEquals(codec.decode(current), restored)
+        assertFalse(org.json.JSONObject(codec.encode(restored)).has("nokinvIpTunnel"))
+    }
+
     @Test fun customBackgroundIsLocalOptionalAndRoundTripsWithoutChangingOtherPreferences() {
         val defaults = DefaultStoredSettingsFactory.create()
         assertNull(codec.decode(null).personalizationSettings.customBackground)

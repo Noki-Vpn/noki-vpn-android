@@ -17,12 +17,12 @@ class NokiNVReleaseTest {
         publicKey = null, shortId = null, flow = null)
     private val hy = hysteriaCandidate("hy")
 
-    @Test fun manualNokiNvCarriersStayDistinctAcrossCatalogRefreshAndCountryChange() {
+    @Test fun manualNokiNvUsesOnlyQuicAcrossCatalogRefreshAndCountryChange() {
         val option = VpnEndpointOption(code = nv.code, host = nv.entryHost, port = nv.entryPort,
             proxyType = "nokinv", transport = "nokinv", security = "tls")
         val options = EndpointGroupPolicy.manualOptions(listOf(option, option.copy(code = "other-node", locationCode = "other")))
-        assertEquals(listOf("NokiNV / QUIC", "NokiNV / TCP"), options.map { it.label })
-        for (mode in listOf("quic", "tcp")) {
+        assertEquals(listOf("NokiNV"), options.map { it.label })
+        for (mode in listOf("quic")) {
             val selected = options.single { it.transportMode == mode }
             val settings = AdvancedSettings(protocol = VpnProtocol.NOKINV, endpointSelectionMode = EndpointSelectionMode.MANUAL,
                 manualEndpointCode = selected.code, manualEndpointGroupKey = selected.endpointGroupKey)
@@ -33,10 +33,10 @@ class NokiNVReleaseTest {
                 nokinvToken = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 1 }),
                 nokinvCredentialGeneration = 1)
             assertTrue(VpnProfileValidator.isUsable(profile, settings, endpointOptions = listOf(option)))
-            assertFalse(VpnProfileValidator.isUsable(profile.copy(transportMode = if (mode == "quic") "tcp" else "quic"),
+            assertFalse(VpnProfileValidator.isUsable(profile.copy(transportMode = "tcp"),
                 settings, endpointOptions = listOf(option)))
             assertFalse(VpnProfileValidator.isUsable(profile, settings,
-                endpointOptions = listOf(option.copy(transportMode = if (mode == "quic") "tcp" else "quic"))))
+                endpointOptions = listOf(option.copy(transportMode = "tcp"))))
             assertEquals(settings.manualEndpointGroupKey,
                 EndpointGroupPolicy.settingsAfterSelection(settings, candidate.code, listOf(option)).manualEndpointGroupKey)
             assertEquals(settings.manualEndpointGroupKey,
@@ -62,6 +62,21 @@ class NokiNVReleaseTest {
         }
         assertEquals("quic", EndpointGroupPolicy.manualCandidates(listOf(nv), AdvancedSettings(
             endpointSelectionMode = EndpointSelectionMode.MANUAL, manualEndpointGroupKey = "tls|nokinv|")).single().transportMode)
+        assertEquals("quic", EndpointGroupPolicy.manualCandidates(listOf(nv), AdvancedSettings(
+            endpointSelectionMode = EndpointSelectionMode.MANUAL, manualEndpointGroupKey = "tls|nokinv|tcp")).single().transportMode)
+    }
+
+    @Test fun retiredNokiNvTcpAndAutoNeverEnterThePickerOrAutomaticSelection() {
+        val candidates = listOf(nv.copy(code = "retired-tcp", transportMode = "tcp"),
+            nv.copy(code = "retired-auto", transportMode = "auto"), nv, hy)
+        for (network in EndpointRankingPolicy.NetworkKind.entries) {
+            val ranked = EndpointRankingPolicy.rankCandidates(candidates, emptyMap(), network, 1000)
+            assertEquals(listOf(nv.code, hy.code), ranked.map { it.code })
+        }
+        val options = candidates.map { VpnEndpointOption(code = it.code, host = it.entryHost, port = it.entryPort,
+            proxyType = it.proxyType, transport = it.transport, transportMode = it.transportMode.orEmpty(), security = it.security) }
+        assertEquals(listOf("NokiNV", "Hysteria2"), EndpointGroupPolicy.manualOptions(options).map { it.label })
+        assertEquals("quic", EndpointSelector.profileFromCandidate(nv, "").transportMode)
     }
 
     @Test fun cachedHysteriaFallbackReconsidersPrimaryButRemainsUsableWhenApiIsOffline() = runBlocking {
@@ -132,9 +147,6 @@ class NokiNVReleaseTest {
         val profile = select(auto).profile
         assertEquals("nokinv", profile.proxyType)
         assertEquals(session.nokinvToken, profile.nokinvToken)
-        assertFalse(profile.nokinvIpTunnel)
-        assertTrue(EndpointSelector.profileFromCandidate(session, nv.copy(ipTunnel = true)).nokinvIpTunnel)
-        assertFalse(EndpointSelector.profileFromCandidate(session, hy).nokinvIpTunnel)
         assertTrue(VpnProfileValidator.isUsable(profile, auto))
         val fallback = select(auto, listOf(hy)).profile
         assertEquals("hysteria", fallback.proxyType)

@@ -47,7 +47,7 @@ object EndpointSecurityPolicy {
                 "tls" -> transport == "tcp" && mode.isBlank()
                 else -> false
             }
-            "nokinv" -> security == "tls" && transport == "nokinv" && mode in setOf("", "quic", "tcp")
+            "nokinv" -> security == "tls" && transport == "nokinv" && mode in setOf("", "quic")
             "hysteria" -> security == "tls" && transport == "hysteria" && mode.isBlank()
             else -> false
         }

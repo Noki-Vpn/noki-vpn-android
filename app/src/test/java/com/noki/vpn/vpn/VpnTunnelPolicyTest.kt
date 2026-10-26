@@ -2,17 +2,20 @@ package com.noki.vpn.vpn
 
 import android.app.Application
 import android.net.VpnService
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import com.noki.vpn.data.AppFilterMode
 import com.noki.vpn.data.BackendRuWireGuardConfig
 import com.noki.vpn.data.DefaultStoredSettingsFactory
 import java.net.InetAddress
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
@@ -48,6 +51,49 @@ class VpnTunnelPolicyTest {
         AndroidTunInterfaceFactory(service).establishWireGuard(settings, null, wg)
 
         assertEquals(listOf("198.18.0.1"), TunnelAllocationShadow.advertisedDns)
+    }
+
+    @Test
+    fun platformDnsPreservesRawRecordsOnlyOnSupportedAndroidVersions() {
+        val controller = VpnCoreController(RuntimeEnvironment.getApplication())
+        val dns = ReflectionHelpers.getField<io.nekohasekai.libbox.LocalDNSTransport>(controller, "localDns")
+        val original = Build.VERSION.SDK_INT
+        try {
+            for (sdk in listOf(28, 29, 34)) {
+                ReflectionHelpers.setStaticField(Build.VERSION::class.java, "SDK_INT", sdk)
+                assertEquals("Android API $sdk", sdk >= 29, dns.raw())
+            }
+        } finally {
+            ReflectionHelpers.setStaticField(Build.VERSION::class.java, "SDK_INT", original)
+        }
+    }
+
+    @Test
+    fun platformDnsCancellationWinsBeforeSynchronousAndLateCallbacks() {
+        var cancel: () -> Unit = {}
+        val results = mutableListOf<String>()
+        VpnCoreController.awaitDnsQuery(onCancel = { cancel = it }, onCancelled = { results += "cancelled" }) { signal, complete ->
+            signal.setOnCancelListener { complete { results += "synchronous error" } }
+            cancel()
+            assertTrue(signal.isCanceled)
+            complete { results += "late answer" }
+        }
+        assertEquals(listOf("cancelled"), results)
+        var dispatched = false
+        VpnCoreController.awaitDnsQuery(onCancel = { it() }, onCancelled = {}) { _, _ -> dispatched = true }
+        assertFalse(dispatched)
+    }
+
+    @Test
+    fun platformDnsAnswerCompletesOnceBeforeLaterCancellation() {
+        var cancel: () -> Unit = {}
+        val results = mutableListOf<String>()
+        VpnCoreController.awaitDnsQuery(onCancel = { cancel = it }, onCancelled = { results += "cancelled" }) { _, complete ->
+            complete { results += "answer" }
+            complete { results += "duplicate answer" }
+            cancel()
+        }
+        assertEquals(listOf("answer"), results)
     }
 
     @Implements(VpnService.Builder::class)

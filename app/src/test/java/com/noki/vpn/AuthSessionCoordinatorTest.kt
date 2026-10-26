@@ -80,6 +80,7 @@ class AuthSessionCoordinatorTest {
 
         assertTrue(result.exceptionOrNull() is BackendException)
         assertTrue(result.exceptionOrNull() !is AuthRefreshRejectedException)
+        assertEquals("auth_required", result.exceptionOrNull()?.message)
         assertTrue(store.load().isAuthenticated)
         assertEquals(0, api.callCount.get())
     }

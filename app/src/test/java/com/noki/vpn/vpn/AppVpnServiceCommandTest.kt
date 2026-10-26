@@ -857,7 +857,7 @@ class AppVpnServiceCommandTest {
                 personalizationSettings = com.noki.vpn.data.PersonalizationSettings(language = com.noki.vpn.data.AppLanguage.RU),
             ), autoEndpointSelection = true)
         }
-        for ((carrier, text) in listOf("quic" to "QUIC (UDP)", "tls" to "TCP/TLS", "mixed" to "UDP + TCP")) {
+        for (carrier in listOf("quic")) {
             fixture.runtimeCarrier = carrier
             fixture.invoke("updateActiveNotification")
             assertEquals(carrier, AppVpnService.liveRuntimeState().nokiNvCarrier)
@@ -865,24 +865,19 @@ class AppVpnServiceCommandTest {
                 it.action == AppVpnService.ACTION_STATE_CHANGED
             }
             assertEquals(carrier, broadcast.getStringExtra(AppVpnService.EXTRA_NOKINV_CARRIER))
-            val normalLabel = when (carrier) {
-                "quic" -> "NokiNV / QUIC"
-                "tls" -> "NokiNV / TCP"
-                else -> "NokiNV / Auto"
-            }
-            assertEquals(normalLabel, label())
-            assertEquals("NokiNV · $text · Игровой", label(gaming = true))
+            assertEquals("NokiNV", label())
+            assertEquals("NokiNV / gaming", label(gaming = true))
         }
         fixture.runtimeCarrier = ""
         fixture.invoke("updateActiveNotification")
         assertEquals("", AppVpnService.liveRuntimeState().nokiNvCarrier)
-        assertEquals("NokiNV / Auto", label())
+        assertEquals("NokiNV", label())
         fixture.runtimeCarrier = "quic"
         fixture.invoke("updateActiveNotification")
         fixture.stop(1)
         fixture.orchestrator.activeTransitionJob()!!.join()
         assertEquals("", AppVpnService.liveRuntimeState().nokiNvCarrier)
-        assertEquals("Auto (NokiNV / Auto)", label())
+        assertEquals("Auto (NokiNV)", label())
         val stopped = shadowOf(fixture.service).broadcastIntents.last {
             it.action == AppVpnService.ACTION_STATE_CHANGED
         }

@@ -98,7 +98,7 @@ internal class AuthSessionCoordinator(
             block(attempt.accessToken)
         } catch (error: BackendException) {
             if (error.statusCode != 401) throw error
-            val retryAttempt = retryAfterUnauthorized(attempt) ?: throw error
+            val retryAttempt = retryAfterUnauthorized(attempt) ?: throw BackendException("auth_required", 401)
             block(retryAttempt.accessToken)
         }
     }

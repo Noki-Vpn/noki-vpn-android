@@ -26,10 +26,10 @@ object EndpointGroupPolicy {
     fun manualOptions(options: List<VpnEndpointOption>): List<VpnEndpointOption> {
         val grouped = linkedMapOf<String, MutableList<VpnEndpointOption>>()
         options.filter { !it.canaryOnly && EndpointSecurityPolicy.isAllowedOption(it) &&
-            EndpointTransportPolicy.isDirectOption(it) }.flatMap { option ->
+            EndpointTransportPolicy.isDirectOption(it) }.map { option ->
             if (option.proxyType == "nokinv" && option.transportMode.isBlank()) {
-                listOf(option.copy(transportMode = "quic"), option.copy(transportMode = "tcp"))
-            } else listOf(option)
+                option.copy(transportMode = "quic")
+            } else option
         }.forEach { option ->
             grouped.getOrPut(groupKey(option)) { mutableListOf() }.add(option)
         }
@@ -84,7 +84,7 @@ object EndpointGroupPolicy {
         if (targetGroup.isNotBlank()) {
             val mode = targetGroup.substringAfterLast('|')
             return candidates.map {
-                if (it.proxyType == "nokinv" && it.transportMode.isNullOrBlank() && mode in setOf("quic", "tcp")) {
+                if (it.proxyType == "nokinv" && it.transportMode.isNullOrBlank() && mode == "quic") {
                     it.copy(transportMode = mode)
                 } else it
             }.filter { groupKey(it) == targetGroup }
@@ -131,17 +131,13 @@ object EndpointGroupPolicy {
         val normalizedTransport = normalizeTransport(transport[1])
         val mode = normalizeTransportMode(transport[1], transport[2])
         return groupKey(transport[0], normalizedTransport,
-            if (normalizedTransport == "nokinv" && mode.isBlank()) "quic" else mode)
+            if (normalizedTransport == "nokinv") "quic" else mode)
     }
 
     fun displayLabelFor(option: VpnEndpointOption): String {
-        if (option.proxyType == "nokinv") return when (option.transportMode) {
-            "quic" -> "NokiNV / QUIC"
-            "tcp" -> "NokiNV / TCP"
-            else -> "NokiNV / Auto"
-        }
+        if (option.proxyType == "nokinv") return "NokiNV"
         if (option.proxyType.equals("hysteria", ignoreCase = true) || normalizeTransport(option.transport) == "hysteria") {
-            return "Hysteria2 / UDP"
+            return "Hysteria2"
         }
         val security = when (val normalized = option.security.lowercase(Locale.ROOT).ifBlank { "tls" }) {
             "tls" -> "TLS"
@@ -174,6 +170,10 @@ object EndpointGroupPolicy {
     ): String {
         val mode = rawMode.lowercase(Locale.ROOT).trim()
         if (mode.isNotBlank()) return mode
-        return if (normalizeTransport(transport) == "xhttp") "stream-up" else ""
+        return when (normalizeTransport(transport)) {
+            "xhttp" -> "stream-up"
+            "nokinv" -> "quic"
+            else -> ""
+        }
     }
 }

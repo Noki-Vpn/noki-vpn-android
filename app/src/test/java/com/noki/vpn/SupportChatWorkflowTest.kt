@@ -6,6 +6,12 @@ import com.noki.vpn.data.BackendException
 import com.noki.vpn.data.BackendSupportChat
 import com.noki.vpn.data.BackendSupportMessage
 import com.noki.vpn.data.BackendSupportAttachment
+import com.noki.vpn.data.AuthRefreshApi
+import com.noki.vpn.data.AuthRefreshRejectedException
+import com.noki.vpn.data.AuthTokenRefresher
+import com.noki.vpn.data.BackendAuthTokens
+import com.noki.vpn.data.DefaultStoredSettingsFactory
+import com.noki.vpn.data.InMemoryAtomicStoredSettingsStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -17,6 +23,85 @@ import org.junit.Test
 import java.io.IOException
 
 class SupportChatWorkflowTest {
+    @Test fun `resource authorization errors keep the draft without asking for another login`() = runBlocking {
+        for (status in listOf(401, 403)) {
+            val f = Fixture(this)
+            f.workflow.open()
+            f.loadResponse = { throw BackendException("resource authorization rejected", status) }
+            f.workflow.refresh(); yield()
+            assertNotNull(f.state.supportChat.error)
+            assertFalse(asksForLogin(f.state.supportChat.error!!))
+            f.sendResponse = { _, _ -> throw BackendException("resource authorization rejected", status) }
+            f.workflow.updateDraft("Помогите"); f.workflow.submit(); yield()
+            assertEquals("Помогите", f.state.supportChat.draft)
+            assertFalse(asksForLogin(f.state.supportChat.sendError!!))
+            assertTrue(f.state.isAuthenticated)
+        }
+    }
+
+    @Test fun `rejected refresh or missing authentication still asks for login`() = runBlocking {
+        for (error in listOf(AuthRefreshRejectedException(BackendException("refresh rejected", 401)), BackendException("auth_required", 401))) {
+            val f = Fixture(this)
+            f.workflow.open()
+            f.sendResponse = { _, _ -> throw error }
+            f.workflow.updateDraft("Помогите"); f.workflow.submit(); yield()
+            assertTrue(asksForLogin(f.state.supportChat.sendError!!))
+            assertEquals("Помогите", f.state.supportChat.draft)
+        }
+    }
+
+    @Test fun `expired access refreshes and sends the same message without another login`() = runBlocking {
+        val store = InMemoryAtomicStoredSettingsStore(DefaultStoredSettingsFactory.create().copy(
+            isAuthenticated = true, backendAccessToken = "expired-access", backendRefreshToken = "refresh",
+            backendDeviceId = "device-1"))
+        var refreshes = 0
+        val refreshApi = object : AuthRefreshApi {
+            override suspend fun refreshAuthToken(refreshToken: String, deviceId: String?, requestId: String?): BackendAuthTokens {
+                assertEquals("refresh", refreshToken)
+                assertEquals("device-1", deviceId)
+                refreshes++
+                return BackendAuthTokens(accessToken = "fresh-access", refreshToken = "fresh-refresh")
+            }
+        }
+        val auth = AuthSessionCoordinator(store, AuthTokenRefresher(store, refreshApi)).also { it.restore(store.load()) }
+        var state = AppUiState(isAuthenticated = true)
+        val sent = mutableListOf<Triple<String, String, String>>()
+        val workflow = SupportChatWorkflow(this, { state }, { state = it }, auth::attempt, auth::isCurrent,
+            { _, _ -> page() }, { attempt, content, id, _ ->
+                auth.run(attempt) { token ->
+                    sent += Triple(token, content, id)
+                    if (token == "expired-access") throw BackendException("Invalid device session", 401)
+                    message(4, content)
+                }
+            }, { error("unexpected attachment") }, { _, _ -> error("unexpected download") }, { _, _ -> }, { _, _ -> }, {}, { true })
+        workflow.open(); workflow.updateDraft("Помогите"); workflow.submit(); yield()
+        assertEquals(1, refreshes)
+        assertEquals(listOf("expired-access", "fresh-access"), sent.map { it.first })
+        assertEquals(listOf("Помогите", "Помогите"), sent.map { it.second })
+        assertEquals(sent[0].third, sent[1].third)
+        assertEquals("", state.supportChat.draft)
+        assertNull(state.supportChat.sendError)
+        assertEquals(listOf(4L), state.supportChat.messages.map { it.id })
+        assertTrue(state.isAuthenticated)
+        assertTrue(store.load().isAuthenticated)
+    }
+
+    @Test fun `expired access without refresh asks for login and preserves the message`() = runBlocking {
+        val store = InMemoryAtomicStoredSettingsStore(DefaultStoredSettingsFactory.create().copy(
+            isAuthenticated = true, backendAccessToken = "expired-access", backendRefreshToken = null))
+        val refreshApi = object : AuthRefreshApi {
+            override suspend fun refreshAuthToken(refreshToken: String, deviceId: String?, requestId: String?): BackendAuthTokens =
+                error("refresh is unavailable")
+        }
+        val auth = AuthSessionCoordinator(store, AuthTokenRefresher(store, refreshApi)).also { it.restore(store.load()) }
+        val f = Fixture(this)
+        f.sendResponse = { _, _ -> auth.run { throw BackendException("Token is expired or invalid", 401) } }
+        f.workflow.open(); f.workflow.updateDraft("Помогите"); f.workflow.submit(); yield()
+        assertTrue(asksForLogin(f.state.supportChat.sendError!!))
+        assertEquals("Помогите", f.state.supportChat.draft)
+        assertTrue(store.load().isAuthenticated)
+    }
+
     @Test fun `typing while sending survives the acknowledgement and duplicate send stays blocked`() = runBlocking {
         val f = Fixture(this)
         val delivery = CompletableDeferred<BackendSupportMessage>()
@@ -56,6 +141,7 @@ class SupportChatWorkflowTest {
         assertFalse(f.state.supportChat.isSending)
     }
 
+    private fun asksForLogin(text: String) = "Войдите" in text || "Sign in again" in text
     private fun message(id: Long, content: String = "Message $id") = BackendSupportMessage(id, content, "incoming", id)
     private fun page(vararg ids: Long, before: Long? = null) = BackendSupportChat(1, "open", ids.map { message(it) }, before)
 

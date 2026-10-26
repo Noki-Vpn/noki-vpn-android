@@ -13,7 +13,6 @@ import com.noki.vpn.data.SettingsRepository
 import io.nekohasekai.libbox.*
 import java.io.File
 import java.net.Inet4Address
-import java.net.InetAddress
 import java.net.NetworkInterface as JavaNetworkInterface
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
@@ -215,44 +214,31 @@ internal class VpnCoreController(
     }
 
     private val localDns = object : LocalDNSTransport {
-        override fun raw() = false
-        override fun exchange(context: ExchangeContext, message: ByteArray) = error("raw_dns_not_supported")
-        override fun lookup(context: ExchangeContext, family: String, domain: String) {
+        override fun raw() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+        override fun exchange(context: ExchangeContext, message: ByteArray) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) error("raw_dns_not_supported")
             val network = physicalNetwork()
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                // ponytail: API 26–28 cannot cancel platform DNS; the native context stops waiting.
-                context.success(network.getAllByName(domain).filter {
-                    if (family == "ip4") it is Inet4Address else it !is Inet4Address
-                }.mapNotNull { it.hostAddress }.joinToString("\n"))
-                return
+            awaitDnsQuery(onCancel = { cancel -> context.onCancel { cancel() } },
+                onCancelled = { context.errnoCode(OsConstants.ECANCELED) }) { cancellation, complete ->
+                DnsResolver.getInstance().rawQuery(network, message, DnsResolver.FLAG_NO_RETRY,
+                    Executor { it.run() }, cancellation, object : DnsResolver.Callback<ByteArray> {
+                        override fun onAnswer(answer: ByteArray, rcode: Int) {
+                            // Preserve the complete DNS response, including NXDOMAIN/NODATA and non-address records.
+                            complete { context.rawSuccess(answer) }
+                        }
+                        override fun onError(error: DnsResolver.DnsException) {
+                            complete { context.errnoCode(OsConstants.EIO) }
+                        }
+                    })
             }
-            val done = CountDownLatch(1)
-            val finished = AtomicBoolean(false)
-            val cancellation = CancellationSignal()
-            context.onCancel {
-                cancellation.cancel()
-                if (finished.compareAndSet(false, true)) {
-                    context.errnoCode(OsConstants.ECANCELED)
-                    done.countDown()
-                }
-            }
-            DnsResolver.getInstance().query(network, domain,
-                if (family == "ip6") DnsResolver.TYPE_AAAA else DnsResolver.TYPE_A,
-                DnsResolver.FLAG_NO_RETRY, Executor { it.run() }, cancellation,
-                object : DnsResolver.Callback<List<InetAddress>> {
-                    override fun onAnswer(answer: List<InetAddress>, rcode: Int) {
-                        if (!finished.compareAndSet(false, true)) return
-                        if (rcode == 0) context.success(answer.mapNotNull { it.hostAddress }.joinToString("\n"))
-                        else context.errorCode(rcode)
-                        done.countDown()
-                    }
-                    override fun onError(error: DnsResolver.DnsException) {
-                        if (!finished.compareAndSet(false, true)) return
-                        context.errnoCode(OsConstants.EIO)
-                        done.countDown()
-                    }
-                })
-            done.await()
+        }
+        override fun lookup(context: ExchangeContext, family: String, domain: String) {
+            // The native adapter selects Lookup only below API 29; newer Android uses rawQuery above.
+            val network = physicalNetwork()
+            // API 26–28 cannot cancel platform DNS; the native context stops waiting.
+            context.success(network.getAllByName(domain).filter {
+                if (family == "ip4") it is Inet4Address else it !is Inet4Address
+            }.mapNotNull { it.hostAddress }.joinToString("\n"))
         }
     }
 
@@ -269,6 +255,29 @@ internal class VpnCoreController(
     companion object {
         private const val TAG = "NokiVpnCore"
         private var setupComplete = false
+
+        internal fun awaitDnsQuery(onCancel: (() -> Unit) -> Unit, onCancelled: () -> Unit,
+                                   query: (CancellationSignal, (() -> Unit) -> Unit) -> Unit) {
+            val done = CountDownLatch(1)
+            val finished = AtomicBoolean(false)
+            val cancellation = CancellationSignal()
+            val complete: (() -> Unit) -> Unit = { action ->
+                if (finished.compareAndSet(false, true)) {
+                    try { action() } finally { done.countDown() }
+                }
+            }
+            onCancel {
+                // Win completion before cancelling Android: cancellation can synchronously invoke onError.
+                complete { try { cancellation.cancel() } finally { onCancelled() } }
+            }
+            try {
+                if (!finished.get()) query(cancellation, complete)
+                done.await()
+            } finally {
+                // A thrown query/interrupt must not leave an outstanding resolver callback alive.
+                complete { cancellation.cancel() }
+            }
+        }
 
         @Synchronized
         private fun setup(context: Context) {

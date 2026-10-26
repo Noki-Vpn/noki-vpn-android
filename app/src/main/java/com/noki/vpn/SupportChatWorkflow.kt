@@ -286,11 +286,14 @@ internal class SupportChatWorkflow(
         if (error is TimeoutCancellationException) return tr(language, "Скачивание заняло слишком много времени. Повторите попытку.", "The download timed out. Please try again.")
         if (error.message == "support_attachment_unavailable") return tr(language, "Не удалось открыть файл. Выберите его ещё раз.", "Could not open the file. Select it again.")
         if (error.message == "support_attachment_save_only") return tr(language, "Этот формат можно только сохранить.", "This file type can only be saved.")
+        if (error is AuthRefreshRejectedException ||
+            error is BackendException && error.statusCode == 401 && error.message == "auth_required") {
+            return tr(language, "Сессия истекла. Войдите в аккаунт снова.", "Your session expired. Sign in again.")
+        }
         val status = (error as? BackendException)?.statusCode
-            ?: (error as? AuthRefreshRejectedException)?.rejection?.statusCode
         return when (status) {
-            401 -> tr(language, "Сессия истекла. Войдите в аккаунт снова.", "Your session expired. Sign in again.")
-            403 -> tr(language, "Чат недоступен для этой сессии. Войдите в аккаунт снова.", "Chat is unavailable for this session. Sign in again.")
+            401 -> tr(language, "Не удалось подтвердить доступ к чату. Повторите попытку.", "Could not verify access to chat. Please try again.")
+            403 -> tr(language, "Чат недоступен для этой сессии.", "Chat is unavailable for this session.")
             429 -> tr(language, "Слишком много запросов. Подождите немного и повторите.", "Too many requests. Wait a moment and try again.")
             400, 422 -> tr(language, "Сообщение не принято. Проверьте текст и повторите.", "Your message was not accepted. Check the text and try again.")
             502, 503, 504 -> tr(language, "Чат временно недоступен. Повторите через несколько секунд.", "Chat is temporarily unavailable. Try again in a few seconds.")
