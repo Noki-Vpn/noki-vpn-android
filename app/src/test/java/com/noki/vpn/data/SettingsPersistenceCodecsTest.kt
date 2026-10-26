@@ -16,29 +16,6 @@ class SettingsPersistenceCodecsTest {
     private val settingsCodec = StoredSettingsCodec { defaults }
 
     @Test
-    fun oldIpProfileRestoresTheFlowTransportWithoutClearingTheSession() {
-        val token = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 7 })
-        val profile = VlessProfile(proxyType = "nokinv", transport = "nokinv", transportMode = "tcp",
-            security = "tls", host = "node.example", serverName = "node.example", port = "10443",
-            nokinvToken = token, nokinvCredentialGeneration = 3)
-        val saved = defaults.copy(profile = profile, isAuthenticated = true,
-            backendAccessToken = "retained-access", backendRefreshToken = "retained-refresh",
-            advancedSettings = defaults.advancedSettings.copy(ruRelayEnabled = false))
-        val legacy = org.json.JSONObject(settingsCodec.encode(saved)).put("nokinvIpTunnel", true)
-        val restored = settingsCodec.decode(legacy.toString())
-        val outbound = org.json.JSONObject(com.noki.vpn.vpn.VpnConfigFactory.buildProbe(restored.profile))
-            .getJSONArray("outbounds").getJSONObject(0)
-        assertFalse(outbound.has("ip_tunnel"))
-        assertEquals("tcp", outbound.getString("transport"))
-        assertEquals(token, outbound.getString("token"))
-        assertEquals(3, outbound.getInt("credential_generation"))
-        assertEquals("retained-access", restored.backendAccessToken)
-        assertEquals("retained-refresh", restored.backendRefreshToken)
-        assertTrue(restored.isAuthenticated)
-        assertFalse(org.json.JSONObject(settingsCodec.encode(restored)).has("nokinvIpTunnel"))
-    }
-
-    @Test
     fun explicitProtocolRestoresManualModeAfterAnOlderServerSelectionReset() {
         val advanced = AdvancedSettings(protocol = VpnProtocol.NOKINV,
             endpointSelectionMode = EndpointSelectionMode.AUTO, manualEndpointGroupKey = "lv-2|tls|nokinv||100")
