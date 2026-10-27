@@ -197,7 +197,7 @@ internal fun AdvancedProtocolSheet(
                 AdvancedText(
                     text = tr(
                         language,
-                        "Изменение вступит в силу после переподключения.",
+                        "Активный VPN переподключится автоматически.",
                         "The change takes effect after reconnecting.",
                     ),
                     fontSize = 12f,

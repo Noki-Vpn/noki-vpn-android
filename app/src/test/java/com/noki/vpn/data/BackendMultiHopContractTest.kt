@@ -86,7 +86,8 @@ class BackendMultiHopContractTest {
         val session = BackendVpnSessionJsonParser.parse(payload)
         val route = requireNotNull(session.multiHop)
         val settings = AdvancedSettings(multiHop = route.selection,
-            alwaysOnDomains = listOf("domain:russian.example"))
+            alwaysOnDomains = listOf("domain:russian.example"),
+            bypassDomains = listOf(DomainRulePolicy.RUSSIAN_RESOURCES_RULE))
         val geosite = GeositeAssetTest.asset("CATEGORY-RU" to listOf(GeositeAssetTest.domain(2, "russian.example")))
         for (candidate in session.endpointCandidates) {
             val profile = EndpointSelector.profileFromCandidate(session, candidate)

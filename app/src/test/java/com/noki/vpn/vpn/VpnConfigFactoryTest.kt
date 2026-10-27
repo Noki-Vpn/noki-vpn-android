@@ -262,7 +262,7 @@ class VpnConfigFactoryTest {
     }
 
     @Test
-    fun mandatoryRussianDirectPrecedesConflictingVpnAndIgnoresOldPresetToggle() {
+    fun russianDirectIsDisabledWhenThePresetIsOff() {
         val config = JSONObject(VpnConfigFactory.build(profile(), AdvancedSettings(
             alwaysOnDomains = listOf("domain:russian.example", DomainRulePolicy.RUSSIAN_RESOURCES_RULE),
             bypassDomains = listOf("domain:local.example"),
@@ -270,7 +270,9 @@ class VpnConfigFactoryTest {
         val rules = rules(config)
         val russian = rules.indexOfFirst { it.optJSONArray("domain_suffix")?.toString() == "[\"russian.example\"]" && it.optString("outbound") == "direct" }
         val vpn = rules.indexOfFirst { it.optString("outbound") == "proxy" }
-        assertTrue(russian >= 0 && vpn > russian)
+        assertEquals(-1, russian)
+        assertTrue(vpn >= 0)
+        assertFalse(config.getJSONObject("dns").getJSONArray("rules").toString().contains("russian.example"))
         assertEquals("proxy", config.getJSONObject("route").getString("final"))
         assertTrue(rules.any { it.optJSONArray("domain_suffix")?.toString() == "[\"local.example\"]" && it.optString("outbound") == "direct" })
         assertFalse(config.toString().contains("geosite:"))
@@ -278,7 +280,8 @@ class VpnConfigFactoryTest {
 
     @Test
     fun dnsAndBlocksRemainBeforeDirectAndDnsDialerUsesTheTunnel() {
-        val config = JSONObject(VpnConfigFactory.build(profile(), AdvancedSettings(), geosite))
+        val config = JSONObject(VpnConfigFactory.build(profile(), AdvancedSettings(
+            bypassDomains = listOf(DomainRulePolicy.RUSSIAN_RESOURCES_RULE)), geosite))
         val rules = rules(config)
         assertEquals("sniff", rules[0].getString("action"))
         assertEquals("hijack-dns", rules[1].getString("action"))
@@ -333,7 +336,7 @@ class VpnConfigFactoryTest {
             val underlayMatches = (0 until dnsRules.length()).map(dnsRules::getJSONObject)
                 .filter { it.optString("server") == "bootstrap" }
                 .map { JSONObject(it.toString()).apply { remove("server") } }
-            assertEquals(3, trafficMatches.size)
+            assertEquals(2, trafficMatches.size)
             assertEquals(trafficMatches.size, underlayMatches.size)
             assertEquals(trafficMatches.map(JSONObject::toString).toSet(), underlayMatches.map(JSONObject::toString).toSet())
             val custom = underlayMatches.single { it.toString().contains("local.example") }
@@ -387,7 +390,8 @@ class VpnConfigFactoryTest {
             "10.240.1.2/32", listOf("1.1.1.1"), 1280, listOf("0.0.0.0/0"))
         for (multiHop in listOf(false, true)) {
             val config = JSONObject(VpnConfigFactory.buildWireGuard(wg, ByteArray(32) { 1 },
-                AdvancedSettings(ruRelayEnabled = true, multiHop = MultiHopSettings(enabled = multiHop)), geosite))
+                AdvancedSettings(ruRelayEnabled = true, multiHop = MultiHopSettings(enabled = multiHop),
+                    bypassDomains = listOf(DomainRulePolicy.RUSSIAN_RESOURCES_RULE)), geosite))
             val endpoint = config.getJSONArray("endpoints").getJSONObject(0)
             assertEquals("wireguard", endpoint.getString("type"))
             assertFalse(endpoint.getBoolean("system"))

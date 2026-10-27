@@ -154,6 +154,7 @@ internal fun AppUiRuntime.changeProtocol(protocol: VpnProtocol) {
     val persisted = settingsMutationCoordinator.persistProtocolChange(next, protocol)
     uiState = withFreeTrafficLimitNotice(next.copy(profile = persisted.profile))
     prepareVpnInAdvance()
+    applyAppRoutingSettings()
 }
 
 internal fun AppUiRuntime.toggleAutoEndpointSelection(enabled: Boolean) {
@@ -283,6 +284,7 @@ internal fun AppUiRuntime.selectManualEndpoint(option: VpnEndpointOption) {
     val persisted = settingsMutationCoordinator.persistManualEndpointSelection(next, option)
     uiState = withFreeTrafficLimitNotice(next.copy(profile = persisted.profile))
     prepareVpnInAdvance()
+    applyAppRoutingSettings()
 }
 
 internal fun AppUiRuntime.setLoggingEnabled(enabled: Boolean) {

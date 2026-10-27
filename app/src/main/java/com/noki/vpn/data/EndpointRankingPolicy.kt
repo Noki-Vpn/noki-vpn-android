@@ -228,7 +228,7 @@ object EndpointRankingPolicy {
             .filter(EndpointSecurityPolicy::isAllowedCandidate)
             .filter { candidate ->
                 val state = health[candidate.code]
-                candidate.proxyType.equals("nokinv", true) || ignoreCooldown || state == null || state.cooldownUntilMillis <= nowMillis
+                ignoreCooldown || state == null || state.cooldownUntilMillis <= nowMillis
             }
     }
 
@@ -238,8 +238,7 @@ object EndpointRankingPolicy {
         networkKind: NetworkKind,
     ): Comparator<BackendEndpointCandidate> {
         val classOrder = preferredClasses(networkKind)
-        return compareBy<BackendEndpointCandidate> { if (classify(it) == CLASS_NOKINV) 0 else 1 }
-            .thenByDescending { effectiveScore(health[it.code], nowMillis) }
+        return compareByDescending<BackendEndpointCandidate> { effectiveScore(health[it.code], nowMillis) }
             .thenBy { freshLatency(health[it.code], nowMillis) ?: Long.MAX_VALUE }
             .thenBy { classOrder.indexOf(classify(it)) }
             .thenBy { it.priority }

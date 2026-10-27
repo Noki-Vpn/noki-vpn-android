@@ -161,7 +161,7 @@ class SettingsPersistenceCodecsTest {
                 bypassDomains = listOf("domain:example.test")),
         )
         val legacy = org.json.JSONObject(settingsCodec.encode(saved)).apply {
-            put("ruRelayDefaultsVersion", 1)
+            put("ruRelayDefaultsVersion", 2)
         }.toString()
         val migrated = settingsCodec.decode(legacy)
         val expected = saved.copy(
@@ -172,13 +172,15 @@ class SettingsPersistenceCodecsTest {
 
         assertEquals(expected, migrated)
         val persisted = settingsCodec.encode(migrated)
-        assertEquals(2, org.json.JSONObject(persisted).getInt("ruRelayDefaultsVersion"))
+        assertEquals(3, org.json.JSONObject(persisted).getInt("ruRelayDefaultsVersion"))
         assertEquals(migrated, settingsCodec.decode(persisted))
 
         val enabled = migrated.copy(advancedSettings = migrated.advancedSettings.copy(ruRelayEnabled = true))
         assertEquals(enabled, settingsCodec.decode(settingsCodec.encode(enabled)))
         assertEquals(enabled, settingsCodec.decode(org.json.JSONObject(settingsCodec.encode(enabled))
-            .put("ruRelayDefaultsVersion", 2).toString()))
+            .put("ruRelayDefaultsVersion", 3).toString()))
+        assertEquals(expected, settingsCodec.decode(org.json.JSONObject(legacy)
+            .put("ruRelayDefaultsVersion", 1).toString()))
         var stored = legacy
         assertThrows(IllegalStateException::class.java) {
             settingsCodec.decode(stored) { error("commit failed") }

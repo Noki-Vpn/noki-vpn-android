@@ -71,7 +71,7 @@ class NokiNVReleaseTest {
             nv.copy(code = "retired-auto", transportMode = "auto"), nv, hy)
         for (network in EndpointRankingPolicy.NetworkKind.entries) {
             val ranked = EndpointRankingPolicy.rankCandidates(candidates, emptyMap(), network, 1000)
-            assertEquals(listOf(nv.code, hy.code), ranked.map { it.code })
+            assertEquals(listOf(hy.code, nv.code), ranked.map { it.code })
         }
         val options = candidates.map { VpnEndpointOption(code = it.code, host = it.entryHost, port = it.entryPort,
             proxyType = it.proxyType, transport = it.transport, transportMode = it.transportMode.orEmpty(), security = it.security) }
@@ -117,13 +117,18 @@ class NokiNVReleaseTest {
         assertEquals(2, attempts)
     }
 
-    @Test fun autoPrefersNokiNVDespiteFasterHysteriaAndFallsBackAfterFailure() {
+    @Test fun autoRanksByHealthAndLatencyWithoutNokiNVPreferenceAndRespectsCooldown() {
         for (network in EndpointRankingPolicy.NetworkKind.entries) {
             val health = mapOf("hy" to EndpointHealth(score = 100, latencyEwmaMs = 1, latencyUpdatedAtMillis = 1000))
             val candidates = listOf(hy, nv)
-            assertEquals(listOf("nv", "hy"), EndpointRankingPolicy.rankCandidates(candidates, health, network, 1000).map { it.code })
+            assertEquals(listOf("hy", "nv"), EndpointRankingPolicy.rankCandidates(candidates, health, network, 1000).map { it.code })
+            val equalScores = health + ("nv" to EndpointHealth(score = 100, latencyEwmaMs = 20, latencyUpdatedAtMillis = 1000))
+            assertEquals("hy", EndpointRankingPolicy.select(candidates, equalScores, network, 1000, { 0 })?.candidate?.code)
+            val fasterNv = equalScores + ("hy" to EndpointHealth(score = 100, latencyEwmaMs = 40, latencyUpdatedAtMillis = 1000))
+            assertEquals("nv", EndpointRankingPolicy.select(candidates, fasterNv, network, 1000, { 0 })?.candidate?.code)
             val failed = health + ("nv" to EndpointRankingPolicy.updateAfterResult(success = false, nowMillis = 1000))
-            assertEquals("nv", EndpointRankingPolicy.select(candidates, failed, network, 1000, { 0 })?.candidate?.code)
+            assertEquals("hy", EndpointRankingPolicy.select(candidates, failed, network, 1000, { 0 })?.candidate?.code)
+            assertEquals(listOf("hy"), EndpointRankingPolicy.rankCandidates(candidates, failed, network, 1000).map { it.code })
             assertEquals("hy", EndpointRankingPolicy.select(candidates, failed, network, 1000, { 0 }, excludedCodes = setOf("nv"))?.candidate?.code)
             assertEquals("hy", EndpointRankingPolicy.select(candidates, health, network, 1000, { 0 }, excludedCodes = setOf("nv"))?.candidate?.code)
         }
@@ -144,7 +149,8 @@ class NokiNVReleaseTest {
             EndpointSelector.selectionForSession(RuntimeEnvironment.getApplication(), session.copy(endpointCandidates = candidates),
                 settings, emptyMap(), { 0 }, networkKind = EndpointRankingPolicy.NetworkKind.WIFI)
         val auto = AdvancedSettings(ruRelayEnabled = false)
-        val profile = select(auto).profile
+        assertEquals("xhttp", select(auto).endpointCode)
+        val profile = select(auto.copy(protocol = VpnProtocol.NOKINV)).profile
         assertEquals("nokinv", profile.proxyType)
         assertEquals(session.nokinvToken, profile.nokinvToken)
         assertTrue(VpnProfileValidator.isUsable(profile, auto))

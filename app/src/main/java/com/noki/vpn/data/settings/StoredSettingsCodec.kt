@@ -11,7 +11,7 @@ internal class StoredSettingsCodec(
         val json = runCatching { JSONObject(raw) }.getOrElse { return defaults() }
         val migrated = runCatching {
             val decoded = decode(json).let { settings ->
-                if (json.optInt("ruRelayDefaultsVersion") >= 2) settings else settings.copy(
+                if (json.optInt("ruRelayDefaultsVersion") >= 3) settings else settings.copy(
                     advancedSettings = settings.advancedSettings.copy(ruRelayEnabled = false),
                     profile = RuntimeProfilePolicy.profileAfterServerSelection(settings.profile),
                     ruRelaySelectionRevision = settings.ruRelaySelectionRevision + 1L,
@@ -25,13 +25,13 @@ internal class StoredSettingsCodec(
                 stored.selectedPackages, stored.filterMode,
             ))
         }.getOrElse { return defaults() }
-        if (json.optInt("ruRelayDefaultsVersion") < 2) persistMigration?.invoke(migrated)
+        if (json.optInt("ruRelayDefaultsVersion") < 3) persistMigration?.invoke(migrated)
         return migrated
     }
 
     fun encode(settings: StoredSettings): String = JSONObject()
         .put("russianDirectDefaultsVersion", 1)
-        .put("ruRelayDefaultsVersion", 2)
+        .put("ruRelayDefaultsVersion", 3)
         .put("remark", settings.profile.remark)
         .put("endpointCode", settings.profile.endpointCode)
         .put("proxyType", settings.profile.proxyType)

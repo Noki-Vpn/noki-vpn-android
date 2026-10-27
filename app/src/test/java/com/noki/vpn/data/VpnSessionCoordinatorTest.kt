@@ -14,7 +14,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [28])
 class VpnSessionCoordinatorTest {
     @Test
-    fun `serialized no RU MultiHop prepares NokiNV auto TCP and QUIC through the entry`() = runBlocking {
+    fun `serialized no RU MultiHop keeps Auto ranking and explicit NokiNV QUIC through the entry`() = runBlocking {
         val payload = contractFixture("multihop_session_v2.json")
         for (side in listOf("entry", "exit")) {
             payload.getJSONObject("multihop").getJSONObject("selection").getJSONObject(side)
@@ -31,7 +31,7 @@ class VpnSessionCoordinatorTest {
         val coordinator = VpnSessionCoordinator(context = RuntimeEnvironment.getApplication(),
             repository = FakeVpnSessionStore(), backendApi = FakeVpnSessionApi(pairSession = session),
             challengeSigner = { "signature" })
-        for (mode in listOf("", "tcp", "quic")) {
+        for (mode in listOf("", "quic")) {
             val advanced = AdvancedSettings(ruRelayEnabled = false, multiHop = session.multiHop!!.selection,
                 protocol = if (mode.isEmpty()) VpnProtocol.AUTO else VpnProtocol.NOKINV,
                 endpointSelectionMode = if (mode.isEmpty()) EndpointSelectionMode.AUTO else EndpointSelectionMode.MANUAL,
@@ -40,15 +40,16 @@ class VpnSessionCoordinatorTest {
                 advancedSettings = advanced)
             val result = coordinator.prepare("token", settings)
             assertNull(VpnProfileValidator.rejectionReason(result.settings))
-            assertEquals("nokinv", result.settings.profile.proxyType)
-            assertEquals(mode, result.settings.profile.transportMode)
-            assertEquals(session.nokinvToken, result.settings.profile.nokinvToken)
+            assertEquals(if (mode.isEmpty()) "vless" else "nokinv", result.settings.profile.proxyType)
+            assertEquals(if (mode.isEmpty()) "stream-up" else mode, result.settings.profile.transportMode)
+            assertEquals(if (mode.isEmpty()) "" else session.nokinvToken, result.settings.profile.nokinvToken)
             val config = org.json.JSONObject(com.noki.vpn.vpn.VpnConfigFactory.build(result.settings.profile, advanced,
                 com.noki.vpn.vpn.GeositeAssetTest.asset("CATEGORY-RU" to listOf(
                     com.noki.vpn.vpn.GeositeAssetTest.domain(2, "russian.example")))))
             val outbound = config.getJSONArray("outbounds").getJSONObject(0)
             assertEquals(session.multiHop.entryIp, outbound.getString("server"))
-            assertEquals(20004, outbound.getInt("server_port"))
+            val selected = session.endpointCandidates.single { it.code == result.settings.profile.endpointCode }
+            assertEquals(selected.entryPort, outbound.getInt("server_port"))
         }
     }
 

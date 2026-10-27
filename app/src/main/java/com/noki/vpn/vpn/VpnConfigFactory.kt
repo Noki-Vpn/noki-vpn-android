@@ -107,7 +107,7 @@ object VpnConfigFactory {
         }
         // DNS follows the same exclusions as data; a failed underlay lookup never falls back to node DNS.
         // YouTube's explicit protected DNS rule stays ahead of overlapping user exclusions.
-        for (match in listOfNotNull(russian,
+        for (match in listOfNotNull(russian.takeIf { DomainRulePolicy.RUSSIAN_RESOURCES_RULE in normalized.bypassDomains },
             JSONObject().put("domain_suffix", JSONArray().put("googleapis.cn")),
             domainMatch(normalized.bypassDomains.filterNot { it == DomainRulePolicy.RUSSIAN_RESOURCES_RULE }, resolved))) {
             rules.put(route(JSONObject(match.toString()), "direct"))

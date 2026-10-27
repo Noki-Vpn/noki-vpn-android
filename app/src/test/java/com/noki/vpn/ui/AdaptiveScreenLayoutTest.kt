@@ -754,10 +754,42 @@ class AdaptiveScreenLayoutTest {
             assertTrue(gaming.top > relay.bottom)
             compose.runOnIdle { state = normal.copy(advancedSettings = normal.advancedSettings.copy(gamingModeEnabled = true)) }
             compose.onNodeWithText("Игровой режим").assertIsDisplayed()
+            compose.onNodeWithText("Автовыбор протокола").assertDoesNotExist()
+            compose.onNodeWithText("Сменить").assertDoesNotExist()
+            compose.runOnIdle { state = normal }
             compose.onNodeWithText("Автовыбор протокола").performScrollTo().assertIsDisplayed()
         }
         renderHome(normal).use {
             compose.onNodeWithText("Игровой режим").assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun manualProtocolSelectionRestartsAnActiveVpnAfterPersisting() {
+        val application = RuntimeEnvironment.getApplication()
+        val viewModel = layoutViewModel()
+        val runtime = org.robolectric.util.ReflectionHelpers.getField<com.noki.vpn.AppUiRuntime>(viewModel, "runtime")
+        val shadow = org.robolectric.Shadows.shadowOf(application)
+        while (shadow.nextStartedService != null) Unit
+        val option = com.noki.vpn.data.EndpointGroupPolicy.manualOptions(listOf(
+            com.noki.vpn.data.VpnEndpointOption(code = "reality-test", host = "node.example", security = "reality",
+                transport = "xhttp", transportMode = "stream-up"))).single()
+        for (connection in listOf(com.noki.vpn.data.VpnConnectionState.CONNECTED,
+            com.noki.vpn.data.VpnConnectionState.CONNECTING, com.noki.vpn.data.VpnConnectionState.DISCONNECTED)) {
+            runtime.uiState = russianState().let { it.copy(connectionState = connection,
+                endpointOptions = listOf(option), endpointOptionsCountryCode = it.userProfile.selectedCountryCode,
+                advancedSettings = it.advancedSettings.copy(ruRelayEnabled = false, gamingModeEnabled = false)) }
+            viewModel.selectManualEndpoint(option)
+            assertEquals(option.code, runtime.repository.load().advancedSettings.manualEndpointCode)
+            val command = shadow.nextStartedService
+            assertEquals(if (connection == com.noki.vpn.data.VpnConnectionState.DISCONNECTED) null
+                else com.noki.vpn.vpn.AppVpnService.restartIntent(application).action, command?.action)
+            assertEquals(null, shadow.nextStartedService)
+            viewModel.changeProtocol(com.noki.vpn.data.VpnProtocol.TLS)
+            assertEquals(com.noki.vpn.data.VpnProtocol.TLS, runtime.repository.load().advancedSettings.protocol)
+            assertEquals(if (connection == com.noki.vpn.data.VpnConnectionState.DISCONNECTED) null
+                else com.noki.vpn.vpn.AppVpnService.restartIntent(application).action, shadow.nextStartedService?.action)
+            assertEquals(null, shadow.nextStartedService)
         }
     }
 

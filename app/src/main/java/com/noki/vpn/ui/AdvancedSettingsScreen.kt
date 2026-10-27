@@ -147,7 +147,7 @@ fun AdvancedSettingsScreen(
 
                 Spacer(modifier = Modifier.height(metrics.dp(20f)))
 
-                if (!state.advancedSettings.ruRelayEnabled) {
+                if (!state.advancedSettings.ruRelayEnabled && !state.advancedSettings.gamingModeEnabled) {
                     AdvancedToggleCard(
                         enabled = autoEndpointSelection,
                         title = tr(language, "Автовыбор протокола", "Auto protocol selection"),
@@ -343,8 +343,8 @@ fun AdvancedSettingsScreen(
                     AdvancedProtocolNotice(
                         text = tr(
                             language,
-                            "Протокол применится после переподключения VPN",
-                            "Protocol applies after reconnecting VPN",
+                            "Протокол выбран",
+                            "Protocol selected",
                         ),
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
