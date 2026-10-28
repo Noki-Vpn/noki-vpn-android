@@ -897,7 +897,69 @@ class AppVpnServiceCommandTest {
         assertEquals(30L, fixture.measureReadiness(fastStartup = true))
         assertEquals(listOf(3_000L), fixture.probeTimeouts)
         assertEquals(listOf(VpnProbePlanPolicy.connectedTargets(false).map { it.url }), fixture.readinessCandidates)
+        assertEquals(listOf(false), fixture.watchdogProbes)
         org.junit.Assert.assertTrue(android.os.SystemClock.elapsedRealtime() - start <= VpnProbePlanPolicy.STARTUP_TOTAL_TIMEOUT_MILLIS)
+    }
+
+    @Test
+    fun healthyCachedStartDoesNotScheduleASelectionRefresh(): Unit = runBlocking {
+        val fixture = Fixture(this, probeFallback = true, workingEndpoint = "tcp1")
+        fixture.startPrepared(EndpointSelectionMode.MANUAL)
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        fixture.useOfflinePreparation(onPrepare = { requests.incrementAndGet() })
+        fixture.stop(1)
+        fixture.orchestrator.activeTransitionJob()?.join()
+        fixture.startAccount(VpnPreparationStrategy.CachedFirst)
+        fixture.orchestrator.activeTransitionJob()?.join()
+        assertEquals(VpnConnectionState.CONNECTED, fixture.orchestrator.currentState())
+        val owner = fixture.orchestrator.snapshot().owner
+        val starts = fixture.startedEndpoints.size
+        val stops = fixture.runtimeStops
+        try {
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(2))
+            yield()
+            fixture.orchestrator.activeTransitionJob()?.join()
+            assertEquals("A healthy cached session must not create a fresh VPN session", 0, requests.get())
+            assertEquals(owner, fixture.orchestrator.snapshot().owner)
+            assertEquals(starts, fixture.startedEndpoints.size)
+            assertEquals(stops, fixture.runtimeStops)
+        } finally {
+            fixture.stop(1)
+            fixture.orchestrator.activeTransitionJob()?.join()
+        }
+    }
+
+    @Test
+    fun watchdogUsesLivenessWithoutReplacingHealthyRuntime(): Unit = runBlocking {
+        val fixture = Fixture(this, probeFallback = true, workingEndpoint = "tcp1")
+        fixture.setNetworkAvailability(UnderlyingNetworkAvailability.Validated)
+        fixture.startPrepared(EndpointSelectionMode.MANUAL)
+        val settings = checkNotNull(fixture.orchestrator.currentSettings())
+        val owner = checkNotNull(fixture.orchestrator.snapshot().owner)
+        val tunnel = fixture.orchestrator.currentTunnel()
+        val starts = fixture.startedEndpoints.size
+        val stops = fixture.runtimeStops
+        val watchdog = VpnWatchdogController(
+            HandlerDelayedTaskScheduler(android.os.Handler(Looper.getMainLooper())),
+            { 0L }, fixture::launchWatchdogProbe, { false })
+        fixture.set("watchdogController", watchdog)
+        watchdog.start(ConnectedWatchdogPolicy.Owner(owner.generationId,
+            System.identityHashCode(tunnel), owner.coreId), settings, initialVpnEvidence = false)
+        fixture.watchdogProbes.clear()
+        try {
+            watchdog.forceProbe()
+            kotlinx.coroutines.withTimeout(5_000) { while (!watchdog.hasFreshVpnEvidence()) yield() }
+            assertEquals(listOf(true), fixture.watchdogProbes)
+            assertEquals(4_000L, fixture.probeTimeouts.last())
+            assertEquals(VpnProbePlanPolicy.connectedTargets(false).map { it.url }, fixture.readinessCandidates.last())
+            assertEquals(starts, fixture.startedEndpoints.size)
+            assertEquals(stops, fixture.runtimeStops)
+            org.junit.Assert.assertSame(tunnel, fixture.orchestrator.currentTunnel())
+        } finally {
+            watchdog.stop(null)
+            fixture.stop(1)
+            fixture.orchestrator.activeTransitionJob()?.join()
+        }
     }
 
     @Test
@@ -1833,6 +1895,7 @@ class AppVpnServiceCommandTest {
         val startedConfigs = mutableListOf<JSONObject>()
         val probeTimeouts = java.util.concurrent.CopyOnWriteArrayList<Long>()
         val readinessCandidates = java.util.concurrent.CopyOnWriteArrayList<List<String>>()
+        val watchdogProbes = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
         var rejectYoutubeRuntime = false
         var runtimeRunning = false
         var runtimeCarrier = ""
@@ -1884,8 +1947,9 @@ class AppVpnServiceCommandTest {
                     return runtimeRebindSucceeds
                 }
                 override fun cancelMeasureDelay() { probeCancels.incrementAndGet() }
-                override fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long): VpnReadinessProbe {
+                override fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long, watchdog: Boolean): VpnReadinessProbe {
                     readinessCandidates += targetUrls
+                    watchdogProbes += watchdog
                     val completed = java.util.concurrent.atomic.AtomicBoolean()
                     val cancelled = java.util.concurrent.atomic.AtomicBoolean()
                     return VpnReadinessProbe(
@@ -1980,7 +2044,7 @@ class AppVpnServiceCommandTest {
             })
         }
 
-        fun startAccount() = invoke("startVpn", VpnPreparationStrategy.FreshOnly)
+        fun startAccount(strategy: VpnPreparationStrategy = VpnPreparationStrategy.FreshOnly) = invoke("startVpn", strategy)
 
         fun enableKillSwitch() {
             store.updateSettings { it.copy(advancedSettings = it.advancedSettings.copy(killSwitchEnabled = true)) }
@@ -2108,7 +2172,7 @@ class AppVpnServiceCommandTest {
         suspend fun measureReadiness(fastStartup: Boolean = false): Long? = suspendCoroutineUninterceptedOrReturn { continuation ->
             try {
                 AppVpnService::class.java.declaredMethods.single { it.name == "measureRuntimeReadiness" }
-                    .apply { isAccessible = true }.invoke(service, false, fastStartup, continuation)
+                    .apply { isAccessible = true }.invoke(service, false, fastStartup, false, continuation)
             } catch (error: java.lang.reflect.InvocationTargetException) { throw error.targetException }
         }
 

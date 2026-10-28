@@ -1,6 +1,10 @@
 package com.noki.vpn.vpn
 
+import com.noki.vpn.data.ServerSelectionMode
+
 object ConnectedWatchdogPolicy {
+    fun automaticRecoveryAllowed(selectionMode: ServerSelectionMode): Boolean = selectionMode != ServerSelectionMode.SERVER
+
     enum class TransitionExceptionDecision {
         UseGeneralFailure,
         KeepTruthfulLockdownFailure,
@@ -81,7 +85,7 @@ object ConnectedWatchdogPolicy {
         if (attempt <= 0) VpnPreparationStrategy.CachedFirst else VpnPreparationStrategy.FreshOnly
 
     fun recoveryTargets(currentLocationCode: String): List<RecoveryTarget> = listOf(
-        RecoveryTarget(locationCode = currentLocationCode, attempts = 2),
+        RecoveryTarget(locationCode = currentLocationCode),
         RecoveryTarget(excludeLocationCode = currentLocationCode),
     )
 

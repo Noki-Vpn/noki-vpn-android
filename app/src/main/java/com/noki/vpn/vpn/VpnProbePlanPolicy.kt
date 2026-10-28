@@ -5,6 +5,7 @@ import com.noki.vpn.data.NokiBackendConfig
 object VpnProbePlanPolicy {
     const val TOTAL_TIMEOUT_MILLIS = 10_000L
     const val STARTUP_TOTAL_TIMEOUT_MILLIS = 3_000L
+    const val WATCHDOG_TOTAL_TIMEOUT_MILLIS = 4_000L
 
     data class ProbeTarget(
         val key: String,

@@ -193,8 +193,8 @@ internal class VpnConnectionOrchestrator(
         core.cancelMeasureDelay()
     }
 
-    fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long): VpnReadinessProbe =
-        core.prepareReadinessCandidates(targetUrls, timeoutMillis)
+    fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long, watchdog: Boolean = false): VpnReadinessProbe =
+        core.prepareReadinessCandidates(targetUrls, timeoutMillis, watchdog)
 
     fun pauseConnectedSidecars() {
         activeOwner?.let(sidecars::stop)

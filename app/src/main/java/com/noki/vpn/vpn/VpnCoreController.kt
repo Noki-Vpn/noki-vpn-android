@@ -76,11 +76,12 @@ internal class VpnCoreController(
         return measureProbe { checkNotNull(core) { "vpn_core_not_running" }.measureDelay("proxy", targetUrl, timeoutMillis) }
     }
 
-    override fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long): VpnReadinessProbe {
+    override fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long, watchdog: Boolean): VpnReadinessProbe {
         val core = server
         return try {
-            val measurement = checkNotNull(core) { "vpn_core_not_running" }
-                .prepareReadinessCandidates("proxy", strings(targetUrls), timeoutMillis)
+            checkNotNull(core) { "vpn_core_not_running" }
+            val measurement = if (watchdog) core.prepareWatchdogCandidates("proxy", strings(targetUrls), timeoutMillis)
+                else core.prepareReadinessCandidates("proxy", strings(targetUrls), timeoutMillis)
             VpnReadinessProbe(
                 measure = { measureProbe { measurement.run() } },
                 cancel = measurement::cancel,

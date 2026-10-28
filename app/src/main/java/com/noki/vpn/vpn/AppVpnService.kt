@@ -549,7 +549,6 @@ class AppVpnService : VpnService() {
                 serverCountry = notificationServerLabel,
                 connectionSuccess = true,
             )
-            scheduleFreshSelectionPrepare()
         }
     }
 
@@ -1342,10 +1341,14 @@ class AppVpnService : VpnService() {
         }
         val repository = SettingsRepository(this)
         val previousSettings = activeSettings ?: endpointHealthController.currentSettings() ?: failedSettings
+        if (!ConnectedWatchdogPolicy.automaticRecoveryAllowed(previousSettings.userProfile.serverSelectionMode)) return
         val previousNetworkKind = activeEndpointNetworkKind
         val countryCode = previousSettings.userProfile.selectedCountryCode
         val failedLocationCode = previousSettings.userProfile.selectedServerCode
         val targets = ConnectedWatchdogPolicy.recoveryTargets(failedLocationCode)
+        val failedNodeIds = mutableSetOf<String>()
+        previousSettings.endpointOptions.firstOrNull { it.code == previousSettings.profile.endpointCode }
+            ?.nodeId?.takeIf(String::isNotBlank)?.let(failedNodeIds::add)
         val incidentId = UUID.randomUUID().toString()
         launchConnectionTransition(repository) { generationId ->
             repository.recordAppLog(
@@ -1414,9 +1417,11 @@ class AppVpnService : VpnService() {
                     destructiveOnFailure = false,
                     sessionSelection = VpnSessionSelection(
                         countryCode = countryCode,
-                        locationCode = target.locationCode.takeUnless { previousSettings.userProfile.serverSelectionMode == com.noki.vpn.data.ServerSelectionMode.SERVER },
-                        excludeLocationCode = target.excludeLocationCode.takeUnless { previousSettings.userProfile.serverSelectionMode == com.noki.vpn.data.ServerSelectionMode.SERVER },
-                        nodeId = previousSettings.userProfile.selectedNodeId.takeIf { previousSettings.userProfile.serverSelectionMode == com.noki.vpn.data.ServerSelectionMode.SERVER },
+                        locationCode = target.locationCode,
+                        excludeLocationCode = target.excludeLocationCode.takeIf {
+                            failedNodeIds.isEmpty() && previousSettings.userProfile.serverSelectionMode == com.noki.vpn.data.ServerSelectionMode.AUTO
+                        },
+                        excludedNodeIds = if (target.excludeLocationCode != null) failedNodeIds.toSet() else emptySet(),
                     ),
                     incidentId = incidentId,
                     onFailure = { prepareFailure = it },
@@ -1456,6 +1461,10 @@ class AppVpnService : VpnService() {
                         cached = false,
                     )
                     return@launchConnectionTransition
+                }
+                prepared.candidateSettings.let { candidate ->
+                    candidate.endpointOptions.firstOrNull { it.code == candidate.profile.endpointCode }
+                        ?.nodeId?.takeIf(String::isNotBlank)?.let(failedNodeIds::add)
                 }
             }
             repository.recordAppLog(
@@ -1523,7 +1532,6 @@ class AppVpnService : VpnService() {
             ),
         )
         uploadPendingVpnIncidents(repository, prepared.candidateSettings)
-        if (cached) scheduleFreshSelectionPrepare()
     }
 
     private fun enqueueVpnIncident(
@@ -2085,7 +2093,7 @@ class AppVpnService : VpnService() {
             return null
         }
         val job = backgroundScope.launch {
-            val latencyMs = measureRuntimeReadiness(recovery = false)
+            val latencyMs = measureRuntimeReadiness(recovery = false, watchdog = true)
             if (!currentCoroutineContext().isActive) return@launch
             connectionOrchestrator.withLifecycleLock {
                 if (!currentCoroutineContext().isActive ||
@@ -2187,12 +2195,16 @@ class AppVpnService : VpnService() {
         }
     }
 
-    private suspend fun measureRuntimeReadiness(recovery: Boolean, fastStartup: Boolean = false): Long? = readinessMutex.withLock {
+    private suspend fun measureRuntimeReadiness(recovery: Boolean, fastStartup: Boolean = false, watchdog: Boolean = false): Long? = readinessMutex.withLock {
         val repository = SettingsRepository(this)
         val connectedTargets = VpnProbePlanPolicy.connectedTargets(recovery)
-        val totalTimeout = if (fastStartup) VpnProbePlanPolicy.STARTUP_TOTAL_TIMEOUT_MILLIS else VpnProbePlanPolicy.TOTAL_TIMEOUT_MILLIS
+        val totalTimeout = when {
+            watchdog -> VpnProbePlanPolicy.WATCHDOG_TOTAL_TIMEOUT_MILLIS
+            fastStartup -> VpnProbePlanPolicy.STARTUP_TOTAL_TIMEOUT_MILLIS
+            else -> VpnProbePlanPolicy.TOTAL_TIMEOUT_MILLIS
+        }
         val startedAt = SystemClock.elapsedRealtime()
-        val probe = connectionOrchestrator.prepareReadinessCandidates(connectedTargets.map { it.url }, totalTimeout)
+        val probe = connectionOrchestrator.prepareReadinessCandidates(connectedTargets.map { it.url }, totalTimeout, watchdog)
         val result = try {
             withTimeoutOrNull(totalTimeout) {
                 EndpointProbeRunner.awaitNativeProbe(measure = probe.measure, cancel = probe.cancel)
@@ -2203,7 +2215,7 @@ class AppVpnService : VpnService() {
         currentCoroutineContext().ensureActive()
         recordDiagnostic(
             repository = repository,
-            message = "readiness_probe",
+            message = if (watchdog) "watchdog_probe" else "readiness_probe",
             details = readinessDiagnosticDetails(
                 targetKey = connectedTargets.joinToString(",") { it.key },
                 result = result,

@@ -489,7 +489,7 @@ private class RecordingVpnCoreRuntime(
     override fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult =
         VpnProbeResult(delayMs = 1L)
 
-    override fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long): VpnReadinessProbe =
+    override fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long, watchdog: Boolean): VpnReadinessProbe =
         prepareReadiness(targetUrls, timeoutMillis)
 }
 
@@ -516,7 +516,7 @@ private class BlockingFirstCancellationVpnCoreRuntime(
     override fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult =
         VpnProbeResult(delayMs = 1L)
 
-    override fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long): VpnReadinessProbe =
+    override fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long, watchdog: Boolean): VpnReadinessProbe =
         VpnReadinessProbe(measure = { VpnProbeResult(delayMs = 1L) }, cancel = {})
 }
 

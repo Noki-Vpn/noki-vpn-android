@@ -125,7 +125,7 @@ class VpnSessionCoordinatorTest {
     }
 
     @Test
-    fun `hidden saved server falls back to visible auto node`() = runBlocking {
+    fun `hidden saved server never falls back to auto`() = runBlocking {
         val api = FakeVpnSessionApi()
         val measured = mutableListOf<String>()
         val coordinator = VpnSessionCoordinator(
@@ -142,11 +142,33 @@ class VpnSessionCoordinatorTest {
             advancedSettings = AdvancedSettings(ruRelayEnabled = false),
             userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.SERVER, selectedNodeId = "hidden-node"),
         )
-        val result = coordinator.prepare("token", settings)
-        assertEquals(setOf("node-de-2", "node-lv2"), measured.toSet())
-        assertEquals(listOf("hidden-node", "node-lv2"), api.requestedNodeIds)
-        assertEquals(ServerSelectionMode.AUTO, result.settings.userProfile.serverSelectionMode)
-        assertEquals("", result.settings.userProfile.selectedNodeId)
+        val error = runCatching { coordinator.prepare("token", settings) }.exceptionOrNull()
+        assertTrue(error is BackendException && error.statusCode == 503)
+        assertTrue(measured.isEmpty())
+        assertEquals(listOf("hidden-node"), api.requestedNodeIds)
+        assertEquals(ServerSelectionMode.SERVER, settings.userProfile.serverSelectionMode)
+        assertEquals("hidden-node", settings.userProfile.selectedNodeId)
+    }
+
+    @Test
+    fun `unavailable country or excluded country location never selects another country`() = runBlocking {
+        for ((country, excludedLocation) in listOf("FI" to null, "DE" to "de-2")) {
+            val api = FakeVpnSessionApi()
+            val settings = DefaultStoredSettingsFactory.create().copy(
+                backendDeviceId = "device-id", backendDeviceKey = "device-key",
+                advancedSettings = AdvancedSettings(ruRelayEnabled = false),
+                userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.COUNTRY, selectedCountryCode = country),
+            )
+            val coordinator = VpnSessionCoordinator(
+                context = RuntimeEnvironment.getApplication(), repository = FakeVpnSessionStore(), backendApi = api,
+                challengeSigner = { "signature" }, measureClientLatencies = { error("No permitted nodes to measure") },
+            )
+            val error = runCatching { coordinator.prepare("token", settings,
+                sessionSelection = VpnSessionSelection(countryCode = country, excludeLocationCode = excludedLocation)) }.exceptionOrNull()
+            assertTrue(error is BackendException && error.statusCode == 503)
+            assertTrue(api.requestedNodeIds.isEmpty())
+            assertEquals(country, settings.userProfile.selectedCountryCode)
+        }
     }
 
     @Test

@@ -8,6 +8,25 @@ import org.junit.Test
 
 class VpnWatchdogControllerTest {
     @Test
+    fun `manual server never restarts or releases a failing tunnel`() {
+        for (lockdown in listOf(false, true)) {
+            val controller = VpnWatchdogController(
+                scheduler = WatchdogScheduler(), nowMillis = { 1_000L },
+                launchProbe = { _, _ -> CancelableTask {} }, isLockdown = { lockdown },
+            )
+            val owner = watchdogOwner(20L)
+            val settings = DefaultStoredSettingsFactory.create().let { it.copy(
+                userProfile = it.userProfile.copy(serverSelectionMode = com.noki.vpn.data.ServerSelectionMode.SERVER),
+            ) }
+            controller.start(owner, settings, initialVpnEvidence = false)
+            repeat(10) { assertEquals(WatchdogAction.None, failedProbe(controller, owner)) }
+            assertEquals(owner, controller.currentOwner())
+            controller.forceProbe()
+            assertEquals(WatchdogProbeOutcome.Healthy, controller.completeProbe(owner, 30L))
+        }
+    }
+
+    @Test
     fun `network handover cancels old evidence without losing the runtime owner`() {
         var cancelled = 0
         val controller = VpnWatchdogController(

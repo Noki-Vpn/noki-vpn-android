@@ -103,6 +103,8 @@ internal class VpnWatchdogController(
             recordEvidence(WatchdogEvidence.VPN_PROBE)
             return WatchdogProbeOutcome.Healthy
         }
+        if (!ConnectedWatchdogPolicy.automaticRecoveryAllowed(checkNotNull(settings).userProfile.serverSelectionMode))
+            return WatchdogProbeOutcome.Unhealthy(WatchdogAction.None)
         return when (ConnectedWatchdogPolicy.probeDecision(false, failureCount)) {
             ConnectedWatchdogPolicy.ProbeDecision.Healthy -> error("Failed probe cannot be healthy")
             ConnectedWatchdogPolicy.ProbeDecision.Retry -> {

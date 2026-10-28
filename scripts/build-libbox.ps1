@@ -83,7 +83,7 @@ elif mode=='extract':
     actual={'python':sys.version.split()[0],'zlib':zlib.ZLIB_VERSION,'zlib_runtime':zlib.ZLIB_RUNTIME_VERSION}
     assert actual==inputs['packaging'], 'Packaging runtime mismatch: expected '+str(inputs['packaging'])+', actual '+str(actual)
     assert inputs['source_commit']=='55faa763f986f4ca8a492d9b2719bc6330d2bef5'
-    assert inputs['version']=='1.14.1-extended-2.7.2-nokinv-26'
+    assert inputs['version']=='1.14.1-extended-2.7.2-nokinv-27'
     assert inputs['local_source_commit']=='0d157d028f75f0e5f554f5b0aa53863fce4a0a1c'
     assert inputs['abis']==['arm64-v8a','armeabi-v7a','x86_64']
     assert sha((source/'build-libbox.ps1').read_bytes())==inputs['recipe_sha256']

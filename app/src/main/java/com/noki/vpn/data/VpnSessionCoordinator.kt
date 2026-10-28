@@ -103,14 +103,7 @@ class VpnSessionCoordinator(
         val scopedNodes = visibleNodes.filter {
             sessionSelection.locationCode == null || it.locationCode == sessionSelection.locationCode
         }
-        val preferredNodes = EndpointRankingPolicy.rankServers(scopedNodes, scope)
-        // Saved node/country selections may disappear after an admin changes visibility.
-        val fellBackToAuto = preferredNodes.isEmpty() &&
-            (scope.serverSelectionMode != ServerSelectionMode.AUTO || sessionSelection.locationCode != null)
-        val rankingScope = if (fellBackToAuto) scope.copy(serverSelectionMode = ServerSelectionMode.AUTO) else scope
-        val eligibleNodes = if (fellBackToAuto) EndpointRankingPolicy.rankServers(
-            visibleNodes, rankingScope,
-        ) else preferredNodes
+        val eligibleNodes = EndpointRankingPolicy.rankServers(scopedNodes, scope)
         if (eligibleNodes.isEmpty()) throw BackendException("No available servers", 503)
         val samples = if (eligibleNodes.size == 1) emptyMap() else {
             val eligibleIds = eligibleNodes.map { it.id }.toSet()
@@ -121,7 +114,7 @@ class VpnSessionCoordinator(
         }
         val nodes = if (samples.isEmpty()) eligibleNodes else EndpointRankingPolicy.rankServers(
             eligibleNodes.map { node -> node.copy(latencyMs = clientLatencyTargetKey(node)?.let(samples::get)) },
-            rankingScope,
+            scope,
         )
         var lastFailure: Exception = BackendException("No available servers", 503)
         for (node in nodes) {
@@ -131,9 +124,6 @@ class VpnSessionCoordinator(
                 ))
                 if (!VpnProfileValidator.isUsable(result.settings) && node != nodes.last()) continue
                 return@withContext result.copy(settings = result.settings.copy(userProfile = result.settings.userProfile.copy(
-                    serverSelectionMode = if (fellBackToAuto) ServerSelectionMode.AUTO else result.settings.userProfile.serverSelectionMode,
-                    selectedNodeId = if (fellBackToAuto) "" else result.settings.userProfile.selectedNodeId,
-                    selectedCountryCode = if (fellBackToAuto) "" else result.settings.userProfile.selectedCountryCode,
                     actualCountryCode = node.countryCode,
                 )))
             } catch (cancelled: CancellationException) {

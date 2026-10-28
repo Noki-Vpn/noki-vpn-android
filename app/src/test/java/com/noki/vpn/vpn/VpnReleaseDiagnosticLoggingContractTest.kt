@@ -39,17 +39,16 @@ class VpnReleaseDiagnosticLoggingContractTest {
     fun `readiness uses one native operation with the complete target budget`() {
         val readiness = source.substringAfter("private suspend fun measureRuntimeReadiness")
             .substringBefore("private fun readinessDiagnosticDetails")
-        assertTrue(readiness.contains("prepareReadinessCandidates(connectedTargets.map { it.url }, totalTimeout)"))
+        assertTrue(readiness.contains("prepareReadinessCandidates(connectedTargets.map { it.url }, totalTimeout, watchdog)"))
         assertTrue(readiness.indexOf("prepareReadinessCandidates(") < readiness.indexOf("awaitNativeProbe("))
         assertTrue(readiness.contains("measure = probe.measure, cancel = probe.cancel"))
         assertFalse(readiness.contains("remainingMillis /"))
         val loader = javaClass.classLoader
-        Class.forName("io.nekohasekai.libbox.CommandServer", false, loader).getMethod(
-            "prepareReadinessCandidates",
-            String::class.java,
-            Class.forName("io.nekohasekai.libbox.StringIterator", false, loader),
-            Long::class.javaPrimitiveType,
-        )
+        val server = Class.forName("io.nekohasekai.libbox.CommandServer", false, loader)
+        for (method in listOf("prepareReadinessCandidates", "prepareWatchdogCandidates")) {
+            server.getMethod(method, String::class.java,
+                Class.forName("io.nekohasekai.libbox.StringIterator", false, loader), Long::class.javaPrimitiveType)
+        }
         val measurement = Class.forName("io.nekohasekai.libbox.Measurement", false, loader)
         measurement.getMethod("run")
         measurement.getMethod("cancel")

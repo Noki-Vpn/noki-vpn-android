@@ -11,7 +11,7 @@ internal interface VpnCoreRuntime {
 
     fun measureDelay(targetUrl: String, timeoutMillis: Long): VpnProbeResult
 
-    fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long): VpnReadinessProbe
+    fun prepareReadinessCandidates(targetUrls: List<String>, timeoutMillis: Long, watchdog: Boolean = false): VpnReadinessProbe
 
     fun nokiNvCarrier(): String
 }

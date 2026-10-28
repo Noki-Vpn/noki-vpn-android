@@ -115,7 +115,7 @@ class ConnectedWatchdogPolicyTest {
     fun unexpectedDropRetriesCurrentServerTwiceBeforeCountryFailover() {
         assertEquals(
             listOf(
-                ConnectedWatchdogPolicy.RecoveryTarget(locationCode = "lv-2", attempts = 2),
+                ConnectedWatchdogPolicy.RecoveryTarget(locationCode = "lv-2"),
                 ConnectedWatchdogPolicy.RecoveryTarget(excludeLocationCode = "lv-2"),
             ),
             ConnectedWatchdogPolicy.recoveryTargets("lv-2"),
