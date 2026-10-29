@@ -13,6 +13,50 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
 class VpnSessionCoordinatorTest {
+    @Test fun `manual Romania Naive prepares a fresh Naive session with TLS and its own credentials`() = runBlocking {
+        val endpoint = org.json.JSONObject().put("code", "ro-naive").put("node_id", "node-ro")
+            .put("entry_host", "ro.example.test").put("entry_port", 9443).put("server_name", "ro.example.test")
+            .put("location_code", "ro-1").put("location_name", "Romania")
+            .put("proxy_type", "naive").put("transport", "naive").put("security", "tls")
+        val payload = contractFixture("multihop_session_v2.json").apply {
+            remove("multihop")
+            put("route_mode", "direct").put("location_code", "ro-1").put("location_name", "Romania")
+            put("profile_code", "naive").put("endpoint_code", "ro-naive").put("entry_host", "ro.example.test")
+            put("connect_ip", "ro.example.test").put("entry_port", 9443).put("server_name", "ro.example.test")
+            put("proxy_type", "naive").put("transport", "naive").put("transport_mode", org.json.JSONObject.NULL)
+            put("security", "tls").put("vpn_username", "fixture-user").put("vpn_secret", "fixture-password")
+            put("public_key", org.json.JSONObject.NULL).put("short_id", org.json.JSONObject.NULL).put("flow", "")
+            put("endpoint_candidates", org.json.JSONArray().put(endpoint))
+        }
+        val session = BackendVpnSessionJsonParser.parse(payload)
+        val option = EndpointGroupPolicy.manualOptions(EndpointSelector.optionsFromSession(session)).single()
+        val advanced = AdvancedSettings(ruRelayEnabled = false,
+            protocol = VpnProtocol.fromBackendCode(option.security, option.proxyType),
+            endpointSelectionMode = EndpointSelectionMode.MANUAL, manualEndpointCode = option.code,
+            manualEndpointGroupKey = EndpointGroupPolicy.groupKey(option))
+        val settings = DefaultStoredSettingsFactory.create().copy(backendDeviceId = "device-id", backendDeviceKey = "device-key",
+            advancedSettings = advanced, userProfile = UserProfile(serverSelectionMode = ServerSelectionMode.SERVER,
+                selectedNodeId = "node-ro", selectedCountryCode = "RO"))
+        val api = FakeVpnSessionApi(pairSession = session)
+        val coordinator = VpnSessionCoordinator(context = RuntimeEnvironment.getApplication(),
+            repository = FakeVpnSessionStore(), backendApi = api, challengeSigner = { "signature" }, startupTcpPrecheck = { true })
+        val start = VpnStartCoordinator(VpnStartCoordinator.VpnSessionPreparer { token, stored, devices, selection ->
+            coordinator.prepare(token, stored, devices, selection)
+        })
+        val decision = start.resolveStart("token", settings, emptyList(), allowCachedFallback = false)
+        assertTrue("Fresh preparation failed: $decision", decision is VpnStartCoordinator.StartDecision.FreshSession)
+        val prepared = (decision as VpnStartCoordinator.StartDecision.FreshSession).result.settings
+        assertEquals("naive", api.requestedProfileCode)
+        assertNull(VpnProfileValidator.rejectionReason(prepared))
+        assertEquals(VpnProtocol.NAIVE, prepared.advancedSettings.protocol)
+        assertEquals("tls|naive|", prepared.advancedSettings.manualEndpointGroupKey)
+        assertEquals("fixture-user", prepared.profile.vpnUsername)
+        assertEquals("fixture-password", prepared.profile.uuid)
+        val outbound = org.json.JSONObject(com.noki.vpn.vpn.VpnConfigFactory.buildProbe(prepared.profile))
+            .getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("naive", outbound.getString("type"))
+        assertEquals(9443, outbound.getInt("server_port"))
+    }
     @Test
     fun `serialized no RU MultiHop keeps Auto ranking and explicit NokiNV QUIC through the entry`() = runBlocking {
         val payload = contractFixture("multihop_session_v2.json")
