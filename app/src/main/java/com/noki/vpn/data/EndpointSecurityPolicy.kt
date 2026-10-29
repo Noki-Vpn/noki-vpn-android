@@ -49,6 +49,7 @@ object EndpointSecurityPolicy {
             }
             "nokinv" -> security == "tls" && transport == "nokinv" && mode in setOf("", "quic")
             "hysteria" -> security == "tls" && transport == "hysteria" && mode.isBlank()
+            "naive" -> security == "tls" && transport == "naive" && mode.isBlank()
             else -> false
         }
 

@@ -565,6 +565,7 @@ class AppVpnServiceCommandTest {
                     com.noki.vpn.data.VpnProtocol.TLS -> setOf("tls")
                     com.noki.vpn.data.VpnProtocol.REALITY -> setOf("reality")
                     com.noki.vpn.data.VpnProtocol.NOKINV -> emptySet()
+                    com.noki.vpn.data.VpnProtocol.NAIVE -> emptySet()
                     com.noki.vpn.data.VpnProtocol.WIREGUARD -> emptySet()
                 }
                 assertEquals("$mode/$protocol", expected, outcomes.map { it.endpointCode }.toSet())

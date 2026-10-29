@@ -355,6 +355,7 @@ data class BackendYoutubeAccess(
     val wireguard: BackendRuWireGuardConfig? = null,
     val endpoint: BackendEndpointCandidate? = null,
     val vpnSecret: String? = null,
+    val vpnUsername: String? = null,
 )
 
 sealed interface BackendRuWireGuardSession {

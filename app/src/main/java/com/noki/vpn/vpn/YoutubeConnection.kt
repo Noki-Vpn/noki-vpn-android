@@ -217,9 +217,9 @@ internal class YoutubeConnection(
                 }
                 "selected_transport" -> {
                     require(primary != null && primary.endpointCode.isNotBlank()) { "youtube_primary_transport_missing" }
-                    val profile = EndpointSelector.profileFromCandidate(checkNotNull(grant.endpoint), checkNotNull(grant.vpnSecret))
+                    val profile = EndpointSelector.profileFromCandidate(checkNotNull(grant.endpoint), checkNotNull(grant.vpnSecret), grant.vpnUsername.orEmpty())
                     require(transportFamily(profile) == transportFamily(primary) &&
-                        profile.proxyType.lowercase(Locale.ROOT) in setOf("vless", "hysteria", "hysteria2", "hy2")) {
+                        profile.proxyType.lowercase(Locale.ROOT) in setOf("vless", "hysteria", "hysteria2", "hy2", "naive")) {
                         "youtube_transport_mismatch"
                     }
                     YoutubeConnectionConfig.SelectedTransport(profile)

@@ -17,6 +17,27 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VpnConfigFactoryTest {
+    @Test fun naiveUsesNativeCronetAndAuthenticatedUotWithoutVlessOptions() {
+        val profile = VlessProfile(proxyType = "naive", transport = "naive", security = "tls",
+            host = "node.example", port = "443", serverName = "node.example",
+            vpnUsername = "test-user", uuid = "test-password")
+        val settings = AdvancedSettings(protocol = com.noki.vpn.data.VpnProtocol.NAIVE)
+        assertTrue(com.noki.vpn.data.VpnProfileValidator.isUsable(profile, settings))
+        val outbound = JSONObject(VpnConfigFactory.buildProbe(profile)).getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("naive", outbound.getString("type"))
+        assertEquals("test-user", outbound.getString("username"))
+        assertEquals("test-password", outbound.getString("password"))
+        assertFalse(outbound.getBoolean("quic"))
+        assertTrue(outbound.getJSONObject("udp_over_tcp").getBoolean("enabled"))
+        assertEquals(2, outbound.getJSONObject("udp_over_tcp").getInt("version"))
+        assertEquals(setOf("enabled", "server_name"), outbound.getJSONObject("tls").keys().asSequence().toSet())
+        assertFalse(outbound.has("uuid"))
+        assertFalse(com.noki.vpn.data.VpnProfileValidator.isUsable(profile.copy(vpnUsername = ""), settings))
+        assertThrows(IllegalArgumentException::class.java) {
+            VpnConfigFactory.buildProbe(profile.copy(alpn = "h2"))
+        }
+        assertEquals("", com.noki.vpn.data.RuntimeProfilePolicy.profileAfterServerSelection(profile).vpnUsername)
+    }
     @Test fun connectionLogSettingTakesPriorityOverErrorLogs() {
         for ((connection, error, level) in listOf(
             Triple(true, true, "info"),

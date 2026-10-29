@@ -49,7 +49,8 @@ object VpnProfileValidator {
         val expectedSecurity = advancedSettings.effectiveProtocol.name.lowercase(Locale.ROOT)
         val normalizedSecurity = profile.security.lowercase(Locale.ROOT)
         val nokinv = profile.proxyType == "nokinv"
-        if (if (expectedSecurity == "nokinv") !nokinv else (nokinv && expectedSecurity != "auto") ||
+        val naive = profile.proxyType == "naive"
+        if (if (expectedSecurity == "naive") !naive else if (expectedSecurity == "nokinv") !nokinv else (nokinv && expectedSecurity != "auto") ||
             (expectedSecurity != "auto" && normalizedSecurity != expectedSecurity)) return "protocol_mismatch"
 
         if (!advancedSettings.gamingModeEnabled &&
@@ -93,6 +94,8 @@ object VpnProfileValidator {
             val decoded = runCatching { java.util.Base64.getUrlDecoder().decode(token) }.getOrNull()
             if (decoded?.size != 32 || java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(decoded) != token ||
                 profile.nokinvCredentialGeneration < 1) return "invalid_credential"
+        } else if (naive) {
+            if (profile.vpnUsername.isBlank() || profile.uuid.isBlank()) return "invalid_credential"
         } else if (runCatching { UUID.fromString(profile.uuid) }.isFailure) return "invalid_credential"
         return if (EndpointSecurityPolicy.isAllowedProfile(profile)) null else "security_policy_rejected"
     }

@@ -135,6 +135,7 @@ object EndpointGroupPolicy {
     }
 
     fun displayLabelFor(option: VpnEndpointOption): String {
+        if (option.proxyType.equals("naive", ignoreCase = true)) return "NaiveProxy"
         if (option.proxyType == "nokinv") return "NokiNV"
         if (option.proxyType.equals("hysteria", ignoreCase = true) || normalizeTransport(option.transport) == "hysteria") {
             return "Hysteria2"

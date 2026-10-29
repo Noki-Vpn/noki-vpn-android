@@ -4,6 +4,19 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class EndpointRankingPolicyTest {
+    @Test fun naiveHasAnIndependentAllowedAutoAndManualFamily() {
+        val endpoint = tcpCandidate("naive").copy(proxyType = "naive", transport = "naive", security = "tls",
+            transportMode = null, publicKey = null, shortId = null, flow = null, path = null)
+        for (network in EndpointRankingPolicy.NetworkKind.entries) {
+            assertEquals("naive", EndpointRankingPolicy.select(listOf(endpoint), emptyMap(), network, 1000, { 0 })?.endpointClass)
+        }
+        val options = listOf(VpnEndpointOption(code = "naive", host = "node.example", proxyType = "naive",
+            transport = "naive", security = "tls"))
+        assertEquals("NaiveProxy", EndpointGroupPolicy.manualOptions(options).single().label)
+        assertEquals("tls|naive|", EndpointGroupPolicy.groupKey(options.single()))
+        org.junit.Assert.assertTrue(EndpointTransportPolicy.isDirectCandidate(endpoint))
+        org.junit.Assert.assertFalse(EndpointSecurityPolicy.isAllowedCandidate(endpoint.copy(security = "reality")))
+    }
     @Test fun nokinvSelectionUsesItsOwnTransportClassWithoutTcpPrecheck() {
         val endpoint = tcpCandidate("nv").copy(proxyType = "nokinv", transport = "nokinv", security = "tls", publicKey = null, shortId = null)
         for (network in EndpointRankingPolicy.NetworkKind.entries) {

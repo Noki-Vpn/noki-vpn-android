@@ -27,7 +27,8 @@ object RuntimeProfilePolicy {
         protocol: VpnProtocol,
     ): VlessProfile {
         if (protocol == VpnProtocol.AUTO) return profile
-        return if (if (protocol == VpnProtocol.NOKINV) profile.proxyType == "nokinv"
+        return if (if (protocol == VpnProtocol.NAIVE) profile.proxyType == "naive"
+            else if (protocol == VpnProtocol.NOKINV) profile.proxyType == "nokinv"
             else profile.proxyType != "nokinv" && profile.security.equals(protocol.name, ignoreCase = true)) {
             profile
         } else {
@@ -64,6 +65,7 @@ object RuntimeProfilePolicy {
             port = option.port.toString(),
             security = option.security,
             uuid = "",
+            vpnUsername = "",
             nokinvToken = "",
             nokinvCredentialGeneration = 0,
             serverName = "",
@@ -89,6 +91,7 @@ object RuntimeProfilePolicy {
         return copy(
             endpointCode = "",
             uuid = "",
+            vpnUsername = "",
             nokinvToken = "",
             nokinvCredentialGeneration = 0,
             serverName = "",

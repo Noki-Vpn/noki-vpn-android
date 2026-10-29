@@ -40,6 +40,7 @@ internal class StoredSettingsCodec(
         .put("host", settings.profile.host)
         .put("port", settings.profile.port)
         .put("uuid", settings.profile.uuid)
+        .put("vpnUsername", settings.profile.vpnUsername)
         .put("nokinvToken", settings.profile.nokinvToken)
         .put("nokinvCredentialGeneration", settings.profile.nokinvCredentialGeneration)
         .put("flow", settings.profile.flow)
@@ -138,6 +139,7 @@ internal class StoredSettingsCodec(
             host = json.optString("host"),
             port = json.optString("port", "443"),
             uuid = json.optString("uuid"),
+            vpnUsername = json.optString("vpnUsername"),
             nokinvToken = json.optString("nokinvToken", ""),
             nokinvCredentialGeneration = json.optInt("nokinvCredentialGeneration", 0),
             flow = json.optString("flow"),

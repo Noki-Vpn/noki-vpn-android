@@ -231,6 +231,7 @@ object TemporaryVpnLeaseCodec {
         .put("host", profile.host)
         .put("port", profile.port)
         .put("uuid", profile.uuid)
+        .put("vpnUsername", profile.vpnUsername)
         .put("flow", profile.flow)
         .put("security", profile.security)
         .put("fingerprint", profile.fingerprint)
@@ -254,6 +255,7 @@ object TemporaryVpnLeaseCodec {
         host = json.optString("host"),
         port = json.optString("port", "443"),
         uuid = json.optString("uuid"),
+        vpnUsername = json.optString("vpnUsername"),
         flow = json.optString("flow"),
         security = json.optString("security", "reality"),
         fingerprint = json.optString("fingerprint", "chrome"),

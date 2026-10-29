@@ -46,6 +46,17 @@ class YoutubeConnectionTest {
         .put("entry_port", 443).put("server_name", "youtube.example.test").put("proxy_type", "vless")
         .put("transport", "tcp").put("security", "tls")
 
+    @Test fun naiveSelectedTransportRequiresAndCarriesItsOwnUsername() {
+        val payload = response("selected_transport").put("endpoint", endpoint()
+            .put("proxy_type", "naive").put("transport", "naive"))
+        assertThrows(IllegalArgumentException::class.java) { BackendYoutubeAccessJsonParser.parse(payload, now) }
+        val grant = BackendYoutubeAccessJsonParser.parse(payload.put("vpn_username", "grant-user"), now)
+        val primary = EndpointSelector.profileFromCandidate(checkNotNull(grant.endpoint), "primary-secret", "primary-user")
+        val runtime = YoutubeConnection.runtimeConfig(grant, primary, keyId, ByteArray(32)) as YoutubeConnectionConfig.SelectedTransport
+        assertEquals("grant-user", runtime.profile.vpnUsername)
+        assertEquals(grant.vpnSecret, runtime.profile.uuid)
+    }
+
     @Test fun onlyReadyGrantHasRuntimeMaterial() {
         val ready = BackendYoutubeAccessJsonParser.parse(response(), now)
         val privateKey = ByteArray(32) { 9 }

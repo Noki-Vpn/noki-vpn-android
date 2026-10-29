@@ -15,6 +15,15 @@ class SettingsPersistenceCodecsTest {
     private val defaults = DefaultStoredSettingsFactory.create(Locale.US)
     private val settingsCodec = StoredSettingsCodec { defaults }
 
+    @Test fun naiveUsernameAndOpaquePasswordRoundTripInExistingSettings() {
+        val profile = defaults.profile.copy(proxyType = "naive", transport = "naive", security = "tls",
+            vpnUsername = "test-user", uuid = "opaque-password")
+        val stored = defaults.copy(profile = profile,
+            advancedSettings = defaults.advancedSettings.copy(ruRelayEnabled = false, protocol = VpnProtocol.NAIVE))
+        assertEquals(profile, settingsCodec.decode(settingsCodec.encode(stored)).profile)
+        assertEquals("", settingsCodec.decode("{}").profile.vpnUsername)
+    }
+
     @Test
     fun explicitProtocolRestoresManualModeAfterAnOlderServerSelectionReset() {
         val advanced = AdvancedSettings(protocol = VpnProtocol.NOKINV,

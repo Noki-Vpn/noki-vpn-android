@@ -578,10 +578,12 @@ internal object BackendYoutubeAccessJsonParser {
         }
         val secret = if (readySelected) json.getString("vpn_secret") else null
         if (secret != null) require(secret.isNotBlank()) { "youtube_access_credential_invalid" }
+        val username = if (readySelected) json.optBackendString("vpn_username") else null
+        if (endpoint?.proxyType == "naive") require(!username.isNullOrBlank()) { "youtube_access_credential_invalid" }
         return BackendYoutubeAccess(mode, status, grantId, generation, expires, revokeToken,
             if (readyWg) canonicalRuUuid(json.getString("public_key_id")) else null,
             if (readyWg) RuWireGuardSessionJsonParser.parseConfig(json.getJSONObject("wireguard")) else null,
-            endpoint, secret)
+            endpoint, secret, username)
     }
 }
 

@@ -202,6 +202,18 @@ object VpnConfigFactory {
                 .put("domain_resolver", resolver(BOOTSTRAP_TAG))
         }
         require(profile.uuid.isNotBlank()) { "vpn_profile_invalid" }
+        if (kind == "naive") {
+            require(security == "tls" && transport == "naive" && profile.vpnUsername.isNotBlank() &&
+                profile.flow.isBlank() && profile.transportMode.isBlank() && profile.requestHost.isBlank() &&
+                profile.path in listOf("", "/") && profile.publicKey.isBlank() && profile.shortId.isBlank() &&
+                profile.alpn.isBlank()) { "vpn_profile_transport_unsupported" }
+            return JSONObject().put("tag", "proxy").put("type", "naive")
+                .put("server", profile.host).put("server_port", port)
+                .put("username", profile.vpnUsername).put("password", profile.uuid)
+                .put("quic", false).put("udp_over_tcp", JSONObject().put("enabled", true).put("version", 2))
+                .put("tls", JSONObject().put("enabled", true).put("server_name", profile.serverName))
+                .put("domain_resolver", resolver(BOOTSTRAP_TAG))
+        }
         val hy2 = kind in setOf("hysteria", "hysteria2", "hy2")
         if (hy2) {
             require(transport in setOf("hysteria", "hysteria2", "hy2") && security == "tls" &&

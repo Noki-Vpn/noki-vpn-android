@@ -57,10 +57,12 @@ enum class VpnProtocol {
     TLS,
     REALITY,
     NOKINV,
+    NAIVE,
     WIREGUARD;
 
     companion object {
         fun fromBackendCode(code: String?, proxyType: String? = null): VpnProtocol = when {
+            code.equals("naive", ignoreCase = true) || proxyType.equals("naive", ignoreCase = true) -> NAIVE
             code.equals("nokinv", ignoreCase = true) || proxyType.equals("nokinv", ignoreCase = true) -> NOKINV
             code.equals("tls", ignoreCase = true) -> TLS
             code.equals("reality", ignoreCase = true) -> REALITY
@@ -171,6 +173,7 @@ data class VlessProfile(
     val host: String = "",
     val port: String = "443",
     val uuid: String = "",
+    val vpnUsername: String = "",
     val nokinvToken: String = "",
     val nokinvCredentialGeneration: Int = 0,
     val flow: String = "",

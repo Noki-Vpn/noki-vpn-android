@@ -168,6 +168,7 @@ object EndpointSelector {
         when (protocol) {
             VpnProtocol.AUTO -> true
             VpnProtocol.NOKINV -> candidate.proxyType.equals("nokinv", ignoreCase = true)
+            VpnProtocol.NAIVE -> candidate.proxyType.equals("naive", ignoreCase = true)
             VpnProtocol.TLS -> !candidate.proxyType.equals("nokinv", ignoreCase = true) && candidate.security.equals("tls", ignoreCase = true)
             VpnProtocol.REALITY -> candidate.security.equals("reality", ignoreCase = true)
             VpnProtocol.WIREGUARD -> false
@@ -190,13 +191,14 @@ object EndpointSelector {
             require(candidate.nodeId == route.exitNodeId && candidate.entryHost == route.entryIp &&
                 candidate.connectIp == route.entryIp && candidate.entryPort in 20000..29999) { "multihop_exit_mismatch" }
         }
-        return profileFromCandidate(candidate.copy(proxyType = candidate.proxyType.ifBlank { session.proxyType }), session.vpnSecret)
+        return profileFromCandidate(candidate.copy(proxyType = candidate.proxyType.ifBlank { session.proxyType }),
+            session.vpnSecret, session.vpnUsername)
             .copy(remark = "Noki ${candidate.locationName.ifBlank { session.locationName }}", multiHop = session.multiHop,
                 nokinvToken = if (candidate.proxyType == "nokinv") session.nokinvToken else "",
                 nokinvCredentialGeneration = if (candidate.proxyType == "nokinv") session.nokinvCredentialGeneration else 0)
     }
 
-    internal fun profileFromCandidate(candidate: BackendEndpointCandidate, vpnSecret: String): VlessProfile =
+    internal fun profileFromCandidate(candidate: BackendEndpointCandidate, vpnSecret: String, vpnUsername: String = ""): VlessProfile =
         VlessProfile(
             remark = "Noki ${candidate.locationName}",
             endpointCode = candidate.code,
@@ -206,6 +208,7 @@ object EndpointSelector {
             host = candidate.connectionHost(),
             port = candidate.entryPort.toString(),
             uuid = vpnSecret,
+            vpnUsername = if (candidate.proxyType == "naive") vpnUsername else "",
             flow = candidate.flow.orEmpty(),
             security = candidate.security,
             fingerprint = candidate.fingerprint ?: "chrome",
@@ -233,6 +236,7 @@ object EndpointSelector {
             host = session.connectIp.orEmpty().ifBlank { session.entryHost },
             port = session.entryPort.toString(),
             uuid = session.vpnSecret,
+            vpnUsername = if (session.proxyType == "naive") session.vpnUsername else "",
             flow = session.flow.orEmpty(),
             security = session.security,
             fingerprint = session.fingerprint ?: "chrome",

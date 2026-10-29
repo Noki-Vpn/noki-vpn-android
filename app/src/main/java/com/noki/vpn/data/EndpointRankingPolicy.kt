@@ -186,14 +186,15 @@ object EndpointRankingPolicy {
         networkKind: NetworkKind,
     ): List<String> {
         return when (networkKind) {
-            NetworkKind.WIFI -> listOf(CLASS_REALITY_TCP, CLASS_REALITY_XHTTP_STREAM, CLASS_REALITY_XHTTP_PACKET, CLASS_TLS_TCP, CLASS_HYSTERIA, CLASS_NOKINV)
-            NetworkKind.CELLULAR -> listOf(CLASS_REALITY_XHTTP_STREAM, CLASS_REALITY_XHTTP_PACKET, CLASS_REALITY_TCP, CLASS_TLS_TCP, CLASS_HYSTERIA, CLASS_NOKINV)
+            NetworkKind.WIFI -> listOf(CLASS_REALITY_TCP, CLASS_REALITY_XHTTP_STREAM, CLASS_REALITY_XHTTP_PACKET, CLASS_TLS_TCP, CLASS_HYSTERIA, CLASS_NAIVE, CLASS_NOKINV)
+            NetworkKind.CELLULAR -> listOf(CLASS_REALITY_XHTTP_STREAM, CLASS_REALITY_XHTTP_PACKET, CLASS_REALITY_TCP, CLASS_TLS_TCP, CLASS_HYSTERIA, CLASS_NAIVE, CLASS_NOKINV)
             NetworkKind.OTHER -> listOf(
                 CLASS_REALITY_XHTTP_STREAM,
                 CLASS_REALITY_XHTTP_PACKET,
                 CLASS_REALITY_TCP,
                 CLASS_TLS_TCP,
                 CLASS_HYSTERIA,
+                CLASS_NAIVE,
                 CLASS_NOKINV,
             )
         }
@@ -204,6 +205,7 @@ object EndpointRankingPolicy {
         val transport = candidate.normalizedTransport()
         val mode = candidate.normalizedTransportMode()
         return when {
+            candidate.proxyType.equals("naive", ignoreCase = true) -> CLASS_NAIVE
             candidate.proxyType.equals("nokinv", ignoreCase = true) -> CLASS_NOKINV
             security == "reality" && transport == "tcp" -> CLASS_REALITY_TCP
             security == "reality" && transport == "xhttp" && mode == "stream-up" -> CLASS_REALITY_XHTTP_STREAM
@@ -292,6 +294,7 @@ object EndpointRankingPolicy {
     private const val CLASS_TLS_TCP = "tls-tcp"
     private const val CLASS_HYSTERIA = "hysteria"
     private const val CLASS_NOKINV = "nokinv"
+    private const val CLASS_NAIVE = "naive"
     private const val CLASS_OTHER = "other"
 }
 
