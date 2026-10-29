@@ -141,7 +141,7 @@ class NokiNVReleaseTest {
             proxyType = "nokinv", transport = "nokinv", transportMode = null, security = "tls", fingerprint = null,
             requestHost = null, path = "/tunnel", alpn = null, allowInsecure = false, enableMux = false,
             randomUserAgent = false, publicKey = null, shortId = null, vpnUsername = "fixture", flow = null, planCode = "plus",
-            endpointCandidates = listOf(tcpCandidate("vless"), xhttp, hy, nv),
+            endpointCandidates = listOf(tcpCandidate("vless").copy(path = null), xhttp, hy, nv),
             vpnSecret = "12345678-1234-1234-1234-123456789abc",
             nokinvToken = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 1 }),
             nokinvCredentialGeneration = 1)
@@ -149,7 +149,7 @@ class NokiNVReleaseTest {
             EndpointSelector.selectionForSession(RuntimeEnvironment.getApplication(), session.copy(endpointCandidates = candidates),
                 settings, emptyMap(), { 0 }, networkKind = EndpointRankingPolicy.NetworkKind.WIFI)
         val auto = AdvancedSettings(ruRelayEnabled = false)
-        assertEquals("xhttp", select(auto).endpointCode)
+        assertEquals("vless", select(auto).endpointCode)
         val profile = select(auto.copy(protocol = VpnProtocol.NOKINV)).profile
         assertEquals("nokinv", profile.proxyType)
         assertEquals(session.nokinvToken, profile.nokinvToken)
@@ -162,8 +162,21 @@ class NokiNVReleaseTest {
             manualEndpointGroupKey = EndpointGroupPolicy.groupKey(nv))
         assertEquals("nv", select(manual).endpointCode)
         assertFalse(VpnProfileValidator.isUsable(fallback, manual))
-        assertEquals(setOf("nv", "hy", "xhttp"), EndpointSelector.optionsFromSession(session).map { it.code }.toSet())
-        assertFalse(VpnProfileValidator.isUsable(EndpointSelector.profileFromCandidate(tcpCandidate("vless"), session.vpnSecret), auto))
+        val options = EndpointSelector.optionsFromSession(session)
+        assertEquals(setOf("nv", "hy", "xhttp", "vless"), options.map { it.code }.toSet())
+        val tcpOption = EndpointGroupPolicy.manualOptions(options).single { it.transport == "tcp" }
+        assertEquals("Reality / TCP", tcpOption.label)
+        val tcpSettings = auto.copy(protocol = VpnProtocol.REALITY, endpointSelectionMode = EndpointSelectionMode.MANUAL,
+            manualEndpointGroupKey = tcpOption.endpointGroupKey)
+        val tcpProfile = select(tcpSettings).profile
+        assertEquals("vless", tcpProfile.endpointCode)
+        assertTrue(VpnProfileValidator.isUsable(tcpProfile, tcpSettings, endpointOptions = options))
+        val tcpOutbound = org.json.JSONObject(com.noki.vpn.vpn.VpnConfigFactory.buildProbe(tcpProfile))
+            .getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("vless", tcpOutbound.getString("type"))
+        assertEquals("xtls-rprx-vision", tcpOutbound.getString("flow"))
+        assertEquals(tcpProfile.publicKey, tcpOutbound.getJSONObject("tls").getJSONObject("reality").getString("public_key"))
+        assertFalse(tcpOutbound.has("transport"))
         val reality = auto.copy(protocol = VpnProtocol.REALITY, endpointSelectionMode = EndpointSelectionMode.MANUAL,
             manualEndpointGroupKey = EndpointGroupPolicy.groupKey(xhttp))
         assertEquals("xhttp", select(reality).endpointCode)

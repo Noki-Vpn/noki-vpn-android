@@ -16,7 +16,8 @@ object EndpointTransportPolicy {
     private fun isDirectTransport(proxyType: String, security: String, transport: String, mode: String): Boolean =
         proxyType.equals("nokinv", true) || proxyType.equals("hysteria", true) ||
             (proxyType.equals("vless", true) && security.equals("reality", true) &&
-                transport.equals("xhttp", true) && (mode.isBlank() || mode.equals("stream-up", true)))
+                ((transport.equals("tcp", true) || transport.equals("raw", true)) && mode.isBlank() ||
+                    transport.equals("xhttp", true) && (mode.isBlank() || mode.equals("stream-up", true))))
 
     fun isHysteria(candidate: BackendEndpointCandidate): Boolean {
         return candidate.proxyType.equals("hysteria", ignoreCase = true) ||
