@@ -38,6 +38,7 @@ Thumbs.db
 *.bak
 
 *.md
+!/README.md
 !**/LICENSE.md
 *.PROVENANCE.*
 Noki_Project/
