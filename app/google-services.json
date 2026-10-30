@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "11724764093",
+    "project_id": "noki-iiii",
+    "storage_bucket": "noki-iiii.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:11724764093:android:f0986dfe644b2b9f4598d4",
+        "android_client_info": {
+          "package_name": "com.noki.vpn"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC0-nuloT28y6gnhfewAa6nVS6vqHgJ29c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
