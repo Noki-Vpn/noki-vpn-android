@@ -289,6 +289,7 @@ fun AdvancedSettingsScreen(
                     onEnabledChanged = viewModel::setKillSwitchEnabled,
                 )
 
+                if (!state.userProfile.isFreePlan) {
                 Spacer(modifier = Modifier.height(metrics.dp(25f)))
                 AdvancedPanelSurface(
                     backdrop = surfaceBackdrop,
@@ -336,6 +337,7 @@ fun AdvancedSettingsScreen(
                         .height(metrics.dp(NokiUiKitPolicy.advancedProtocolToggleCardHeightDp)),
                     onEnabledChanged = viewModel::setGamingModeEnabled,
                 )
+                }
 
                 }
 

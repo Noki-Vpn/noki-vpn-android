@@ -692,9 +692,31 @@ class AdaptiveScreenLayoutTest {
     }
 
     @Test
+    fun ordinaryFreeHidesPaidConnectionControlsButFreePlusKeepsThem() {
+        val viewModel = layoutViewModel()
+        for (tier in listOf("free", "free-plus", "plus")) {
+            val state = russianState().let { it.copy(userProfile = it.userProfile.copy(
+                selectedPlanCodeRaw = tier, selectedPlanTier = tier,
+            )) }
+            render {
+                AdvancedSettingsScreen(state, viewModel, rememberPrismalGlassLayer(),
+                    liveGlassEnabled = false, showBackground = false)
+            }.use {
+                for (title in listOf("YouTube без рекламы", "MultiHop", "RU-реле", "Игровой режим")) {
+                    if (tier == "free") compose.onNodeWithText(title).assertDoesNotExist()
+                    else compose.onNodeWithText(title).assertExists()
+                }
+                compose.onNodeWithText("Автовыбор протокола").assertExists()
+                compose.onNodeWithText("Kill-switch").assertExists()
+                saveImage("advanced-settings-$tier")
+            }
+        }
+    }
+
+    @Test
     fun ruRelayModeHidesProtocolAndManualRelayControls() {
         val viewModel = layoutViewModel()
-        val normal = russianState()
+        val normal = russianState().let { it.copy(userProfile = it.userProfile.copy(selectedPlanTier = "plus")) }
         render {
             AdvancedSettingsScreen(normal, viewModel, rememberPrismalGlassLayer(),
                 liveGlassEnabled = false, showBackground = false)
@@ -722,7 +744,7 @@ class AdaptiveScreenLayoutTest {
     @Test
     fun multiHopWithoutRuKeepsProtocolControlsVisible() {
         val viewModel = layoutViewModel()
-        val normal = russianState()
+        val normal = russianState().let { it.copy(userProfile = it.userProfile.copy(selectedPlanTier = "plus")) }
         val pair = normal.copy(advancedSettings = normal.advancedSettings.copy(
             multiHop = com.noki.vpn.data.MultiHopSettings(enabled = true),
             ruRelayEnabled = false, protocol = com.noki.vpn.data.VpnProtocol.NOKINV,
@@ -741,7 +763,7 @@ class AdaptiveScreenLayoutTest {
     @Test
     fun gamingToggleFollowsRuRelayAndRemainsReachableWhenEnabled() {
         val viewModel = layoutViewModel()
-        val normal = russianState()
+        val normal = russianState().let { it.copy(userProfile = it.userProfile.copy(selectedPlanTier = "plus")) }
         var state by androidx.compose.runtime.mutableStateOf(normal)
         render {
             AdvancedSettingsScreen(state, viewModel, rememberPrismalGlassLayer(),

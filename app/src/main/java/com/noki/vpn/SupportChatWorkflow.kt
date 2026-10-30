@@ -59,6 +59,8 @@ internal class SupportChatWorkflow(
     private val isFileAvailable: (String) -> Boolean,
 ) {
     private var generation = 0L
+    private var historyGeneration = 0L
+    private var conversationId: Long? = null
     private var accountEpoch: Long? = null
     private var loadJob: Job? = null
     private var sendJob: Job? = null
@@ -136,12 +138,13 @@ internal class SupportChatWorkflow(
         if (state.messages.none { message -> message.id == attachment.messageId && attachment in message.attachments }) return
         val attempt = currentAuthAttempt() ?: return
         val owner = generation
+        val historyOwner = historyGeneration
         update(state.copy(attachmentLoading = state.attachmentLoading + attachment.id, attachmentErrors = state.attachmentErrors - attachment.id))
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 val path = state.attachmentFiles[attachment.id]?.takeIf(isFileAvailable)
                     ?: downloadAttachment(attempt, attachment)
-                if (owner != generation || !isCurrent(attempt)) { deleteFile(path); return@launch }
+                if (owner != generation || historyOwner != historyGeneration || !isCurrent(attempt)) { deleteFile(path); return@launch }
                 update(state.copy(attachmentFiles = state.attachmentFiles + (attachment.id to path), attachmentLoading = state.attachmentLoading - attachment.id))
                 when (action) {
                     SupportAttachmentAction.Preview -> Unit
@@ -151,11 +154,11 @@ internal class SupportChatWorkflow(
                 }
             } catch (error: Exception) {
                 if (error is CancellationException && error !is TimeoutCancellationException) throw error
-                if (owner == generation && isCurrent(attempt)) update(state.copy(
+                if (owner == generation && historyOwner == historyGeneration && isCurrent(attempt)) update(state.copy(
                     attachmentLoading = state.attachmentLoading - attachment.id,
                     attachmentFiles = if (error.message == "support_attachment_unavailable") state.attachmentFiles - attachment.id else state.attachmentFiles,
                     attachmentErrors = state.attachmentErrors + (attachment.id to readable(error))))
-            } finally { if (owner == generation) fileJobs.remove(attachment.id) }
+            } finally { if (owner == generation && historyOwner == historyGeneration) fileJobs.remove(attachment.id) }
         }
         fileJobs[attachment.id] = job
         job.start()
@@ -169,16 +172,17 @@ internal class SupportChatWorkflow(
         if (uri == null) return
         val attempt = currentAuthAttempt() ?: return
         val owner = generation
+        val historyOwner = historyGeneration
         update(state.copy(isSavingAttachment = true, fileError = null))
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 exportAttachment(request.path, uri)
-                if (owner == generation && isCurrent(attempt)) update(state.copy(isSavingAttachment = false))
+                if (owner == generation && historyOwner == historyGeneration && isCurrent(attempt)) update(state.copy(isSavingAttachment = false))
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
-                if (owner == generation && isCurrent(attempt)) update(state.copy(isSavingAttachment = false,
+                if (owner == generation && historyOwner == historyGeneration && isCurrent(attempt)) update(state.copy(isSavingAttachment = false,
                     fileError = tr(currentState().personalizationSettings.language, "Не удалось сохранить файл. Нажмите «Сохранить» ещё раз.", "Could not save the file. Tap Save again.")))
-            } finally { if (owner == generation) exportJob = null }
+            } finally { if (owner == generation && historyOwner == historyGeneration) exportJob = null }
         }
         exportJob = job
         job.start()
@@ -198,12 +202,15 @@ internal class SupportChatWorkflow(
             try {
                 val page = load(attempt, before)
                 if (owner != generation || !isCurrent(attempt)) return@launch
+                val conversationChanged = conversationId != null && conversationId != page.conversationId
+                if (conversationChanged) clearHistory()
+                conversationId = page.conversationId
                 val missedPage = !older && state.messages.isNotEmpty() && page.messages.isNotEmpty() &&
                     page.messages.none { fresh -> state.messages.any { it.id == fresh.id } } &&
                     page.messages.maxOf { it.id } > state.messages.maxOf { it.id }
                 update(state.copy(
                     messages = merge(if (missedPage) emptyList() else state.messages, page.messages),
-                    nextBefore = if (older || !state.hasLoaded || missedPage) page.nextBefore else state.nextBefore,
+                    nextBefore = if (conversationChanged || older || !state.hasLoaded || missedPage) page.nextBefore else state.nextBefore,
                     hasLoaded = true,
                     isLoading = false,
                     isLoadingOlder = false,
@@ -230,6 +237,7 @@ internal class SupportChatWorkflow(
         if (sendJob != null || state.isPreparingAttachment || (content.isEmpty() && attachments.isEmpty())) return
         val attempt = currentAuthAttempt() ?: return
         val owner = generation
+        val historyOwner = historyGeneration
         // Retrying an uncertain delivery must reuse the idempotency key.
         val paths = attachments.map { it.path }
         val request = pendingSend?.takeIf { it.content == content && it.attachmentPaths == paths }
@@ -238,7 +246,7 @@ internal class SupportChatWorkflow(
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 val message = send(attempt, request.content, request.id, attachments)
-                if (owner != generation || !isCurrent(attempt)) return@launch
+                if (owner != generation || historyOwner != historyGeneration || !isCurrent(attempt)) return@launch
                 pendingSend = null
                 val files = if (message.attachments.size == attachments.size) message.attachments.zip(attachments)
                     .filter { (remote, local) -> remote.size == local.size && remote.mime == local.mime }
@@ -250,30 +258,40 @@ internal class SupportChatWorkflow(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                if (owner == generation && isCurrent(attempt)) update(state.copy(isSending = false, sendError = readable(error)))
+                if (owner == generation && historyOwner == historyGeneration && isCurrent(attempt)) update(state.copy(isSending = false, sendError = readable(error)))
             } finally {
-                if (owner == generation) sendJob = null
+                if (owner == generation && historyOwner == historyGeneration) sendJob = null
             }
         }
         sendJob = job
         job.start()
     }
 
-    fun invalidate() {
-        generation++
-        loadJob?.cancel()
+    private fun clearHistory() {
+        historyGeneration++
         sendJob?.cancel()
-        stageJob?.cancel()
         exportJob?.cancel()
         fileJobs.values.forEach { it.cancel() }
         fileJobs.clear()
-        (state.attachmentFiles.values + state.pendingAttachments.map { it.path } + listOfNotNull(state.saveRequest?.path)).distinct().forEach(deleteFile)
-        loadJob = null
+        (state.attachmentFiles.values + listOfNotNull(state.saveRequest?.path)).distinct().forEach(deleteFile)
         sendJob = null
         pendingSend = null
+        exportJob = null
+        update(state.copy(messages = emptyList(), nextBefore = null, isSending = false, sendError = null,
+            attachmentFiles = emptyMap(), attachmentLoading = emptySet(), attachmentErrors = emptyMap(),
+            saveRequest = null, savePickerPending = false, isSavingAttachment = false, fileError = null))
+    }
+
+    fun invalidate() {
+        generation++
+        clearHistory()
+        conversationId = null
+        loadJob?.cancel()
+        stageJob?.cancel()
+        state.pendingAttachments.forEach { deleteFile(it.path) }
+        loadJob = null
         pickerAttempt = null
         stageJob = null
-        exportJob = null
         accountEpoch = null
         update(SupportChatState())
     }

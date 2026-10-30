@@ -189,6 +189,64 @@ class SupportChatWorkflowTest {
         assertEquals(30L, f.state.supportChat.nextBefore)
     }
 
+    @Test fun `replacement conversation clears empty history and cached files but preserves the draft`() = runBlocking {
+        for (older in listOf(false, true)) {
+            val f = Fixture(this)
+            val attachment = BackendSupportAttachment(8, 4, "file", "reply.txt", 3, "text/plain")
+            f.loadResponse = { page(4, before = 4).copy(messages = listOf(message(4).copy(attachments = listOf(attachment)))) }
+            f.workflow.open(); f.workflow.refresh(); yield()
+            f.workflow.loadAttachment(attachment, SupportAttachmentAction.Save); yield()
+            assertTrue(f.state.supportChat.savePickerPending)
+            f.workflow.updateDraft("unfinished")
+            assertTrue(f.workflow.beginAttachmentPick())
+            f.workflow.selectAttachments(listOf("picked")); yield()
+            val pending = f.state.supportChat.pendingAttachments
+            f.loadResponse = { BackendSupportChat(2, "open", emptyList(), null) }
+            f.workflow.refresh(older); yield()
+            assertTrue(f.state.supportChat.messages.isEmpty())
+            assertNull(f.state.supportChat.nextBefore)
+            assertTrue(f.state.supportChat.attachmentFiles.isEmpty())
+            assertNull(f.state.supportChat.saveRequest)
+            assertFalse(f.state.supportChat.savePickerPending)
+            assertEquals(listOf("private/8.txt"), f.deleted)
+            assertEquals("unfinished", f.state.supportChat.draft)
+            assertEquals(pending, f.state.supportChat.pendingAttachments)
+            f.loadResponse = { BackendSupportChat(2, "open", listOf(message(1)), null) }
+            f.workflow.refresh(); yield()
+            assertEquals(listOf(1L), f.state.supportChat.messages.map { it.id })
+        }
+    }
+
+    @Test fun `late delivery and download cannot restore a deleted conversation`() = runBlocking {
+        val f = Fixture(this)
+        val attachment = BackendSupportAttachment(8, 4, "file", "reply.txt", 3, "text/plain")
+        val delivery = CompletableDeferred<BackendSupportMessage>()
+        val download = CompletableDeferred<String>()
+        val keys = mutableListOf<String>()
+        f.loadResponse = { page(4).copy(messages = listOf(message(4).copy(attachments = listOf(attachment)))) }
+        f.sendResponse = { text, id ->
+            keys += id
+            if (keys.size == 1) withContext(NonCancellable) { delivery.await() } else message(6, text)
+        }
+        f.downloaded = { withContext(NonCancellable) { download.await() } }
+        f.workflow.open(); f.workflow.refresh(); yield()
+        f.workflow.loadAttachment(attachment, SupportAttachmentAction.Open)
+        f.workflow.updateDraft("unfinished"); f.workflow.submit(); yield()
+        f.loadResponse = { BackendSupportChat(2, "open", emptyList(), null) }
+        f.workflow.refresh(); yield()
+        delivery.complete(message(5)); download.complete("private/late.txt"); yield(); yield()
+        assertTrue(f.state.supportChat.messages.isEmpty())
+        assertTrue(f.state.supportChat.attachmentFiles.isEmpty())
+        assertFalse(f.state.supportChat.isSending)
+        assertTrue(f.state.supportChat.attachmentLoading.isEmpty())
+        assertTrue(f.opened.isEmpty())
+        assertEquals(listOf("private/late.txt"), f.deleted)
+        assertEquals("unfinished", f.state.supportChat.draft)
+        f.workflow.submit(); yield()
+        assertEquals(listOf(6L), f.state.supportChat.messages.map { it.id })
+        assertNotEquals(keys[0], keys[1])
+    }
+
     @Test fun `send retry keeps draft and idempotency key and double tap submits once`() = runBlocking {
         val f = Fixture(this)
         val keys = mutableListOf<String>()
