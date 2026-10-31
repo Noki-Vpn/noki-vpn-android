@@ -196,8 +196,9 @@ internal fun AppUiRuntime.authenticatedSessionCoordinator(): AuthenticatedSessio
             syncFromBackendState(token, baseState)
         },
         publishAuthenticatedState = { state ->
+            supportChatWorkflow.invalidate()
             persistBackendState(state)
-            applyAndPersist(state)
+            applyAndPersist(state.copy(supportChat = SupportChatState()))
         },
     )
 }

@@ -216,17 +216,18 @@ internal class AppUiRuntime(
         },
     )
 
+    private val supportGuestToken by lazy { repository.ensureSupportGuestToken() }
     internal val supportChatWorkflow = SupportChatWorkflow(
         scope = scope,
         currentState = { uiState },
         publishState = { uiState = it },
-        currentAuthAttempt = { authSessionCoordinator.attempt() },
-        isCurrent = authSessionCoordinator::isCurrent,
+        currentAuthAttempt = { authSessionCoordinator.supportAttempt(allowGuest = !uiState.isAuthenticated) { supportGuestToken } },
+        isCurrent = authSessionCoordinator::isCurrentSupportAttempt,
         load = { attempt, before ->
-            authSessionCoordinator.run(attempt) { token -> backendApi.supportChat(token, before) }
+            authSessionCoordinator.runSupport(attempt) { token -> backendApi.supportChat(token, before) }
         },
         send = { attempt, content, requestId, attachments ->
-            authSessionCoordinator.run(attempt) { token ->
+            authSessionCoordinator.runSupport(attempt) { token ->
                 if (attachments.isEmpty()) backendApi.sendSupportMessage(token, content, requestId)
                 else backendApi.sendSupportAttachments(token, content, requestId, attachments)
             }
@@ -235,7 +236,7 @@ internal class AppUiRuntime(
         downloadAttachment = { attempt, attachment ->
             val destination = SupportChatFiles.destination(application)
             try {
-                authSessionCoordinator.run(attempt) { token -> backendApi.downloadSupportAttachment(token, attachment, destination) }.also {
+                authSessionCoordinator.runSupport(attempt) { token -> backendApi.downloadSupportAttachment(token, attachment, destination) }.also {
                     it.setExecutable(false, false)
                 }.path
             } catch (error: Throwable) {

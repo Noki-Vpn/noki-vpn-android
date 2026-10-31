@@ -415,10 +415,7 @@ fun AppScreen(
                             sharedBackdrop = sharedBackgroundBackdrop,
                             liveGlassEnabled = liveGlassEnabled,
                             showBackground = !showSharedNavigation,
-                            onOpenChat = {
-                                if (state.isAuthenticated) viewModel.openSupportChat()
-                                else viewModel.openScreen(AppDestination.LOGIN)
-                            },
+                            onOpenChat = viewModel::openSupportChat,
                             onCloseChat = viewModel::closeSupportChat,
                             onRefreshChat = viewModel::refreshSupportChat,
                             onDraftChanged = viewModel::updateSupportChatDraft,

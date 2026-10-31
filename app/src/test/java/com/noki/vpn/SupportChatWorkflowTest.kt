@@ -23,6 +23,82 @@ import org.junit.Test
 import java.io.IOException
 
 class SupportChatWorkflowTest {
+    @Test fun `unavailable guest credential storage shows a retryable chat error without crashing`() = runBlocking {
+        val f = Fixture(this)
+        f.state = f.state.copy(isAuthenticated = false)
+        f.authAttempt = { throw IllegalStateException("Credential storage unavailable") }
+        f.workflow.open()
+        assertTrue(f.state.supportChat.isOpen)
+        assertNotNull(f.state.supportChat.error)
+        f.workflow.refresh(); f.workflow.updateDraft("Help"); f.workflow.submit(); yield()
+        assertEquals("Help", f.state.supportChat.draft)
+        assertFalse(f.state.supportChat.isSending)
+    }
+
+    @Test fun `guest can open send and read replies without an account or refresh token`() = runBlocking {
+        val store = InMemoryAtomicStoredSettingsStore(DefaultStoredSettingsFactory.create())
+        val refreshApi = object : AuthRefreshApi {
+            override suspend fun refreshAuthToken(refreshToken: String, deviceId: String?, requestId: String?): BackendAuthTokens =
+                error("Guest support must not refresh an account")
+        }
+        val auth = AuthSessionCoordinator(store, AuthTokenRefresher(store, refreshApi)).also { it.restore(store.load()) }
+        val guestToken = "support-guest." + "a".repeat(64)
+        var state = AppUiState(isAuthenticated = false)
+        val history = mutableListOf<BackendSupportMessage>()
+        val workflow = SupportChatWorkflow(this, { state }, { state = it },
+            { auth.supportAttempt(allowGuest = !state.isAuthenticated) { guestToken } }, auth::isCurrentSupportAttempt,
+            { attempt, _ -> auth.runSupport(attempt) { token ->
+                assertEquals(guestToken, token)
+                page().copy(messages = history.toList())
+            } },
+            { attempt, text, _, _ -> auth.runSupport(attempt) { token ->
+                assertEquals(guestToken, token)
+                message(1, text).also { history += it }
+            } },
+            { error("Unused attachment") }, { _, _ -> error("Unused download") }, { _, _ -> },
+            { _, _ -> }, {}, { true })
+        workflow.open()
+        assertTrue(state.supportChat.isOpen)
+        workflow.updateDraft("Cannot sign in"); workflow.submit(); yield()
+        assertEquals("Cannot sign in", state.supportChat.messages.single().content)
+        history += message(2, "We can help").copy(messageType = "outgoing")
+        workflow.refresh(); yield()
+        assertEquals(listOf(1L, 2L), state.supportChat.messages.map { it.id })
+        assertFalse(state.isAuthenticated)
+        assertNull(auth.attempt())
+        workflow.updateDraft("Guest draft")
+        val guest = checkNotNull(auth.supportAttempt(true) { guestToken })
+        auth.commit(BackendAuthTokens(accessToken = "account-access", refreshToken = "account-refresh"))
+        assertFalse(auth.isCurrentSupportAttempt(guest))
+        state = state.copy(isAuthenticated = true)
+        workflow.open()
+        assertTrue(state.supportChat.messages.isEmpty())
+        assertEquals("", state.supportChat.draft)
+        assertEquals("account-access", auth.supportAttempt(false) { error("No guest fallback after login") }!!.accessToken)
+    }
+
+    @Test fun `guest authorization failures never refresh or downgrade an account`() = runBlocking {
+        val store = InMemoryAtomicStoredSettingsStore(DefaultStoredSettingsFactory.create())
+        val refreshApi = object : AuthRefreshApi {
+            override suspend fun refreshAuthToken(refreshToken: String, deviceId: String?, requestId: String?): BackendAuthTokens =
+                error("Guest support must not refresh an account")
+        }
+        val auth = AuthSessionCoordinator(store, AuthTokenRefresher(store, refreshApi)).also { it.restore(store.load()) }
+        assertNull(auth.supportAttempt(allowGuest = false) { error("No anonymous fallback in an authenticated UI") })
+        val guest = checkNotNull(auth.supportAttempt(true) { "support-guest." + "b".repeat(64) })
+        try {
+            auth.runSupport(guest) { throw BackendException("guest denied", 401) }
+            fail("Expected rejection")
+        } catch (error: BackendException) { assertEquals("guest denied", error.message) }
+        auth.commit(BackendAuthTokens(accessToken = "account-access"))
+        var called = false
+        try {
+            auth.runSupport(guest) { called = true }
+            fail("Stale guest session must be rejected")
+        } catch (error: BackendException) { assertEquals(403, error.statusCode) }
+        assertFalse(called)
+    }
+
     @Test fun `resource authorization errors keep the draft without asking for another login`() = runBlocking {
         for (status in listOf(401, 403)) {
             val f = Fixture(this)
@@ -148,6 +224,7 @@ class SupportChatWorkflowTest {
     private inner class Fixture(scope: CoroutineScope) {
         var state = AppUiState(isAuthenticated = true)
         var epoch = 0L
+        var authAttempt: () -> AuthSessionAttempt? = { AuthSessionAttempt("access", epoch) }
         var loadResponse: suspend (Long?) -> BackendSupportChat = { page(2, 3, before = 2) }
         var sendResponse: suspend (String, String) -> BackendSupportMessage = { text, _ -> message(4, text) }
         var sendFile: List<SupportAttachmentDraft> = emptyList()
@@ -158,7 +235,7 @@ class SupportChatWorkflowTest {
         val opened = mutableListOf<String>()
         val exported = mutableListOf<Pair<String, String>>()
         val workflow = SupportChatWorkflow(scope, { state }, { state = it },
-            { AuthSessionAttempt("access", epoch) }, { it.epoch == epoch },
+            { authAttempt() }, { it.epoch == epoch },
             { _, before -> loadResponse(before) }, { _, text, id, file -> sendFile = file; sendResponse(text, id) },
             { staged(it) }, { _, file -> downloaded(file) }, { path, _ -> opened += path },
             { path, uri -> exported += path to uri }, { deleted += it }, { fileAvailable(it) })

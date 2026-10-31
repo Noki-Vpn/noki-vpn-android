@@ -42,7 +42,22 @@ data class SupportChatState(
 internal enum class SupportAttachmentAction { Preview, Open, Save }
 private data class PendingSupportSend(val content: String, val attachmentPaths: List<String>, val id: String)
 
-/** Account-bound state; the server owns the conversation and its persisted history. */
+// Account epochs are nonnegative; the guest capability never enters the account refresh flow.
+private const val SUPPORT_GUEST_EPOCH = Long.MIN_VALUE
+
+internal fun AuthSessionCoordinator.supportAttempt(allowGuest: Boolean, guestToken: () -> String): AuthSessionAttempt? =
+    attempt() ?: if (allowGuest) AuthSessionAttempt(guestToken(), SUPPORT_GUEST_EPOCH) else null
+
+internal fun AuthSessionCoordinator.isCurrentSupportAttempt(attempt: AuthSessionAttempt): Boolean =
+    if (attempt.epoch == SUPPORT_GUEST_EPOCH) this.attempt() == null else isCurrent(attempt)
+
+internal suspend fun <T> AuthSessionCoordinator.runSupport(attempt: AuthSessionAttempt, block: suspend (String) -> T): T {
+    if (attempt.epoch != SUPPORT_GUEST_EPOCH) return run(attempt, block)
+    if (!isCurrentSupportAttempt(attempt)) throw BackendException("support_session_changed", 403)
+    return block(attempt.accessToken)
+}
+
+/** Session-bound state; the server owns the conversation and its persisted history. */
 internal class SupportChatWorkflow(
     private val scope: CoroutineScope,
     private val currentState: () -> AppUiState,
@@ -73,8 +88,17 @@ internal class SupportChatWorkflow(
 
     private fun update(value: SupportChatState) = publishState(currentState().copy(supportChat = value))
 
+    private fun currentAttempt(): AuthSessionAttempt? = try {
+        currentAuthAttempt()
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) {
+        update(state.copy(isOpen = true, error = tr(currentState().personalizationSettings.language,
+            "Не удалось открыть чат. Повторите попытку.", "Could not open chat. Please try again.")))
+        null
+    }
+
     fun open() {
-        val attempt = currentAuthAttempt() ?: return
+        val attempt = currentAttempt() ?: return
         if (accountEpoch != attempt.epoch) invalidate()
         accountEpoch = attempt.epoch
         update(state.copy(isOpen = true))
@@ -87,7 +111,7 @@ internal class SupportChatWorkflow(
 
     fun beginAttachmentPick(): Boolean {
         if (!state.isOpen || state.isSending || state.isPreparingAttachment || state.pendingAttachments.size >= SUPPORT_ATTACHMENT_MAX_COUNT) return false
-        pickerAttempt = currentAuthAttempt() ?: return false
+        pickerAttempt = currentAttempt() ?: return false
         return true
     }
 
@@ -136,7 +160,7 @@ internal class SupportChatWorkflow(
         if (attachment.id in fileJobs) return
         if (action == SupportAttachmentAction.Save && (state.saveRequest != null || state.isSavingAttachment)) return
         if (state.messages.none { message -> message.id == attachment.messageId && attachment in message.attachments }) return
-        val attempt = currentAuthAttempt() ?: return
+        val attempt = currentAttempt() ?: return
         val owner = generation
         val historyOwner = historyGeneration
         update(state.copy(attachmentLoading = state.attachmentLoading + attachment.id, attachmentErrors = state.attachmentErrors - attachment.id))
@@ -170,7 +194,7 @@ internal class SupportChatWorkflow(
         val request = state.saveRequest ?: return
         update(state.copy(saveRequest = null, savePickerPending = false))
         if (uri == null) return
-        val attempt = currentAuthAttempt() ?: return
+        val attempt = currentAttempt() ?: return
         val owner = generation
         val historyOwner = historyGeneration
         update(state.copy(isSavingAttachment = true, fileError = null))
@@ -195,7 +219,7 @@ internal class SupportChatWorkflow(
     fun refresh(older: Boolean = false) {
         if (loadJob != null) return
         val before = if (older) state.nextBefore ?: return else null
-        val attempt = currentAuthAttempt() ?: return
+        val attempt = currentAttempt() ?: return
         val owner = generation
         update(state.copy(isLoading = !older, isLoadingOlder = older, error = null))
         val job = scope.launch(start = CoroutineStart.LAZY) {
@@ -235,7 +259,7 @@ internal class SupportChatWorkflow(
         val content = submittedDraft.trim()
         val attachments = state.pendingAttachments
         if (sendJob != null || state.isPreparingAttachment || (content.isEmpty() && attachments.isEmpty())) return
-        val attempt = currentAuthAttempt() ?: return
+        val attempt = currentAttempt() ?: return
         val owner = generation
         val historyOwner = historyGeneration
         // Retrying an uncertain delivery must reuse the idempotency key.

@@ -10,6 +10,7 @@ import com.noki.vpn.FcmRegistrationStatePolicy
 import org.json.JSONObject
 import org.json.JSONArray
 import java.security.MessageDigest
+import java.security.SecureRandom
 import java.time.Instant
 
 internal const val SETTINGS_PREFERENCES_NAME = "noki_settings"
@@ -47,6 +48,16 @@ class SettingsRepository(private val context: Context) : VpnSessionStore, Endpoi
     private val settingsCodec = StoredSettingsCodec(::defaultSettings)
     private val cipher = SettingsCipher()
     private val markersStore = SettingsMarkersStore(preferences, ::appVersionCode)
+
+    internal fun ensureSupportGuestToken(): String = synchronized(SETTINGS_LOCK) {
+        val key = "support_guest_token_encrypted_v1"
+        preferences.getString(key, null)?.let(cipher::decrypt)
+            ?.takeIf { it.matches(Regex("support-guest\\.[0-9a-f]{64}")) }
+            ?: ("support-guest." + ByteArray(32).also { SecureRandom().nextBytes(it) }
+                .joinToString("") { "%02x".format(it) }).also { token ->
+                check(preferences.edit().putString(key, cipher.encrypt(token)).commit()) { "support_guest_persist_failed" }
+            }
+    }
 
     fun loadInstallOnboardingStep() = markersStore.loadInstallOnboardingStep()
 
